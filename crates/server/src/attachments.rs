@@ -67,7 +67,11 @@ pub(crate) const INSIDE: &str = "/verkstead/attachments";
 /// is no bind to put one Conversation's directory at a name every Conversation
 /// would otherwise share: what the policy reaches is that Conversation's own
 /// subdirectory of the attachments root and no other, and what the prompt names
-/// is where the files really are.
+/// is where the files really are. Windows is that answer for the other
+/// reason: nothing is mounted there at all, so a session reads the files
+/// where they really are and what keeps the directory Verkstead's is that
+/// Verkstead wrote it — see [`crate::sandbox::own_directory`], which says
+/// the same of the directory this one is under.
 ///
 /// The skills' own arrangement, one level deeper — see
 /// [`crate::skills::Skills::inside`]. Theirs is one directory for the whole
@@ -79,8 +83,8 @@ pub(crate) const INSIDE: &str = "/verkstead/attachments";
 /// ask for, and this one decides a path a session is told about in prose.
 pub(crate) fn inside(platform: Platform, directory: &Path) -> PathBuf {
     match platform {
-        Platform::MacOs => directory.to_owned(),
-        Platform::Linux | Platform::Windows => PathBuf::from(INSIDE),
+        Platform::MacOs | Platform::Windows => directory.to_owned(),
+        Platform::Linux => PathBuf::from(INSIDE),
     }
 }
 
@@ -683,6 +687,12 @@ mod tests {
             attachments.inside(Platform::MacOs, 7),
             attachments.inside(Platform::MacOs, 8),
             "which is a different one per Conversation, as the bind's is",
+        );
+
+        assert_eq!(
+            attachments.inside(Platform::Windows, 7),
+            Path::new("/data/attachments/7"),
+            "and Windows mounts nothing either, so it is the real directory there",
         );
     }
 

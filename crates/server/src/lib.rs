@@ -72,6 +72,18 @@ mod nudging;
 /// reads them: which of the two places said each one, and whether the server can
 /// see it.
 mod paths;
+/// The named pipe the server listens on beside its socket, which is the whole
+/// of what a sandboxed Windows session will have to ask through — an
+/// AppContainer is refused the loopback interface.
+///
+/// Public for the reason [`sandbox`] is: what a session reaches Verkstead
+/// through is the product's answer rather than an endpoint's, and what proves a
+/// pipe is a pipe is a request really made over one.
+///
+/// Windows' own. The other platforms have a loopback nothing refuses them, so
+/// there is no pipe here and no Unix-socket twin beside it either.
+#[cfg(windows)]
+pub mod pipe;
 /// Where a directory of Verkstead's own goes when nobody has said: the
 /// platform's own place for the Data Directory, and the environment values it
 /// is resolved out of.
@@ -507,20 +519,20 @@ pub fn router_watching(pool: SqlitePool, watched: WatchedPaths, data_dir: PathBu
     )
 }
 
-/// The same again, answering as a build with no session to run does — which
-/// today is a Windows one.
+/// The same again, answering as a build whose sessions run outside a Sandbox
+/// does — which today is a Windows one.
 ///
 /// The arm the machine running these tests will never be, stood up so that they
-/// can ask it: every way into a session refuses in front of everything it would
-/// otherwise make, and the Conversation the viewer is handed says so where the
-/// press would have been. A rule about the build rather than about the
-/// platform's filesystem, so it is asked wherever the suite runs — see
-/// [`sessions::run_on`], which is where a real server's own answer comes from.
+/// can ask it: nothing is refused, and every Conversation the viewer is handed
+/// says the session it would start has the human's own account's reach. A rule
+/// about the build rather than about the platform's filesystem, so it is asked
+/// wherever the suite runs — see [`sessions::unsandboxed_on`], which is where a
+/// real server's own answer comes from.
 ///
 /// Watching `watched` and keeping what it makes in `data_dir`, as
-/// [`router_watching`] does: what these tests press is a Conversation with a
-/// Repo behind it, and the refusals are about what the press did *not* make.
-pub fn router_running_no_sessions(
+/// [`router_watching`] does: what these tests read is a Conversation with a
+/// Repo behind it.
+pub fn router_running_unsandboxed(
     pool: SqlitePool,
     watched: WatchedPaths,
     data_dir: PathBuf,
@@ -531,7 +543,7 @@ pub fn router_running_no_sessions(
         watched,
         nothing_bound(),
         data_dir,
-        sessions::Sessions::without_sessions(),
+        sessions::Sessions::unsandboxed_here(),
         Gh::on_path(),
     )
 }
@@ -865,7 +877,7 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
     // And the skills written out into it, before anything can ask for a session:
     // they are what a grilling session is pointed at, and this binary's are what
     // every sandbox gets, whatever an earlier one left there.
-    let skills = skills::Skills::installed(&data_dir)
+    let skills = skills::Skills::installed(platform::Platform::HERE, &data_dir)
         .context("installing the skills every sandbox is given")?;
 
     // And the shared build cache, which is resolved for the reason the binds
@@ -933,6 +945,17 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
     // waited anyway.
     tokio::task::spawn_blocking(verkstead_render::warm_highlighter);
 
+    // And the pipe beside the socket, which is what a sandboxed Windows session
+    // asks through. Here rather than with the bind, because its name comes off
+    // the Data Directory — see [`pipe`] — and that is only settled above.
+    //
+    // Granting nobody beyond the account this runs as: the identity a
+    // container's sessions run under is what the further argument is for, and
+    // there are no containers yet.
+    #[cfg(windows)]
+    let pipe = pipe::Listener::open(&data_dir, None)
+        .context("opening the named pipe a Windows session asks through")?;
+
     tracing::info!(
         listen = %config.listen,
         data_dir = %data_dir.display(),
@@ -948,30 +971,64 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
         "verkstead is listening",
     );
 
-    axum::serve(
-        listener,
-        router_with_ui(
-            pool,
-            config.releases(),
-            watched,
-            data_dir,
-            Agents::new(
-                homes,
-                sandbox::Reachable::at(config.listen),
-                binds,
-                cache,
-                skills,
-                verkstead,
-                handoffs,
-                attachments,
-                settings.clone(),
-            ),
-            // Whatever `gh` this machine has, authenticating as the configured
-            // token — the same one the sessions get, so one token is the whole
-            // of Verkstead's GitHub auth.
-            Gh::on_path().authenticated_by(settings),
+    // The pipe on a line of its own rather than as a field on the one above:
+    // the other platforms have no pipe, and a field saying so at every startup
+    // there would be a line about nothing. In the spelling a client is given
+    // rather than the one Win32 takes, so that a human can paste what they read
+    // straight into `--server` — see `pipe::Listener::asked_through`.
+    #[cfg(windows)]
+    tracing::info!(pipe = %pipe.asked_through(), "verkstead is listening on a named pipe too");
+
+    // Where a session is told Verkstead is: the socket everywhere, and the pipe
+    // beside it on the platform that opened one — a Windows session is headed
+    // for a container refused the loopback interface, and the pipe is what an
+    // identity can be granted instead. Which of the two a session is handed is
+    // [`sandbox::Reachable`]'s, off the Platform it runs on.
+    let reachable = sandbox::Reachable::at(config.listen);
+
+    #[cfg(windows)]
+    let reachable = reachable.piped(pipe.asked_through());
+
+    let app = router_with_ui(
+        pool,
+        config.releases(),
+        watched,
+        data_dir,
+        Agents::new(
+            homes,
+            reachable,
+            binds,
+            cache,
+            skills,
+            verkstead,
+            handoffs,
+            attachments,
+            settings.clone(),
         ),
-    )
-    .await
-    .context("serving Verkstead")
+        // Whatever `gh` this machine has, authenticating as the configured
+        // token — the same one the sessions get, so one token is the whole
+        // of Verkstead's GitHub auth.
+        Gh::on_path().authenticated_by(settings),
+    );
+
+    // Two listeners over one router here, so that everything a request can ask
+    // for over the socket it can ask for over the pipe. Either one ending is
+    // the server ending: there is no graceful shutdown — the process stopping
+    // is the whole of stopping — so a half that has stopped answering is a
+    // Verkstead that has stopped serving.
+    #[cfg(windows)]
+    {
+        tokio::select! {
+            served = axum::serve(listener, app.clone()) => served.context("serving Verkstead"),
+            served = axum::serve(pipe, app) => served.context("serving Verkstead over its named pipe"),
+        }
+    }
+
+    // And the socket on its own everywhere else, there being no pipe to serve.
+    #[cfg(not(windows))]
+    {
+        axum::serve(listener, app)
+            .await
+            .context("serving Verkstead")
+    }
 }

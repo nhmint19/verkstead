@@ -122,6 +122,40 @@ libc = "0.2"
 # session's own terminal — and the group a stalled fetch is killed by.
 rustix = { version = "1", features = ["fs", "process", "pty", "termios"] }
 
+# And the Windows half of the same thing: the console a session runs on, the
+# process started on it and the Job that holds everything that process starts —
+# see `src/terminal/conpty.rs` — and the named pipe the server listens on beside
+# its socket, which is what a session in a container will ask through — see
+# `src/pipe.rs`. Spoken to through the same `windows-sys` the desktop crate is
+# built on, so the tree carries one binding of Win32 rather than two.
+[target.'cfg(windows)'.dependencies]
+# One feature per header, which is how the tables above are cut up.
+# `Win32_System_Console` is the pseudoconsole itself, `Win32_System_Pipes` and
+# `Win32_Storage_FileSystem` the two pipes it is spoken to through — and the
+# volume a path is on, which is what says whether the Profile's account can be
+# hard-linked into a session's profile — `Win32_System_Threading` the
+# `CreateProcessW` and its attribute list, and the process token the pipe's
+# descriptor is written from, and `Win32_System_JobObjects` what a session's
+# whole process tree is held by. `Win32_System_IO` and `Win32_System_Ioctl` are
+# the one control code Verkstead sends: the reparse point that makes a directory
+# junction, which is how the account is joined in. `Win32_Security` is the
+# descriptor the server's pipe is created with — that account and nothing wider
+# — and the token its identity is read out of; `Win32_Security_Authorization` is
+# how both are written and read back, which is SDDL, the spelling of a
+# descriptor a person can read.
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Console",
+  "Win32_System_IO",
+  "Win32_System_Ioctl",
+  "Win32_System_JobObjects",
+  "Win32_System_Pipes",
+  "Win32_System_Threading",
+] }
+
 [dev-dependencies]
 # Reading and writing the socket below, which is a `Stream` and a `Sink` and
 # nothing else — the two traits are this crate's and are not in the standard
@@ -141,3 +175,10 @@ tokio = { workspace = true, features = ["test-util"] }
 # and the server are speaking one protocol rather than two.
 tokio-tungstenite = "0.29"
 tower = { version = "0.5", features = ["util"] }
+# The server's own log, in front of whoever is reading a failed test. What
+# refuses a session — a sandbox that would not build, a console that would not
+# open, a program that was not found — is written to `tracing` and answered to
+# its caller as a bare refusal, so a suite with no subscriber is a suite whose
+# every such failure reads *it printed nothing*. `env-filter` so that what is
+# printed is this crate's own account rather than sqlx's every statement.
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
