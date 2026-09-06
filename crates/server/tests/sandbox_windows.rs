@@ -462,6 +462,66 @@ impl Grilling {
         self.account.join(".claude").join("skills")
     }
 
+    /// And the name a session's description says that same directory by, which
+    /// is the path inside the profile: the account is junctioned in, so this is
+    /// where every entry written for the refusal is written.
+    ///
+    /// Read beside [`Grilling::their_skills`] where a refusal has to be shown
+    /// to have left the directory as it was, because the two are one directory
+    /// only for as long as the junction is there — see [`Grilling::trail`].
+    fn skills_inside(&self) -> PathBuf {
+        self.profile_dir().join(".claude").join("skills")
+    }
+
+    /// What the machine and the record say about the one directory a
+    /// description refuses, at the moment this is asked.
+    ///
+    /// **Said in the failure rather than worked out afterwards.** The
+    /// `windows-2025` job is the only machine that answers any of this, so a
+    /// refusal that did not leave the directory as it found it is a failure
+    /// nobody can read a second time: what the list said before, what it said
+    /// while the container stood, and what was written down about it are the
+    /// three things a reading of that failure needs, and none of them survives
+    /// the run.
+    fn trail(&self, before: &str, standing: &str, written_down: &str) -> String {
+        format!(
+            "\n  before: {before}\
+             \n  while the container stood: {standing}\
+             \n  now: {}\
+             \n  written down: {written_down}",
+            self.reading(),
+        )
+    }
+
+    /// That directory under both the names a description knows it by, read at
+    /// once: the real one on the host, and the one inside the profile that
+    /// leads to it through the junction.
+    ///
+    /// The pair rather than either alone, because a refusal is written under
+    /// the second name and has to be shown to have left the first as it was —
+    /// and the two are one directory only for as long as the junction is there.
+    fn reading(&self) -> String {
+        format!(
+            "on the host {} / inside the profile {}",
+            listed(&self.their_skills()),
+            listed(&self.skills_inside()),
+        )
+    }
+
+    /// And what the record under the Data Directory says about this
+    /// Conversation's container, which is what a later server takes the
+    /// boundary back from — read while there is still one to read.
+    fn written_down(&self) -> String {
+        let record = self
+            .state
+            .path()
+            .join("containers")
+            .join(self.conversation.id.to_string());
+
+        std::fs::read_to_string(&record)
+            .unwrap_or_else(|error| format!("{}: {error}", record.display()))
+    }
+
     /// The directories of the human's and the machine's own that this
     /// fixture's description grants — which is what a container's ending has to
     /// leave as it found them.
@@ -1069,6 +1129,7 @@ async fn closing_a_conversation_takes_its_profile_and_every_entry_written_for_it
     // behind is this and not merely the absence of a deny — see the server's
     // `sandbox::granting::writing::restored`.
     let refused = fixture.their_skills();
+    let before = fixture.reading();
     let as_it_was = listed(&refused);
 
     let (rendering, closing) = fixture
@@ -1080,6 +1141,9 @@ async fn closing_a_conversation_takes_its_profile_and_every_entry_written_for_it
         .container()
         .expect("a Windows rendering names the container it runs inside")
         .to_owned();
+
+    let standing = fixture.reading();
+    let written_down = fixture.written_down();
 
     closing.close();
 
@@ -1117,7 +1181,8 @@ async fn closing_a_conversation_takes_its_profile_and_every_entry_written_for_it
         listed(&refused),
         as_it_was,
         "the one directory a description refuses should read exactly as it did \
-         before the container was made",
+         before the container was made, and what it said all along is: {}",
+        fixture.trail(&before, &standing, &written_down),
     );
 
     assert!(
@@ -1146,6 +1211,7 @@ async fn a_container_a_crash_left_behind_is_swept_at_the_next_startup() {
     let fixture = grilling().await;
 
     let refused = fixture.their_skills();
+    let before = fixture.reading();
     let as_it_was = listed(&refused);
 
     let (rendering, closing) = fixture
@@ -1157,6 +1223,9 @@ async fn a_container_a_crash_left_behind_is_swept_at_the_next_startup() {
         .container()
         .expect("a Windows rendering names the container it runs inside")
         .to_owned();
+
+    let standing = fixture.reading();
+    let written_down = fixture.written_down();
 
     closing.close();
 
@@ -1199,7 +1268,8 @@ async fn a_container_a_crash_left_behind_is_swept_at_the_next_startup() {
         listed(&refused),
         as_it_was,
         "the sweep should leave the account's own skills reading as they did \
-         before the container was made",
+         before the container was made, and what they said all along is: {}",
+        fixture.trail(&before, &standing, &written_down),
     );
 
     assert!(
