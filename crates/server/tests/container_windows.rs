@@ -112,6 +112,12 @@ async fn a_session_on_a_console_runs_inside_its_container() {
         gone(session).await,
         "a dropped child should have taken the session with it, and it said: {said:?}"
     );
+
+    // And the container taken off the machine, which is the Conversation's to
+    // say now rather than the holder's: a profile lasts as long as the work
+    // does, so a test that let go of one and walked away would leave a profile
+    // on the runner. See [`container::taken_back`].
+    container::taken_back(held.path(), 1);
 }
 
 /// And what one printed with nothing watching it, read back — with what it was
@@ -148,17 +154,25 @@ fn what_a_rendering_printed_off_a_console_is_read_back() {
         alpha.is_some() && alpha < beta,
         "what was put in should have come back sorted, and it said: {printed:?}"
     );
+
+    // And the same take-back the test above ends with, for its reason.
+    container::taken_back(held.path(), 2);
 }
 
-/// A profile Verkstead did not make is one it will not use, and a profile it
-/// made goes when the thing holding it does.
+/// A profile Verkstead did not make is one it will not use, and a Conversation's
+/// own goes when the Conversation is done with it.
 ///
-/// Both halves of the same fact, asked with one name: while the first container
-/// is held the name is taken and making it again says so, and once that
-/// container has gone the name is free — which nothing but the profile really
-/// being deleted would leave it.
+/// Both halves of the same fact, asked with one name: while the Conversation
+/// holds its container the name is taken and making it again says so, and once
+/// it has been taken back the name is free — which nothing but the profile
+/// really being deleted would leave it.
+///
+/// **And letting go of the hold is not what frees it**, which is this stage's
+/// own change: a container outlives every session that runs inside it, so what
+/// takes one off the machine is [`container::taken_back`] — the close, and the
+/// sweep a server starts with.
 #[test]
-fn a_profile_that_is_taken_is_an_error_and_a_container_that_goes_frees_it() {
+fn a_profile_that_is_taken_is_an_error_and_a_container_taken_back_frees_it() {
     let held = tempfile::tempdir().expect("a directory to keep a Data Directory in");
 
     let container =
@@ -175,8 +189,18 @@ fn a_profile_that_is_taken_is_an_error_and_a_container_that_goes_frees_it() {
 
     drop(container);
 
-    let again =
-        Container::named(&name).expect("the profile to have gone with the container that made it");
+    let still_taken = Container::named(&name)
+        .expect_err("a session ending should not have taken the Conversation's profile with it");
+
+    assert!(
+        still_taken.to_string().contains(&name),
+        "and the refusal should still name it, and it said: {still_taken}"
+    );
+
+    container::taken_back(held.path(), 3);
+
+    let again = Container::named(&name)
+        .expect("the profile to have gone with the Conversation it belonged to");
 
     assert_eq!(again.name(), name);
 }

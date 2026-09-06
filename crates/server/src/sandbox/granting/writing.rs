@@ -693,10 +693,13 @@ mod tests {
 
         write(&entries, container.sid()).expect("the entries this description comes to");
 
-        // Held by the container from here, so that everything written above
-        // comes off the human's own temporary directory when this test ends —
-        // see `Container`'s `Drop`.
-        container.wrote(entries);
+        // Held by the container from here, and written down with it — see
+        // [`Container::wrote`], which is called before the write above in a
+        // session start and after it here, there being nothing to refuse for in
+        // a test that has already written them.
+        container
+            .wrote(entries)
+            .expect("the entries to be written down");
 
         let said = attempted(
             container.sid(),
@@ -720,6 +723,13 @@ mod tests {
             said.contains("unnamed=UnauthorizedAccessException"),
             "and so is a path no entry ever named, and the probe said: {said:?}"
         );
+
+        // And taken off the machine again, which a test has to say now that a
+        // container's life is its Conversation's rather than its holder's — see
+        // [`super::super::container::taken_back`]. Everything written above
+        // comes off the human's own temporary directory here, and the profile
+        // goes with it.
+        crate::sandbox::container::taken_back(held.path(), 1);
     }
 
     /// Read each of `paths` from inside the container `sid` names, and hand

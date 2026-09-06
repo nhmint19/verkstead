@@ -38,12 +38,25 @@
 //! would leave entries standing on the human's own directories as a number
 //! nothing can resolve.
 //!
-//! **One is held by everything running inside it.** A Conversation can have a
-//! session and a Conversation Terminal going at once and both are inside the
-//! same profile, so [`Container::for_conversation`] hands out a shared one and
-//! the profile goes when the last of them does — see [`held`]. Giving it the
-//! Conversation's own lifetime instead — granted at the first session, deleted
-//! with the Worktree, swept at startup — is the task after this one's.
+//! **Its life is the Conversation's, rather than a session's** (ADR-0014, Q14).
+//! A Conversation can have a session and a Conversation Terminal going at once
+//! and both are inside the same profile, and the session after those is inside
+//! it too: so what [`Container::for_conversation`] hands out is shared, and what
+//! holds it is this module rather than whoever is running inside. Granted at the
+//! first session, and let go of at exactly two moments — the Conversation being
+//! closed, which takes its Worktree in the same breath, and the sweep a server
+//! starts with. Both arrive here as [`taken_back`].
+//!
+//! **Which is why what was written is also written down.** A held profile is a
+//! fact about this process and its entries are a fact about the human's disk, so
+//! a server that died is one that left a boundary standing that nothing in
+//! memory describes any more. Every container of a Conversation's therefore
+//! keeps a record under the Data Directory — see
+//! [`super::granting::remembering`] — written before anything is granted for it,
+//! and it is that record the sweep takes a crashed-over container back by. A
+//! container that cannot be written down is refused, for the reason a pipe that
+//! will not grant it is: what cannot be taken away afterwards should not be made
+//! now.
 
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
@@ -51,7 +64,7 @@ use std::io;
 use std::os::windows::ffi::OsStringExt;
 use std::path::Path;
 use std::ptr;
-use std::sync::{Arc, LazyLock, Mutex, Weak};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use windows_sys::Win32::Foundation::{HANDLE, LocalFree};
 use windows_sys::Win32::Security::Authorization::{ConvertSidToStringSidW, ConvertStringSidToSidW};
@@ -66,7 +79,7 @@ use windows_sys::Win32::System::Threading::{
     OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 
-use super::granting::{Entry, writing};
+use super::granting::{Entry, remembering, writing};
 use super::starting::{Handle, wide};
 
 /// Every profile this process is holding, by the name it was made under.
@@ -76,9 +89,18 @@ use super::starting::{Handle, wide};
 /// Conversation Terminal beside it — and each of them asks for the container as
 /// it starts. Made twice, the second would be refused the name the first is
 /// holding; deleted twice, the first to end would take the profile out from
-/// under the one still running. So what is handed out is shared, and what is
-/// kept here is a weak hold that says nothing about how long it lives.
-static PROFILES: LazyLock<Mutex<HashMap<String, Weak<Container>>>> =
+/// under the one still running. So what is handed out is shared, and this is
+/// where the sharing is done.
+///
+/// **And the hold is a strong one, which is the Conversation's lifetime said in
+/// code.** A profile outlives every session that runs inside it — the next one
+/// is inside the same profile, and its entries are what makes the Worktree
+/// reachable at all — so what lets go of it is not a session ending but
+/// [`taken_back`], which is the close and the sweep. Held weakly, a
+/// Conversation's boundary would be built and taken down around every session
+/// it runs, which is a directory tree walked at each start for entries that were
+/// already there.
+static PROFILES: LazyLock<Mutex<HashMap<String, Arc<Container>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// The one capability a session's container is created with: the internet
@@ -118,38 +140,98 @@ pub struct Container {
     /// its own description says, and what has to come off at the end is all of
     /// them.
     granted: Mutex<Vec<Entry>>,
+
+    /// And where this container is written down, where it is one of a
+    /// Conversation's rather than one the suite made by name.
+    ///
+    /// `None` for a container made under a name said outright — see
+    /// [`Container::named`] — which is nobody's Conversation and has nothing to
+    /// be swept by: what makes a record worth keeping is a *later* server
+    /// needing to take this away, and a container that belongs to no
+    /// Conversation is one no later server would know what to do with.
+    kept: Option<Kept>,
+}
+
+/// Where a Conversation's container is written down: the Data Directory the
+/// record goes under, and whose record it is.
+///
+/// The pair rather than the composed path, because both halves are wanted
+/// separately — the record is read and written by Conversation, and the sweep
+/// reads every one there is under the same directory.
+#[derive(Debug, Clone)]
+struct Kept {
+    data_dir: std::path::PathBuf,
+    conversation: i64,
 }
 
 impl Container {
-    /// The container a session of `conversation` runs in, under the Data
-    /// Directory at `data_dir` — shared with everything else already running
-    /// inside it.
+    /// The container the sessions of `conversation` run in, under the Data
+    /// Directory at `data_dir` — made at the first of them and shared with
+    /// every one after it.
     ///
     /// The name is both halves because both are needed: the Data Directory so
     /// that two Verksteads on one machine are two sets of containers, and the
     /// Conversation so that what one Conversation's session may reach is not
     /// what the next one's may — see this module's own documentation.
     pub fn for_conversation(data_dir: &Path, conversation: i64) -> io::Result<Arc<Container>> {
-        held(&format!("{}-{conversation}", crate::pipe::bare(data_dir)))
+        held(data_dir, conversation)
     }
 
     /// The entries written for this identity, remembered so that they can be
-    /// taken back when it goes.
+    /// taken back when it goes — here and on the disk both.
     ///
     /// Added to rather than replaced: a Conversation's second session describes
     /// its own surface, and an entry written by the first is still an entry on
     /// somebody's directory.
-    pub(crate) fn wrote(&self, entries: Vec<Entry>) {
-        let mut granted = self.granted.lock().unwrap_or_else(|held| held.into_inner());
+    ///
+    /// **Called before the entries are written on the machine**, and it can
+    /// refuse. What this hands back a failure for is a record that would not
+    /// write, which is a boundary no later server could take back: so the
+    /// caller refuses the session, and nothing has been granted yet to leave
+    /// behind. Remembering an entry the write below then failed on is the safe
+    /// side of the same order — taking back an entry that is not there is
+    /// nothing at all.
+    pub(crate) fn wrote(&self, entries: Vec<Entry>) -> io::Result<()> {
+        {
+            let mut granted = self.granted.lock().unwrap_or_else(|held| held.into_inner());
 
-        for entry in entries {
-            if !granted.contains(&entry) {
-                granted.push(entry);
+            for entry in entries {
+                if !granted.contains(&entry) {
+                    granted.push(entry);
+                }
             }
         }
+
+        self.remember()
+    }
+
+    /// This container as it is written down, where it is one of a
+    /// Conversation's — and nothing to do at all where it is not.
+    fn remember(&self) -> io::Result<()> {
+        let Some(kept) = &self.kept else {
+            return Ok(());
+        };
+
+        remembering::wrote(
+            &kept.data_dir,
+            &remembering::Remembered {
+                conversation: kept.conversation,
+                name: self.name.clone(),
+                sid: self.sid.clone(),
+                entries: self
+                    .granted
+                    .lock()
+                    .unwrap_or_else(|held| held.into_inner())
+                    .clone(),
+            },
+        )
     }
 
     /// And one under a name said outright, which is what the suite makes.
+    ///
+    /// Nobody's Conversation, and so nothing written down: what gives a
+    /// container a record is [`held`], which is where a Conversation's own is
+    /// made.
     ///
     /// **A name already taken is an error rather than the profile that is
     /// there.** A container Verkstead did not make is one whose capabilities
@@ -157,6 +239,20 @@ impl Container {
     /// would be a session behind a boundary nothing here described (ADR-0014,
     /// Q18): what cannot be made refuses the session rather than falling back.
     pub fn named(name: &str) -> io::Result<Container> {
+        Container::made(name, None)
+    }
+
+    /// The same profile, written down as it is made where it is a
+    /// Conversation's.
+    ///
+    /// **Everything that can refuse happens before there is a [`Container`] to
+    /// let go of**, which is not a nicety of shape: this is called with the map
+    /// of profiles held — see [`held`] — and a `Container` dropped there would
+    /// be a [`Container::drop`] taking that same lock. So each refusal below
+    /// deletes the profile itself and hands back a reason, and the record is
+    /// written last of the three, when there is nothing after it that could
+    /// fail.
+    fn made(name: &str, kept: Option<Kept>) -> io::Result<Container> {
         // Held in a value of its own, which is not a spelling to tidy: a
         // temporary here would be a SID given back before the call below is
         // made, and what that call would read is whatever the machine put in
@@ -209,10 +305,6 @@ impl Container {
         // no route at all, and a session that cannot ask is refused rather than
         // started. The profile goes with the refusal: what is left behind
         // otherwise is a name the next attempt would be turned away by.
-        //
-        // Not through the [`Container`] being dropped, which is what would
-        // ordinarily delete it: this is called from [`held`], which is holding
-        // the lock a drop takes.
         if let Err(refused) = crate::pipe::Grants::of_this_process().to(&sid) {
             unsafe { DeleteAppContainerProfile(name_w.as_ptr()) };
 
@@ -222,10 +314,38 @@ impl Container {
             )));
         }
 
+        // And written down, with nothing granted for it yet. Before rather than
+        // after the first grant, which is the whole point of it: what a record
+        // is for is a *later* server taking this away, and the moment there is
+        // anything to take away is the moment after this one. A record that will
+        // not write is a boundary nothing could ever clear, so the container is
+        // refused and what was made of it goes with the refusal.
+        if let Some(kept) = &kept {
+            let remembered = remembering::Remembered {
+                conversation: kept.conversation,
+                name: name.to_owned(),
+                sid: sid.clone(),
+                entries: Vec::new(),
+            };
+
+            if let Err(refused) = remembering::wrote(&kept.data_dir, &remembered) {
+                crate::pipe::Grants::of_this_process().no_longer(&sid);
+
+                unsafe { DeleteAppContainerProfile(name_w.as_ptr()) };
+
+                return Err(io::Error::other(format!(
+                    "the AppContainer {name} was made and could not be written down under the \
+                     Data Directory, so nothing would ever have taken it off this machine \
+                     again and it was deleted: {refused}"
+                )));
+            }
+        }
+
         Ok(Container {
             name: name.to_owned(),
             sid,
             granted: Mutex::new(Vec::new()),
+            kept,
         })
     }
 
@@ -249,25 +369,44 @@ impl Drop for Container {
     /// granted on carrying a number nothing on the machine can resolve — which
     /// is what the probe was careful about too, on the human's own directories.
     ///
+    /// **What runs this is [`taken_back`]**, ordinarily: a Conversation's
+    /// container is held by this module for as long as the Conversation is
+    /// working, so the last hold to go is the close or the sweep letting go of
+    /// it. Where a session is still running at that moment the hold is the
+    /// session's for a little longer, and this runs when its relay lets go —
+    /// which is the right order rather than a race: the boundary a running
+    /// session is behind is not one to take down around it.
+    ///
     /// Nothing is reported about the profile itself: one that will not delete
     /// is not something the code that let go of it can do anything about, and
-    /// what would find it again is the sweep the task after this one adds.
+    /// what finds it again is the sweep the next server starts with.
     fn drop(&mut self) {
         let granted =
             std::mem::take(&mut *self.granted.lock().unwrap_or_else(|held| held.into_inner()));
 
-        let mut profiles = PROFILES.lock().unwrap_or_else(|held| held.into_inner());
+        let profiles = PROFILES.lock().unwrap_or_else(|held| held.into_inner());
 
         // A live hold under this name is a container made *after* this one, in
-        // the moment between this one's last holder letting go and this
-        // running — see [`held`], which replaces a profile nothing is holding.
-        // Its profile is not this one's to delete, and the entries this wrote
-        // are the same SID's, so they go to it rather than being taken back
-        // from under it. Nor is the pipe told to stop granting the identity:
-        // it is that container's identity as much as this one's, and what is
-        // running inside it is asking through the pipe right now.
-        if let Some(taken) = profiles.get(&self.name).and_then(Weak::upgrade) {
-            taken.wrote(granted);
+        // the moment between this one's hold being taken out of the map and
+        // this running — see [`held`], which makes a fresh profile for a name
+        // nothing is holding. Its profile is not this one's to delete, and the
+        // entries this wrote are the same SID's, so they go to it rather than
+        // being taken back from under it. Nor is the pipe told to stop granting
+        // the identity: it is that container's identity as much as this one's,
+        // and what is running inside it is asking through the pipe right now.
+        if let Some(taken) = profiles.get(&self.name).cloned() {
+            // The record is that container's too, and rewriting it is how the
+            // entries this hands over reach the disk. Nothing is done about a
+            // refusal: what this is holding has already been handed on, and the
+            // container that now has it is one a caller could refuse for.
+            if let Err(error) = taken.wrote(granted) {
+                tracing::warn!(
+                    name = self.name,
+                    error = ?error,
+                    "the entries of a container that has gone were handed to the one that \
+                     took its name and could not be written down with it"
+                );
+            }
 
             return;
         }
@@ -276,28 +415,158 @@ impl Drop for Container {
         // identity still granted on a pipe whose profile has been deleted is an
         // entry naming nobody, which is exactly what an access-control entry
         // left behind on a directory would be.
-        crate::pipe::Grants::of_this_process().no_longer(&self.sid);
-
-        // The entries first and the profile after them, which is the order the
-        // probe was careful about on the human's own directories: the SID is
-        // what names an entry, and a profile deleted first leaves every one of
-        // them standing as a number nothing on the machine can resolve.
         //
-        // Both while the map is held, so that a caller arriving in the meantime
-        // waits and then makes a profile of its own rather than finding this
-        // one part-way out. What that costs is a session start held up by
-        // another Conversation's ending, for as long as it takes to walk back
-        // the trees this was granted.
-        profiles.remove(&self.name);
-
-        writing::strip(&granted, &self.sid);
-
-        unsafe { DeleteAppContainerProfile(wide(OsStr::new(&self.name)).as_ptr()) };
+        // All of it while the map is held, so that a caller arriving in the
+        // meantime waits and then makes a profile of its own rather than
+        // finding this one part-way out. What that costs is a session start
+        // held up by another Conversation's ending, for as long as it takes to
+        // walk back the trees this was granted.
+        given_back(
+            &self.name,
+            &self.sid,
+            &granted,
+            self.kept
+                .as_ref()
+                .map(|kept| (kept.data_dir.as_path(), kept.conversation)),
+        );
     }
 }
 
-/// The container called `name`, made where nothing is holding one and shared
-/// where something is.
+/// One container taken off the machine: the pipe told, the entries taken off
+/// every directory they were written on, the profile deleted, and the record of
+/// it removed.
+///
+/// The one place any of that happens, because the order is the whole of it and
+/// there are two ways in: a container this process is holding, which arrives
+/// through [`Container::drop`], and one a server that has gone left behind,
+/// which arrives off its record through [`taken_back`]. Both are the same four
+/// things in the same order.
+///
+/// `record` is where this was written down and whose it is, where it was written
+/// down at all.
+fn given_back(name: &str, sid: &str, granted: &[Entry], record: Option<(&Path, i64)>) {
+    crate::pipe::Grants::of_this_process().no_longer(sid);
+
+    // The entries first and the profile after them, which is the order the
+    // probe was careful about on the human's own directories: the SID is what
+    // names an entry, and a profile deleted first leaves every one of them
+    // standing as a number nothing on the machine can resolve.
+    writing::strip(granted, sid);
+
+    unsafe { DeleteAppContainerProfile(wide(OsStr::new(name)).as_ptr()) };
+
+    // And the record last of all, for the same reason said one step out: a
+    // record is what the next sweep would take this back by, so it goes once
+    // there is nothing left to take back.
+    if let Some((data_dir, conversation)) = record {
+        remembering::forget(data_dir, conversation);
+    }
+}
+
+/// The container of `conversation`, let go of: its entries off the human's
+/// directories, its profile off the machine and its record with them.
+///
+/// **The two ways a Conversation's boundary ends**, and both of them come
+/// through here: the close, which takes the profile in the same breath as the
+/// Worktree, and the sweep a server starts with — see [`crate::containers`],
+/// which is where both are decided.
+///
+/// **A container this process is holding is let go of, and one it is not is
+/// taken back off its record.** The second is what a crash leaves: the profile
+/// and its entries are on the machine and nothing in memory knows about either,
+/// so what says which directories carry an entry is what the server that wrote
+/// them wrote down — see [`super::granting::remembering`].
+///
+/// **Nothing is refused and nothing comes back.** What could be done about a
+/// profile that will not delete is what the next sweep will do about it anyway,
+/// and a close that failed for it would be a Conversation nothing can ever end.
+pub fn taken_back(data_dir: &Path, conversation: i64) {
+    let name = profile(data_dir, conversation);
+
+    // Taken out of the map under the lock and let go of outside it: the drop
+    // below takes that same lock, to make sure of the name it is deleting.
+    let held = {
+        let mut profiles = PROFILES.lock().unwrap_or_else(|hold| hold.into_inner());
+
+        profiles.remove(&name)
+    };
+
+    if let Some(container) = held {
+        // Which is the whole of it where nothing else is inside: the last hold
+        // going is [`Container::drop`], and that is where a container ends. A
+        // session still running holds one too, and then this is the *second*
+        // last hold and the ending is that session's — see the drop.
+        drop(container);
+
+        return;
+    }
+
+    // Nothing held under that name, so what there is to go on is what the
+    // server that made it wrote down. Nothing at all where there is no record:
+    // a Conversation whose sessions never ran on this platform has no profile
+    // to delete and no entry anywhere naming it.
+    let Some(remembered) = remembering::read(data_dir, conversation) else {
+        return;
+    };
+
+    tracing::info!(
+        name = remembered.name,
+        conversation,
+        entries = remembered.entries.len(),
+        "an AppContainer left behind by a server that has gone is being taken off the machine \
+         with the entries it was granted"
+    );
+
+    given_back(
+        &remembered.name,
+        &remembered.sid,
+        &remembered.entries,
+        Some((data_dir, conversation)),
+    );
+}
+
+/// Let go of the hold on a Conversation's container without taking anything
+/// back — which is what a server that died did, and what a suite makes a crash
+/// out of.
+///
+/// **The one thing here that leaves a boundary standing on purpose.** Everything
+/// else takes the entries off the human's directories and deletes the profile;
+/// this leaves both exactly where they are, with the record still under the Data
+/// Directory, which is the state the next server's sweep has to be able to
+/// clear. Nothing in the server calls it — see
+/// `crates/server/tests/sandbox_windows.rs`, which is the whole of why it is
+/// here.
+pub fn forgotten(data_dir: &Path, conversation: i64) {
+    let name = profile(data_dir, conversation);
+
+    let held = {
+        let mut profiles = PROFILES.lock().unwrap_or_else(|hold| hold.into_inner());
+
+        profiles.remove(&name)
+    };
+
+    // Leaked rather than dropped, because dropping is precisely what a process
+    // that died did not do: what is being made here is a machine carrying a
+    // profile and its entries with nothing holding either.
+    if let Some(container) = held {
+        std::mem::forget(container);
+    }
+}
+
+/// What the profile of `conversation`'s container is called on this machine.
+///
+/// Both halves because both are needed — see [`Container::for_conversation`],
+/// which is where the whole of that is.
+///
+/// Public for the reason the module is: what says a profile has really gone is
+/// making one under its name and being allowed to, and the suite is what asks —
+/// see `crates/server/tests/sandbox_windows.rs`.
+pub fn profile(data_dir: &Path, conversation: i64) -> String {
+    format!("{}-{conversation}", crate::pipe::bare(data_dir))
+}
+
+/// The container of `conversation`, made where nothing is holding one and
+/// shared where something is.
 ///
 /// **A profile of this name that Verkstead is not holding is one a run before
 /// this left behind**, and it is taken away rather than worked around. The name
@@ -308,16 +577,29 @@ impl Drop for Container {
 /// profile. The SID is derived from the name, so what comes back is the
 /// identity the entries left on those directories already name.
 ///
+/// **And it is written down before it is handed to anybody.** A container
+/// nothing wrote down is one no later server could take away — see this
+/// module's own documentation — so a record that will not write refuses the
+/// container, and the profile made a moment ago goes with the refusal rather
+/// than being left for the next sweep to puzzle over.
+///
 /// The map is held for the whole of this, which is what makes two callers
 /// arriving at once one profile rather than two.
-fn held(name: &str) -> io::Result<Arc<Container>> {
+fn held(data_dir: &Path, conversation: i64) -> io::Result<Arc<Container>> {
+    let name = profile(data_dir, conversation);
+
     let mut profiles = PROFILES.lock().unwrap_or_else(|held| held.into_inner());
 
-    if let Some(container) = profiles.get(name).and_then(Weak::upgrade) {
-        return Ok(container);
+    if let Some(container) = profiles.get(&name) {
+        return Ok(container.clone());
     }
 
-    let made = Container::named(name).or_else(|refused| {
+    let kept = Kept {
+        data_dir: data_dir.to_owned(),
+        conversation,
+    };
+
+    let made = Container::made(&name, Some(kept.clone())).or_else(|refused| {
         tracing::warn!(
             name,
             error = ?refused,
@@ -326,13 +608,13 @@ fn held(name: &str) -> io::Result<Arc<Container>> {
              was deleted and made again"
         );
 
-        unsafe { DeleteAppContainerProfile(wide(OsStr::new(name)).as_ptr()) };
+        unsafe { DeleteAppContainerProfile(wide(OsStr::new(&name)).as_ptr()) };
 
-        Container::named(name)
+        Container::made(&name, Some(kept))
     })?;
 
     let container = Arc::new(made);
-    profiles.insert(name.to_owned(), Arc::downgrade(&container));
+    profiles.insert(name, container.clone());
 
     Ok(container)
 }

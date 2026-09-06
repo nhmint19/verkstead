@@ -50,6 +50,18 @@
 #[cfg(windows)]
 pub(crate) mod writing;
 
+// And what was written down about what was written: the record under the Data
+// Directory that lets a server which did not make a container take it away all
+// the same. Built everywhere, for this module's own reason — a record is a
+// file, and only the taking-back of an entry is a Win32 call.
+//
+// Half of it is a Win32 machine's all the same: what *writes* a record is a
+// container being made, which is a call one platform has, so a build for either
+// of the others carries the writing of one for its tests and for the shape of
+// the thing rather than for anything it does.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) mod remembering;
+
 use std::path::{Path, PathBuf};
 
 use super::surface::{Access, Reach, Surface};

@@ -29,6 +29,7 @@ use verkstead_schema::{Direction, Nudge};
 
 use crate::AppState;
 use crate::attachments::{self, Attachments};
+use crate::containers;
 use crate::handoffs::Handoffs;
 use crate::repos::git;
 use crate::skills;
@@ -2058,6 +2059,16 @@ async fn ending(state: &AppState, id: i64) -> Result<ConversationClosed> {
     // was worth keeping is on the Timeline already.
     let handoffs = Handoffs::under(&state.data_dir);
     tokio::task::spawn_blocking(move || handoffs.remove(id)).await?;
+
+    // And the boundary those sessions ran behind, on the platform where a
+    // boundary is a name the machine keeps rather than a wrapper around a
+    // process: the Conversation's AppContainer, and every access-control entry
+    // written for it on the human's own directories. Here rather than a step
+    // later because it goes with the Worktree — the reach it granted is a reach
+    // into directories that have just been given back — and the entries come
+    // off before the profile is deleted, which is [`crate::containers`]'s own
+    // business. Nothing at all on the two platforms with a wrapper.
+    containers::closing(state, id).await;
 
     let closing = store::close_conversation(pool, id).await?;
 

@@ -136,7 +136,12 @@ session reaches its own Worktree and its own binds and no other Conversation's.
 A server that crashed between the two would leave entries behind, so **the
 server sweeps at startup**: profiles of Conversations that are Done or Closed
 are deleted and their entries stripped from the directories the Surface would
-have named. One profile for the installation was the alternative, cheaper per
+have named. What the sweep reads them off is a record Verkstead writes under
+its own Data Directory as each container is made, one file per Conversation
+holding the profile's name, its SID and every entry written for it: a Closed
+Conversation has no Worktree left to build a Surface from, so *the directories
+the Surface would have named* has to be something the server that named them
+wrote down. One profile for the installation was the alternative, cheaper per
 session and with nothing to undo, and was rejected for letting any session
 reach every directory ever granted.
 

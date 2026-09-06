@@ -83,7 +83,7 @@ pub use conversations::{
     set_implementation_pairing, set_review_pairing, set_state, settle_naming, skip_grilling,
     skip_review, stacks_on, start_adoption, start_building, start_conversation, start_grilling,
     start_implementing, start_stage, start_unnamed_conversation, state, steer_conversation,
-    switch_repo, timeline, unanswered_set_since, waiting, work_on_repo,
+    switch_repo, timeline, unanswered_set_since, unfinished_conversations, waiting, work_on_repo,
 };
 pub use deferrals::{Ask, Unfolded, asked_as, record_folded, stored_on_timeline, unfolded};
 pub use endings::{ended_on, nothing_else};

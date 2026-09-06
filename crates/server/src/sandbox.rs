@@ -102,7 +102,7 @@ pub(crate) mod open;
 // Built everywhere, because what a description comes to is a fact about the
 // description — only the writing of one is a Win32 call, and that is `cfg`-ed
 // inside.
-mod granting;
+pub(crate) mod granting;
 // And the three ends of what a renderer is: the description going in, the
 // process coming out, and what is left to see to once that process has gone.
 // The last of those is nothing on the two platforms whose links follow their
@@ -655,6 +655,32 @@ pub(crate) fn rendered(platform: Platform, surface: &Surface) -> (Rendering, Clo
             unreachable!("this build carries no rendering for {elsewhere:?}")
         }
     }
+}
+
+/// Everything a Conversation's boundary left on this machine, taken back: on
+/// the platform whose boundary is an identity, the entries written for its
+/// AppContainer, the profile itself and the record of both.
+///
+/// **The one call the rest of the server makes about a container's ending**,
+/// which is why it is here rather than inside the Windows arm: what ends a
+/// boundary is a Conversation being closed or a sweep finding one that has
+/// stopped — see [`crate::containers`] — and neither of those is a fact about
+/// Win32. The two platforms that hide a session behind a wrapper leave nothing
+/// behind for this to take: a mount namespace and a policy are gone with the
+/// process they were around.
+///
+/// So the record is what a machine with no such call still has to see to. There
+/// are none on a Unix — nothing writes one there — and the sweep that reads
+/// them is the same sweep either way, which is what lets one test say what it
+/// decides on any machine.
+///
+/// Blocks: it walks back the directory trees the entries were written on.
+pub(crate) fn taken_back(data_dir: &Path, conversation: i64) {
+    #[cfg(windows)]
+    container::taken_back(data_dir, conversation);
+
+    #[cfg(not(windows))]
+    granting::remembering::forget(data_dir, conversation);
 }
 
 /// The machine's own half of a session's `PATH`, on the platform whose answer
@@ -2474,11 +2500,13 @@ impl Sandbox {
     /// target; see [`Closing`].
     ///
     /// **And it can refuse**, on the platform whose boundary is an identity: a
-    /// profile that will not be created and a grant that will not be written
-    /// are both a session that would otherwise run behind no boundary at all,
-    /// which is the one thing ADR-0014 refuses (Q18). What comes back says
-    /// which, and the caller starts nothing — the same answer a missing `bwrap`
-    /// gets on Linux. The two platforms with a wrapper never refuse here.
+    /// profile that will not be created, a boundary that cannot be written down
+    /// and a grant that will not be written are all a session that would
+    /// otherwise run behind no boundary at all, or behind one nothing could
+    /// ever take back — which is the one thing ADR-0014 refuses (Q18). What
+    /// comes back says which, and the caller starts nothing — the same answer a
+    /// missing `bwrap` gets on Linux. The two platforms with a wrapper never
+    /// refuse here.
     pub fn command<S: AsRef<OsStr>>(&self, argv: &[S]) -> std::io::Result<(Rendering, Closing)> {
         let surface = self.surface(argv);
 
@@ -2520,12 +2548,13 @@ impl Sandbox {
                         ))
                     })?;
 
-            granting::writing::write(&boundary.entries, container.sid())?;
+            // Remembered before it is written, and remembered by the container
+            // rather than by the session: an entry names the container's
+            // identity and goes when it does — see
+            // [`container::Container::wrote`], which is also where the order is.
+            container.wrote(boundary.entries.clone())?;
 
-            // Remembered by the container rather than by the session, because
-            // an entry names the container's identity and goes when it does —
-            // see [`container::Container::wrote`].
-            container.wrote(boundary.entries);
+            granting::writing::write(&boundary.entries, container.sid())?;
 
             rendering.inside(container.sid());
             closing = closing.inside(container);

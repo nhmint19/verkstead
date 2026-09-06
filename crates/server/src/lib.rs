@@ -36,6 +36,16 @@ mod cleanup;
 mod commenting;
 mod comments;
 mod commits;
+/// How long a Conversation's boundary lasts on the platform whose boundary is
+/// an identity: the AppContainer granted at its first session, taken away with
+/// its Worktree, and swept for at startup.
+///
+/// Public for the reason the sandbox is: how long what a session may reach
+/// lasts is part of the product's own promise rather than an implementation
+/// detail of an endpoint, and what proves a boundary has really been taken back
+/// is a suite standing where the close and the sweep do — see
+/// `crates/server/tests/sandbox_windows.rs`.
+pub mod containers;
 mod continuing;
 mod conversations;
 mod deferrals;
@@ -708,6 +718,15 @@ fn routed(
     // files, and a delete that could not have the directory deleted the rows
     // anyway. See [`attachments::at_startup`].
     attachments::at_startup(&state);
+
+    // And the boundaries of the Conversations that have stopped, which is the
+    // same sweep one platform further out: a close takes a Conversation's
+    // AppContainer with its Worktree, and a server that died took nothing at
+    // all — so what is written down under the Data Directory and belongs to a
+    // Conversation that has finished or closed is a profile and a set of
+    // entries on the human's own directories that nothing else will ever look
+    // at. See [`containers::at_startup`].
+    containers::at_startup(&state);
 
     // Before anything is served, because it is about what was already happening
     // rather than about anything a request will start: every Conversation the

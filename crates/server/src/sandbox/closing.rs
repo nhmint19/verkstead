@@ -54,17 +54,14 @@ pub struct Closing {
     /// And the AppContainer the session is running inside, held for as long as
     /// it runs.
     ///
-    /// **Held rather than seen to**: what this is for is the *first* half of
-    /// what a closing is, which is being alive. A profile is deleted and its
-    /// entries taken back when the last thing running inside it lets go — see
-    /// [`super::container::Container`] — and the thing running inside it is
-    /// the session this closing belongs to. So a session's boundary lasts
-    /// exactly as long as the session, without anything here having to say when
-    /// that is.
-    ///
-    /// Giving the profile the Conversation's own lifetime instead — granted at
-    /// the first session, deleted with the Worktree — is the task after this
-    /// one's, and this is the seam it moves.
+    /// **Held rather than seen to**, and held here as well as by the module
+    /// that owns it. A container's life is its Conversation's — granted at the
+    /// first session, taken back with the Worktree, swept for at startup (see
+    /// [`super::container`] and [`crate::containers`]) — so what this adds is
+    /// the one thing that lifetime cannot say on its own: a session is still
+    /// running. A close that arrives while one is takes the container out of
+    /// the module's hands and finds this one still holding it, and the profile
+    /// goes when the session does rather than out from under it.
     #[cfg(windows)]
     inside: Option<std::sync::Arc<super::container::Container>>,
 }
