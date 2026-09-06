@@ -235,6 +235,7 @@ mod tests {
                 name: format!("verkstead-0123456789abcdef-{id}"),
                 sid: format!("S-1-15-2-1-2-3-{id}"),
                 entries: Vec::new(),
+                cut: Vec::new(),
             },
         )
         .expect("a record to be writable under the Data Directory");
@@ -293,6 +294,7 @@ mod tests {
                 name: "verkstead-0123456789abcdef-404".to_owned(),
                 sid: "S-1-15-2-1-2-3-404".to_owned(),
                 entries: Vec::new(),
+                cut: Vec::new(),
             },
         )
         .unwrap();

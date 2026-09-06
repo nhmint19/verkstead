@@ -20,6 +20,10 @@
 //! because a description cannot be worked out again after the fact — a closed
 //! Conversation has no Worktree left to build one from, and what is on those
 //! directories was written by a description that no longer exists anywhere else.
+//! And beside them, of the paths a description refuses, the ones that were
+//! taking entries from above before any of this was written: a refusal cuts
+//! that, so it is the one thing about those directories that stops being
+//! readable off them the moment a container is made.
 //!
 //! **In a spelling of its own.** A record is written by one build and read by
 //! the next one, so what goes on the disk is [`Word`] rather than whatever the
@@ -68,6 +72,19 @@ pub(crate) struct Remembered {
 
     /// Those entries, in the order they were written.
     pub(crate) entries: Vec<Entry>,
+
+    /// And which of the refused paths among them were taking entries from above
+    /// when the first of this Conversation's sessions started.
+    ///
+    /// **The one thing about a directory that cannot be read off it later.** A
+    /// refusal cuts the inheritance on the path it refuses, so a server looking
+    /// at one afterwards — this one at the end of the Conversation, or the next
+    /// one after a crash — finds a directory inheriting nothing whether it was
+    /// inheriting anything before or not, and putting an inheritance back that
+    /// was never cut takes the directory's own entries off it. See
+    /// [`super::writing::inheriting`], which is what reads this while there is
+    /// still an answer to read.
+    pub(crate) cut: Vec<PathBuf>,
 }
 
 /// Write `remembered` down, whole.
@@ -103,6 +120,7 @@ pub(crate) fn wrote(data_dir: &Path, remembered: &Remembered) -> io::Result<()> 
         name: remembered.name.clone(),
         sid: remembered.sid.clone(),
         entries: remembered.entries.iter().map(Line::of).collect(),
+        cut: remembered.cut.clone(),
     };
 
     let body = serde_json::to_string_pretty(&written).map_err(io::Error::other)?;
@@ -262,6 +280,7 @@ fn at(path: &Path, conversation: i64) -> Option<Remembered> {
         name: written.name,
         sid: written.sid,
         entries: written.entries.iter().map(Line::entry).collect(),
+        cut: written.cut,
     })
 }
 
@@ -272,6 +291,14 @@ struct Written {
     name: String,
     sid: String,
     entries: Vec<Line>,
+
+    /// Missing from a record the build before this one wrote, and nothing there
+    /// rather than a record that will not read: what it says is about paths
+    /// whose inheritance was cut, and a record that does not say leaves them
+    /// protected — the entries on them come off either way, which is what a
+    /// sweep is for.
+    #[serde(default)]
+    cut: Vec<PathBuf>,
 }
 
 /// And one entry in it.
@@ -341,6 +368,7 @@ mod tests {
                     wanted: Wanted::Refused,
                 },
             ],
+            cut: vec![PathBuf::from(r"C:\Users\ada\.claude\skills")],
         }
     }
 

@@ -2550,13 +2550,20 @@ impl Sandbox {
                         ))
                     })?;
 
+            // And what the machine says about the paths this description
+            // refuses, read before a word of it is written: a refusal cuts the
+            // inheritance on the path it refuses, so this is the last moment at
+            // which anything can tell whether that path was inheriting to begin
+            // with — see [`granting::writing::inheriting`].
+            let cut = granting::writing::inheriting(&boundary.entries);
+
             // Remembered before it is written, and remembered by the container
             // rather than by the session: an entry names the container's
             // identity and goes when it does — see
             // [`container::Container::wrote`], which is also where the order is.
-            container.wrote(boundary.entries.clone())?;
+            container.wrote(boundary.entries.clone(), cut.clone())?;
 
-            granting::writing::write(&boundary.entries, container.sid())?;
+            granting::writing::write(&boundary.entries, container.sid(), &cut)?;
 
             rendering.inside(container.sid());
             closing = closing.inside(container);

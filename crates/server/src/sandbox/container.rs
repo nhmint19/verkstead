@@ -62,7 +62,7 @@ use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::io;
 use std::os::windows::ffi::OsStringExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::{Arc, LazyLock, Mutex};
 
@@ -141,6 +141,17 @@ pub struct Container {
     /// them.
     granted: Mutex<Vec<Entry>>,
 
+    /// And which of the paths those entries refuse were taking entries from
+    /// above when the first of them was written.
+    ///
+    /// Kept beside them for their own reason and read the same way: a refusal
+    /// cuts the inheritance on the directory it refuses, so this is the one
+    /// thing about that directory nothing can read off it once a container
+    /// exists — see [`super::granting::writing::inheriting`], and
+    /// [`super::granting::remembering`], which is where a later server reads it
+    /// instead.
+    cut: Mutex<Vec<PathBuf>>,
+
     /// And where this container is written down, where it is one of a
     /// Conversation's rather than one the suite made by name.
     ///
@@ -160,7 +171,7 @@ pub struct Container {
 /// reads every one there is under the same directory.
 #[derive(Debug, Clone)]
 struct Kept {
-    data_dir: std::path::PathBuf,
+    data_dir: PathBuf,
     conversation: i64,
 }
 
@@ -191,13 +202,34 @@ impl Container {
     /// behind. Remembering an entry the write below then failed on is the safe
     /// side of the same order — taking back an entry that is not there is
     /// nothing at all.
-    pub(crate) fn wrote(&self, entries: Vec<Entry>) -> io::Result<()> {
+    ///
+    /// `cut` is which of those entries' refused paths were taking entries from
+    /// above when this description was read, which is remembered with them for
+    /// the reason the field below is.
+    pub(crate) fn wrote(&self, entries: Vec<Entry>, cut: Vec<PathBuf>) -> io::Result<()> {
         {
             let mut granted = self.granted.lock().unwrap_or_else(|held| held.into_inner());
 
             for entry in entries {
                 if !granted.contains(&entry) {
                     granted.push(entry);
+                }
+            }
+        }
+
+        {
+            // Added and never taken away, which is what makes the first
+            // session's answer the one that stands: by the second session the
+            // directory has had its inheritance cut and reads as one that was
+            // never inheriting at all — see
+            // [`super::granting::writing::inheriting`], which is why this is
+            // read before anything is written and why a later reading of it
+            // says less than the first.
+            let mut was = self.cut.lock().unwrap_or_else(|held| held.into_inner());
+
+            for path in cut {
+                if !was.contains(&path) {
+                    was.push(path);
                 }
             }
         }
@@ -220,6 +252,11 @@ impl Container {
                 sid: self.sid.clone(),
                 entries: self
                     .granted
+                    .lock()
+                    .unwrap_or_else(|held| held.into_inner())
+                    .clone(),
+                cut: self
+                    .cut
                     .lock()
                     .unwrap_or_else(|held| held.into_inner())
                     .clone(),
@@ -326,6 +363,7 @@ impl Container {
                 name: name.to_owned(),
                 sid: sid.clone(),
                 entries: Vec::new(),
+                cut: Vec::new(),
             };
 
             if let Err(refused) = remembering::wrote(&kept.data_dir, &remembered) {
@@ -345,6 +383,7 @@ impl Container {
             name: name.to_owned(),
             sid,
             granted: Mutex::new(Vec::new()),
+            cut: Mutex::new(Vec::new()),
             kept,
         })
     }
@@ -383,6 +422,7 @@ impl Drop for Container {
     fn drop(&mut self) {
         let granted =
             std::mem::take(&mut *self.granted.lock().unwrap_or_else(|held| held.into_inner()));
+        let cut = std::mem::take(&mut *self.cut.lock().unwrap_or_else(|held| held.into_inner()));
 
         let profiles = PROFILES.lock().unwrap_or_else(|held| held.into_inner());
 
@@ -399,7 +439,7 @@ impl Drop for Container {
             // entries this hands over reach the disk. Nothing is done about a
             // refusal: what this is holding has already been handed on, and the
             // container that now has it is one a caller could refuse for.
-            if let Err(error) = taken.wrote(granted) {
+            if let Err(error) = taken.wrote(granted, cut) {
                 tracing::warn!(
                     name = self.name,
                     error = ?error,
@@ -425,6 +465,7 @@ impl Drop for Container {
             &self.name,
             &self.sid,
             &granted,
+            &cut,
             self.kept
                 .as_ref()
                 .map(|kept| (kept.data_dir.as_path(), kept.conversation)),
@@ -443,15 +484,23 @@ impl Drop for Container {
 /// things in the same order.
 ///
 /// `record` is where this was written down and whose it is, where it was written
-/// down at all.
-fn given_back(name: &str, sid: &str, granted: &[Entry], record: Option<(&Path, i64)>) {
+/// down at all. `cut` is which of the paths `granted` refuses were inheriting
+/// before any of it was written — see [`super::granting::writing::inheriting`],
+/// which is what a refusal cannot work out for itself once it has been made.
+fn given_back(
+    name: &str,
+    sid: &str,
+    granted: &[Entry],
+    cut: &[PathBuf],
+    record: Option<(&Path, i64)>,
+) {
     crate::pipe::Grants::of_this_process().no_longer(sid);
 
     // The entries first and the profile after them, which is the order the
     // probe was careful about on the human's own directories: the SID is what
     // names an entry, and a profile deleted first leaves every one of them
     // standing as a number nothing on the machine can resolve.
-    writing::strip(granted, sid);
+    writing::strip(granted, cut, sid);
 
     unsafe { DeleteAppContainerProfile(wide(OsStr::new(name)).as_ptr()) };
 
@@ -521,6 +570,7 @@ pub fn taken_back(data_dir: &Path, conversation: i64) {
         &remembered.name,
         &remembered.sid,
         &remembered.entries,
+        &remembered.cut,
         Some((data_dir, conversation)),
     );
 }

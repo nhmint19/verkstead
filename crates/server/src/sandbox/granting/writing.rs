@@ -37,9 +37,30 @@
 //! the inheritance back is followed by taking off every entry of the
 //! directory's own that says exactly what one it inherits says, which is the
 //! copies and nothing else.
+//!
+//! **Except on a directory that was taking nothing from above to begin
+//! with**, which is the one thing none of that can read off the list in front
+//! of it — see [`inheriting`], which is why the answer is read before the
+//! description is written and carried with the entries into the record. A
+//! Windows filesystem holds two ages of the same idea: on a tree whose lists
+//! were written the way Windows has written them since automatic inheritance
+//! arrived, what a directory takes from above is marked as taken from above;
+//! on an older one — which is what the `windows-2025` runner's temporary
+//! directory is — the same entries were copied down unmarked when the
+//! directory was made, and are the directory's own as far as anything can
+//! tell. Granting the directory *above* one of those is what converts it:
+//! Windows recomputes the tree and the entries arrive a second time, marked.
+//! So a refusal reading only the list in front of it would find entries from
+//! above that were not there when the session started, copy them down, and —
+//! putting the inheritance back at the end — take the directory's *own*
+//! entries off as though they were the copies, leaving a directory of the
+//! human's holding nothing of its own and following whatever is above it.
+//! Read first, the answer is what it was: a directory that was inheriting has
+//! its inheritance cut and given back, and one that was not keeps its list its
+//! own at both ends.
 
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::{LazyLock, Mutex, MutexGuard};
 
@@ -116,6 +137,41 @@ const THE_SID: usize = 8;
 /// conversion standing in front of a bit test.
 const INHERITED: u8 = 0x10;
 
+/// Which of the paths `entries` refuses are taking entries from above, read
+/// before a word of the description has been written.
+///
+/// **What [`refuse`] and [`restored`] between them cannot read off the list
+/// in front of them**, and the reason it is read here rather than there is
+/// this module's own: a grant written on the directory a refused path is
+/// inside makes Windows recompute the tree, so by the time the refusal is
+/// written the list can be carrying entries from above that were not there
+/// when the session started. Read first, the answer is the one about the
+/// machine as the session found it.
+///
+/// **And it is the caller's to keep**, because the taking-back is a later
+/// server's as often as it is this one's: what comes back is remembered with
+/// the entries — see [`super::remembering`] — and handed to [`strip`] by
+/// whoever ends the container.
+///
+/// A path that is not there and a path with no list of its own are both
+/// nothing here, for [`write`]'s reason and [`refuse`]'s: neither is a
+/// directory whose inheritance there is anything to cut.
+pub(crate) fn inheriting(entries: &[Entry]) -> Vec<PathBuf> {
+    let _one = one_at_a_time();
+
+    entries
+        .iter()
+        .filter(|entry| entry.wanted == Wanted::Refused && entry.path.exists())
+        .filter(|entry| {
+            Held::of(&entry.path)
+                .ok()
+                .and_then(|held| held.list())
+                .is_some_and(|list| list.iter().any(|ace| inherited(ace)))
+        })
+        .map(|entry| entry.path.clone())
+        .collect()
+}
+
 /// Everything `entries` says, written for the container `sid` names.
 ///
 /// **A path that is not there gets no entry**, which is the same answer
@@ -130,7 +186,10 @@ const INHERITED: u8 = 0x10;
 /// session that would start behind a boundary nobody described (ADR-0014, Q18),
 /// so what comes back says which path and what the machine said about it, and
 /// the caller starts nothing.
-pub(crate) fn write(entries: &[Entry], sid: &str) -> io::Result<()> {
+///
+/// `cut` is what [`inheriting`] said of these same entries a moment ago, which
+/// is what a refusal needs and cannot ask for itself.
+pub(crate) fn write(entries: &[Entry], sid: &str, cut: &[PathBuf]) -> io::Result<()> {
     let sid = Sid::of(sid)?;
     let _one = one_at_a_time();
 
@@ -141,7 +200,7 @@ pub(crate) fn write(entries: &[Entry], sid: &str) -> io::Result<()> {
 
         let written = match entry.wanted {
             Wanted::Granted(reach) => grant(&sid, &entry.path, reach),
-            Wanted::Refused => refuse(&sid, &entry.path),
+            Wanted::Refused => refuse(&sid, &entry.path, cut.contains(&entry.path)),
         };
 
         written.map_err(|error| {
@@ -168,8 +227,10 @@ pub(crate) fn write(entries: &[Entry], sid: &str) -> io::Result<()> {
 /// that will not come off is named in the log and the rest go.
 ///
 /// **A refused path is left as it was found**, copies and all — see
-/// [`restored`], which is where the whole of that is.
-pub(crate) fn strip(entries: &[Entry], sid: &str) {
+/// [`restored`], which is where the whole of that is. `cut` is what
+/// [`inheriting`] said of those paths before any of this was written, read back
+/// off the record where this is a later server's doing.
+pub(crate) fn strip(entries: &[Entry], cut: &[PathBuf], sid: &str) {
     let Ok(sid) = Sid::of(sid) else {
         return;
     };
@@ -186,7 +247,7 @@ pub(crate) fn strip(entries: &[Entry], sid: &str) {
         // [`restored`], and [`refuse`] for what it is undoing.
         let taken = match entry.wanted {
             Wanted::Granted(_) => revoked(&sid, &entry.path),
-            Wanted::Refused => restored(&sid, &entry.path),
+            Wanted::Refused => restored(&sid, &entry.path, cut.contains(&entry.path)),
         };
 
         if let Err(error) = taken {
@@ -232,7 +293,11 @@ fn grant(sid: &Sid, path: &Path, reach: Reach) -> io::Result<()> {
 
 /// And `path` refused, whatever a grant above it says — see this module's own
 /// documentation, which is where the whole of why this is not one entry is.
-fn refuse(sid: &Sid, path: &Path) -> io::Result<()> {
+///
+/// `cut` says whether this directory was taking entries from above when the
+/// description started — see [`inheriting`], which is where that is read and
+/// why it cannot be read here.
+fn refuse(sid: &Sid, path: &Path, cut: bool) -> io::Result<()> {
     let held = Held::of(path)?;
 
     let Some(existing) = held.list() else {
@@ -252,6 +317,14 @@ fn refuse(sid: &Sid, path: &Path) -> io::Result<()> {
     let kept: Vec<Vec<u8>> = existing
         .iter()
         .filter(|ace| whose(ace).is_none_or(|theirs| !sid.is(theirs)))
+        // And nothing this description put here itself. A directory that was
+        // taking nothing from above when the session started and is taking
+        // something now is one that the grant on the directory it is inside
+        // recomputed a moment ago — see this module's own documentation. Those
+        // entries are not the human's own reach to keep: copied down, they are
+        // what a restored list would then be unable to tell from the entries the
+        // directory really does hold of its own.
+        .filter(|ace| cut || !inherited(ace))
         .map(|ace| {
             // Kept as the directory's own rather than as something it inherits,
             // because after this it inherits nothing: the flag is what a list
@@ -294,8 +367,20 @@ fn refuse(sid: &Sid, path: &Path) -> io::Result<()> {
 /// rather than dropped, because an entry that matches nothing above it is
 /// indistinguishable from one they wrote there themselves, and losing a
 /// human's own entry is the worse of the two mistakes.
-fn restored(sid: &Sid, path: &Path) -> io::Result<()> {
-    undenied(sid, path)?;
+///
+/// **And a directory that was inheriting nothing is left inheriting nothing**,
+/// which is the whole of what `cut` is for — see [`inheriting`]. There were no
+/// copies to make on one of those and there are none to take off, and putting
+/// an inheritance back that was never cut would be handing a directory of the
+/// human's to whatever is above it: the entries it holds of its own are exactly
+/// what a propagation from above would then arrive as, so the step below would
+/// read them as copies and take every one of them off.
+fn restored(sid: &Sid, path: &Path, cut: bool) -> io::Result<()> {
+    undenied(sid, path, cut)?;
+
+    if !cut {
+        return Ok(());
+    }
 
     uncopied(path)
 }
@@ -321,7 +406,18 @@ fn restored(sid: &Sid, path: &Path) -> io::Result<()> {
 /// so the entries from above come back on their own — and one written back
 /// here would come back as a copy of itself, which is the very thing
 /// [`uncopied`] then has to take off again.
-fn undenied(sid: &Sid, path: &Path) -> io::Result<()> {
+///
+/// **Where the refusal cut no inheritance the list stays protected**, and what
+/// goes back on it is the directory's own entries alone — which on such a
+/// directory is every entry it ever had. See [`restored`], which is where the
+/// reason is, and [`inheriting`] for how `cut` is known.
+///
+/// **A list with nothing left in it is written unprotected all the same.** That
+/// is the one shape [`refuse`] cut no inheritance on for a reason of the path's
+/// rather than of the machine's — a path that had no list at all, which
+/// everybody reaches — and a protected list holding no entry is a directory
+/// nobody reaches, which is the opposite of what was there.
+fn undenied(sid: &Sid, path: &Path, cut: bool) -> io::Result<()> {
     let held = Held::of(path)?;
 
     // No list at all is a path everybody reaches, which is the one shape
@@ -337,11 +433,13 @@ fn undenied(sid: &Sid, path: &Path) -> io::Result<()> {
         .filter(|ace| whose(ace).is_none_or(|theirs| !sid.is(theirs)))
         .collect();
 
-    written(
-        path,
-        &only(&kept)?,
-        DACL_SECURITY_INFORMATION | UNPROTECTED_DACL_SECURITY_INFORMATION,
-    )
+    let inheritance = if cut || kept.is_empty() {
+        UNPROTECTED_DACL_SECURITY_INFORMATION
+    } else {
+        PROTECTED_DACL_SECURITY_INFORMATION
+    };
+
+    written(path, &only(&kept)?, DACL_SECURITY_INFORMATION | inheritance)
 }
 
 /// Every entry of `path`'s own that says exactly what one it inherits says,
@@ -819,7 +917,7 @@ mod tests {
     /// this refusal up and the caller starts nothing (ADR-0014, Q18).
     #[test]
     fn an_identity_that_will_not_resolve_refuses_and_says_which() {
-        let refused = write(&[], "this is not a SID")
+        let refused = write(&[], "this is not a SID", &[])
             .expect_err("an identity that is not a SID should not be written for");
 
         assert!(
@@ -845,7 +943,73 @@ mod tests {
             },
         ];
 
-        write(&entries, NOBODY).expect("a description naming paths that are not there");
+        write(&entries, NOBODY, &inheriting(&entries))
+            .expect("a description naming paths that are not there");
+    }
+
+    /// A refused directory is left holding exactly the entries it held, which
+    /// is what a refusal owes a directory of the human's own.
+    ///
+    /// **The grant beside it is the point rather than the setting.** Writing an
+    /// entry on the directory a refused path is inside makes Windows recompute
+    /// the tree under it, so what the refusal finds in front of it is not what
+    /// the session found a moment earlier — see this module's own
+    /// documentation, and [`inheriting`], which is read here where a session
+    /// start reads it.
+    ///
+    /// Read as the list of entries rather than through `icacls`, which is what
+    /// `tests/sandbox_windows.rs` asks the same question with: in here the
+    /// bytes are what a mistake would show up in, and one entry of the
+    /// directory's own turning into one it inherits is exactly such a mistake.
+    #[test]
+    fn a_refused_directory_is_left_holding_exactly_the_entries_it_held() {
+        let held = tempfile::tempdir().expect("a directory to lay a description out in");
+
+        let account = held.path().join("account");
+        let skills = account.join("skills");
+
+        std::fs::create_dir_all(&skills).unwrap();
+        std::fs::write(skills.join("theirs.md"), "the account's own").unwrap();
+
+        let entries = vec![
+            Entry {
+                path: account,
+                wanted: Wanted::Granted(Reach::ReadWrite),
+            },
+            Entry {
+                path: skills.clone(),
+                wanted: Wanted::Refused,
+            },
+        ];
+
+        let before = listed(&skills);
+        let cut = inheriting(&entries);
+
+        write(&entries, NOBODY, &cut).expect("the entries this description comes to");
+
+        assert_ne!(
+            listed(&skills),
+            before,
+            "a refused directory should be carrying the refusal while the container is there, \
+             and a test that could not see one would pass against a description that wrote \
+             nothing at all",
+        );
+
+        strip(&entries, &cut, NOBODY);
+
+        assert_eq!(
+            listed(&skills),
+            before,
+            "and reading as it did before once the container has gone",
+        );
+    }
+
+    /// What one path's list says, entry by entry.
+    fn listed(path: &Path) -> Vec<Vec<u8>> {
+        Held::of(path)
+            .expect("a path this test has just made")
+            .list()
+            .expect("a directory under a temporary one to have a list of its own")
     }
 
     /// The whole of what this module is for, asked of the machine by attempting
@@ -897,14 +1061,16 @@ mod tests {
             },
         ];
 
-        write(&entries, container.sid()).expect("the entries this description comes to");
+        let cut = inheriting(&entries);
+
+        write(&entries, container.sid(), &cut).expect("the entries this description comes to");
 
         // Held by the container from here, and written down with it — see
         // [`Container::wrote`], which is called before the write above in a
         // session start and after it here, there being nothing to refuse for in
         // a test that has already written them.
         container
-            .wrote(entries)
+            .wrote(entries, cut)
             .expect("the entries to be written down");
 
         let said = attempted(
@@ -991,9 +1157,11 @@ mod tests {
 
         let entries = super::super::entries(&surface, Some(&profile));
 
-        write(&entries, container.sid()).expect("the entries this description comes to");
+        let cut = inheriting(&entries);
+
+        write(&entries, container.sid(), &cut).expect("the entries this description comes to");
         container
-            .wrote(entries)
+            .wrote(entries, cut)
             .expect("the entries to be written down");
 
         let said = attempted(
