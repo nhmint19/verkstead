@@ -12,18 +12,18 @@
 //! `/api/ui/repos/{id}` and writes the files, so what these assertions read is
 //! the endpoints' own words.
 //!
-//! What is worth proving here is that a refusal reads as a refusal. The boundary
-//! itself is the server's — the tests over there are what say a path outside a
-//! Watched Path is turned away — and this side's whole job is to say which of
-//! them happened in words the human can act on, inside the pane the path is
-//! about to be corrected in.
+//! What is worth proving here is that a refusal reads as a refusal. Which paths
+//! are refused is the server's — the tests over there are what say a relative
+//! path or one that is no repository root is turned away — and this side's whole
+//! job is to say which of them happened in words the human can act on, inside
+//! the pane the path is about to be corrected in.
 //!
 //! And that the browse writes the same box the typing does. The field is the
 //! shared one — how the dropdown itself behaves is `browsing.test.tsx`'s, where
 //! it is driven on its own — so what is asked here is what this form made of it:
-//! the two fixtures the server wrote for a browse bounded by the Watched Paths,
-//! browsed down to the repository in them, and registered exactly as a typed
-//! path is.
+//! the home an empty field opens on, the fixture the server wrote for the
+//! directory under it, browsed down to the repository in that, and registered
+//! exactly as a typed path is.
 
 import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";

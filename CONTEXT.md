@@ -11,30 +11,9 @@ still holds word for word, because the asking half is unchanged.
 
 ## The workbench
 
-**Watched Path**:
-A directory Verkstead is permitted to operate inside, said either in the
-environment at installation or in the workbench settings, the boundary being
-the union of the two. A security boundary rather than a convenience: nothing
-outside every Watched Path is written, worked in or registered — a Repo is
-registered only from within one, and so is the account an Agent Profile names.
-**Reading the names in a directory is the one thing it does not bound**, and
-deliberately: the workbench's path fields browse the filesystem into
-themselves, and the fields whose values the boundary says nothing about — a
-Watched Path being added, a Sandbox Configuration bind — browse anywhere the
-server can read. What that discloses is a listing of names to the one human the
-tailnet is the perimeter for, and a field that could not reach the directory it
-is about to be pointed at would be a field nobody could fill in. The fields
-whose values *are* bounded browse bounded, by the same admission their save
-makes. The installation's own are resolved once
-at startup and a missing one refuses to start; the settings' own are re-read
-whenever an admission is decided and never refuse anything — one that will not
-resolve covers nothing, with a line in the log — so a bare binary comes up
-watching nothing, admitting nothing, and is pointed at its first directory from
-the settings page's Paths section.
-_Avoid_: project root, workspace, scan path, allowed directory
-
 **Repo**:
-A git repository registered with Verkstead from inside a Watched Path.
+A git repository registered with Verkstead: an absolute path that is a
+repository root with a default branch, anywhere the server can read.
 Conversations attach to one — and while one is still a Draft with nothing checked
 out, the Repo dropdown on its composer moves it onto another. Its files stay the
 source of truth for task lists (`.tasks/`) and roadmaps (`docs/roadmaps/`) —
@@ -152,8 +131,9 @@ refused over, and the ones a crash left behind. A Conversation that is Done
 keeps its checkouts like any other — Done is not Closed, and a Follow-up steer
 works in them.
 Named for the Repo and what the checkout holds — the branch, or the base a
-detached one stands at — and it lives in the Data Directory rather than inside
-a Watched Path: Verkstead made it, so it goes among Verkstead's own things.
+detached one stands at — and it lives in the Data Directory rather than beside
+the Repo it was made from: Verkstead made it, so it goes among Verkstead's own
+things.
 **A session may rename the branch in its Worktree, and Verkstead follows it.**
 A recorded branch that is gone from the Repo while the checkout sits on another
 branch is a rename: the record moves to the new name, and every mirroring
@@ -175,10 +155,10 @@ on macOS, `%APPDATA%\Verkstead` on Windows, whichever binary was started, so
 that a Verkstead launched from an icon finds what one launched from a shell
 left. A run out of a checkout asks for the old behaviour by name, with
 `--data-dir .`. Everything in it is named by Verkstead rather than by whoever
-started it. Not a Watched Path and not the same kind of thing: a Watched Path
-bounds what the human may point Verkstead at, and this is Verkstead's own. The
-**Build Cache** and the **Log Directory** are Verkstead's own too, and neither
-of them is in here.
+started it. Not a directory the human points Verkstead at and not the same kind
+of thing: a Repo and an Agent Profile's account are somebody else's directories,
+and this is Verkstead's own. The **Build Cache** and the **Log Directory** are
+Verkstead's own too, and neither of them is in here.
 _Avoid_: state directory, work dir, scratch space, cache
 
 **Sandbox**:
@@ -238,10 +218,11 @@ _Avoid_: container, jail, isolation, environment
 **Sandbox Configuration**:
 The extra writable binds a Sandbox gets beyond that surface — a package
 registry's, a cache Verkstead does not provide — as one global set every Sandbox
-gets plus a per-Repo set composed over it. Configured where the Watched Paths
-are, which is now the installation *and* the workbench: `--sandbox-bind DIR` or
+gets plus a per-Repo set composed over it. Configured in two places, the
+installation *and* the workbench: `--sandbox-bind DIR` or
 `--sandbox-bind NAME=DIR`, and the same two grammars on the settings page's
-Paths section and on a Repo's own pane. The two sets union, and each keeps its
+Paths section, which holds these and nothing else, and on a Repo's own pane.
+The two sets union, and each keeps its
 own answer to a bind that is not there — the installation's refuses startup, the
 settings' is skipped for that session with a line in the log, because a phone is
 no place to be told a typo cost every session in a Repo its start. Every one of

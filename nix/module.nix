@@ -512,7 +512,7 @@ in
         ++ map bindPath cfg.sandboxBinds;
 
         # A home the human named somewhere of their own, bound in for the reason
-        # a Watched Path is: it is usually under `/home`, which `ProtectHome`
+        # a `paths` entry is: it is usually under `/home`, which `ProtectHome`
         # replaces with an empty tmpfs, and a HOME that is not there is what a
         # tool reaching for one fails obscurely on. Read-only, because nothing is
         # read out of it any more and a service writing into somebody's own home

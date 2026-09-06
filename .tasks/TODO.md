@@ -26,4 +26,4 @@ Roadmap stage: [01: Open the boundary](docs/roadmaps/onboarding/01-open-the-boun
 - [x] 02: One browse, opening at HOME — [details](02-one-browse-opening-at-home.md)
 - [x] 03: The flag, the setting and the Paths section — [details](03-the-flag-and-the-paths-section.md)
 - [x] 04: `paths` on the NixOS module — [details](04-paths-on-the-nixos-module.md)
-- [ ] 05: Docs and vocabulary — [details](05-docs-and-vocabulary.md)
+- [x] 05: Docs and vocabulary — [details](05-docs-and-vocabulary.md)

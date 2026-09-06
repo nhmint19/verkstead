@@ -36,8 +36,6 @@
 //! sandbox_binds:
 //!   - /var/cache/verkstead-node
 //!   - verkstead=/var/cache/verkstead-cargo
-//! watched_paths:
-//!   - /home/tobi/src
 //! ignored_comments:
 //!   - author: coderabbitai
 //!     body: billing

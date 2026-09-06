@@ -555,11 +555,9 @@ function ConflictResolution(props: { repo: RepoView }): JSX.Element {
 ///
 /// The field browses, and Register is untouched by it: what is sent is whatever
 /// the box holds, tapped together or typed straight in, and every refusal below
-/// is still the server's answer about it. Inside the Watched Paths rather than
-/// anywhere, because that is where a Repo may be registered from — a dropdown
-/// offering what the press would turn away would be offering somebody a wasted
-/// press — and looking for a repository, which is what this form is being filled
-/// in with.
+/// is still the server's answer about it. Anywhere the server can read, because
+/// that is where a Repo may be registered from, and looking for a repository,
+/// which is what this form is being filled in with.
 export function RepoPane(props: {
   /// The way back to the settings, which is a change of level rather than a
   /// navigation: what is open stays open, and the URL goes on saying so.

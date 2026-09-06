@@ -26,27 +26,26 @@ Everything below assumes this shell — it carries the Rust toolchain, `sqlite`,
 
 ```console
 $ (cd web && pnpm install && pnpm build)
-$ cargo run -p verkstead-cli -- serve --data-dir . --watched-path ~/src
-  INFO verkstead_server: verkstead is listening listen=127.0.0.1:8422 data_dir=. watched=["/home/you/src"]
+$ cargo run -p verkstead-cli -- serve --data-dir .
+  INFO verkstead_server: verkstead is listening listen=127.0.0.1:8422 data_dir=. home=/home/you sandbox_binds=0 build_cache=Some("/home/you/.cache/verkstead") skills=./skills
 ```
 
-`--watched-path` names a directory Verkstead may operate inside, and it is a
-security boundary rather than a convenience: nothing outside the paths given is
-touched, and a repo is registered only from within one. Repeat the flag for more
-than one, or set `VERKSTEAD_WATCHED_PATHS` with them separated the way the
-platform writes `PATH` — `:` on Unix, `;` on Windows. A path that is not there
-refuses startup, because a flag is the installation's own word and nobody is
-watching when it is wrong.
+**That is the whole of it — there is no boundary flag to say.** A repo is
+registered from anywhere the server can read, an **Agent Profile** names an
+account anywhere the server can read, and every path field browses the same
+way, opening on the server's own `HOME` when nothing has been typed into it.
+What keeps a session to its own Conversation is the **Sandbox**, composed from
+the Repo and the Profile that Conversation names.
 
-It is not required, though: `cargo run -p verkstead-cli -- serve --data-dir .` on
-its own comes up watching nothing, which admits nothing, and the settings page is
-where it is pointed at its first directory.
-Watched paths and sandbox binds are said in both places and what the server uses
-is the union — see the `"paths"` payload further down this section. The flag is
-the shape a service unit wants, where startup is the moment to hear about a
-typo; the settings are the shape a bare binary wants, where a save has to land
-whatever it was told and an entry that will not resolve is reported rather than
-fatal.
+The one path list left is the **Sandbox Configuration** binds, and they are
+said in two places — `--sandbox-bind DIR`, or `--sandbox-bind NAME=DIR` for the
+sessions working in one Repo, and the same two grammars on the settings page's
+**Paths** section. What a session gets is the union; see the `"paths"` payload
+further down this section. The flag is the shape a service unit wants, where
+startup is the moment to hear about a typo and a bind that is not there refuses
+to start; the settings are the shape a bare binary wants, where a save has to
+land whatever it was told and an entry that will not resolve is reported rather
+than fatal.
 
 Everything Verkstead makes goes in one place, the **Data Directory**: the
 database at `verkstead.db`, the worktrees, the installed skills, the handoff
@@ -166,15 +165,13 @@ share_on_done: false
 sandbox_binds:
   - /var/cache/verkstead-node
   - verkstead=/var/cache/verkstead-cargo
-watched_paths:
-  - /home/tobi/src
 ```
 
-The two lists at the foot are the other place the Watched Paths and the Sandbox
-Configuration binds are said. A bind is a plain path where every session gets
-it, and `name=path` where only the sessions working in the Repo registered under
-that name do; and what the server goes by, for both lists, is the union of this
-file and the installation's own flags.
+`sandbox_binds` at the foot is the other place the Sandbox Configuration binds
+are said. A bind is a plain path where every session gets it, and `name=path`
+where only the sessions working in the Repo registered under that name do; and
+what the server goes by is the union of this file and the installation's own
+flags.
 
 Every session started after that gets the token as `GH_TOKEN`, which `gh`
 honours without being told to — as does the server's own `gh`, the one that
@@ -199,7 +196,7 @@ $ curl http://127.0.0.1:8422/api/ui/settings
  "cleanup":{"trim":{"enabled":true,"days":3,"days_configured":false},
    "delete":{"enabled":false,"days":30,"days_configured":false}},
  "conflict_resolution":"Merge",
- "share_on_done":false,"paths":{"watched":[],"binds":[]}}
+ "share_on_done":false,"paths":{"binds":[]}}
 $ curl -X POST -H 'Content-Type: application/json' \
     -d '{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
          "github_token":{"Set":{"token":"ghp_..."}},
@@ -208,7 +205,6 @@ $ curl -X POST -H 'Content-Type: application/json' \
            "delete":{"enabled":false,"days":""}},
          "conflict_resolution":"Merge",
          "share_on_done":false,
-         "watched_paths":["/home/tobi/src"],
          "sandbox_binds":["/var/cache/verkstead-node"]}' \
     http://127.0.0.1:8422/api/ui/settings
 {"settings":{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
@@ -219,9 +215,7 @@ $ curl -X POST -H 'Content-Type: application/json' \
     "delete":{"enabled":false,"days":30,"days_configured":false}},
   "conflict_resolution":"Merge",
   "share_on_done":false,
-  "paths":{"watched":[{"path":"/home/tobi/src","source":"Settings",
-    "resolution":"Resolves"}],
-   "binds":[{"path":"/var/cache/verkstead-node","repo":null,
+  "paths":{"binds":[{"path":"/var/cache/verkstead-node","repo":null,
     "source":"Settings","resolution":{"Unresolved":{"why":
       "the server cannot see it: there is nothing at that path"}}}]}},
  "verified":{"Account":{"login":"tobico","missing":["gist"]}}}
@@ -245,15 +239,14 @@ server found an `sccache`, `"NoSccache"` where it did not, and
 however many are installed. Its own environment and its own platform rather
 than anybody's setting.
 
-`"watched_paths"` and `"sandbox_binds"` are the two lists `config.yaml` holds,
-sent as values in the grammar the flags use — so a Verkstead started with no
-flags at all is pointed at its first directory through this endpoint. What is
-sent is what the file holds afterwards, and the `"paths"` that comes back is
-both sources at once: every entry says whether the installation's flags or the
-settings said it, and whether the server can see what it names right now. Only
-the settings' own can be sent, and nothing about them is checked as it is
-written — the save lands whatever it was told, and an entry the server cannot
-see is a `"resolution"` saying so rather than a refusal.
+`"sandbox_binds"` is the list `config.yaml` holds, sent as values in the grammar
+the flags use — so a Verkstead started with no flags at all gets its first bind
+through this endpoint. What is sent is what the file holds afterwards, and the
+`"paths"` that comes back is both sources at once: every entry says whether the
+installation's flags or the settings said it, and whether the server can see
+what it names right now. Only the settings' own can be sent, and nothing about
+them is checked as it is written — the save lands whatever it was told, and an
+entry the server cannot see is a `"resolution"` saying so rather than a refusal.
 
 A published share is read through the **share viewer**, a small static page that
 draws it in a browser — a gist link on its own shows source. It is not
@@ -374,10 +367,12 @@ itself, `pnpm dev` is the better half of this: see [The dev loop](#the-dev-loop)
 
 Every Question Set is asked *from* a Conversation and lands on its Timeline, so
 there has to be one before an agent can ask anything. Open
-<http://127.0.0.1:8422/>, add a repo from inside the watched path, and press
-**New conversation**. That opens the composer: pick the repo in the **Repo**
-dropdown along the bottom of the box, then press **Save as draft**. The URL then
-names what it made — `/conversations/1` — and that number is the one below.
+<http://127.0.0.1:8422/>, add a repo — any git repository root the server can
+read, and the path field's dropdown opens on your home to browse for one — and
+press **New conversation**. That opens the composer: pick the repo in the
+**Repo** dropdown along the bottom of the box, then press **Save as draft**.
+The URL then names what it made — `/conversations/1` — and that number is the
+one below.
 
 The same two steps over the API, which is what a script does:
 

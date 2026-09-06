@@ -72,23 +72,21 @@ flowchart LR
 
 ## Domain model
 
-- **Watched paths** are said in two places and the boundary is the union of the
-  two — the environment at installation, and the workbench settings (*revised
-  2026-08-30, grilling configurable-paths*: this said "configured in the
-  environment at installation", full stop). The installation's own are resolved
-  once at startup and fail loudly, because a directory a unit named and has not
-  got is a misconfiguration to report where it can be fixed; the settings' own
-  are re-read at the moment an admission is decided and never fail at all, an
-  entry that will not resolve simply covering nothing, with a word in the log.
-  That is what lets a bare binary come up configured by nobody and be pointed at
-  its first directory from its own settings page. They double as a security
-  boundary either way: Verkstead refuses to operate on any file outside them,
-  and watching nothing admits nothing. Repos are registered from within the
-  watched paths. **Reading the names in a directory is outside the boundary's
-  scope** (*revised 2026-09-02, grilling path-selector*: this said "refuses to
-  operate on any file outside them", full stop) — see the path-selector bullet
-  under **UI** for what browses where, and why the wider half of it was taken
-  deliberately.
+- **There is no boundary above the sandbox** (*revised 2026-09-06, onboarding
+  stage 01*: this bullet described **watched paths**, a rule said in two places
+  — the environment at installation and the workbench settings — that Verkstead
+  refused to operate outside of, and from within which repos were registered and
+  agent accounts named. It is retired;
+  [ADR-0015](../adr/0015-open-boundary-and-workbench-key.md) is why, and the
+  workbench key is what covers what it half-covered). A repo is registered from
+  any absolute path that is a repository root with a default branch, an agent
+  profile names an account anywhere of the shape its harness keeps, and both are
+  anywhere the server can read. What keeps a session's reach to its own
+  conversation is the **sandbox** — the worktree, the repo's git directory, the
+  account and nothing else of the machine — composed from the repo and the
+  profile that conversation names, which is the whole of what it reaches. A
+  path the server cannot see is refused as *missing*, which is what a hardened
+  nix unit's namespace makes of a directory the module was not told to bind.
 - A **conversation** is the core entity: attached to a repo and a base commit,
   starting from a **brief** (an editable markdown document). The base commit
   defaults to the default branch's tip at grill start; overriding it is picking
@@ -192,16 +190,18 @@ flowchart LR
   phone and a desk share it.
 - **Sandbox configuration** (extra read-write binds such as build caches,
   network policy) lives in global defaults with per-repo overrides. It is
-  configured where the watched paths are — `--sandbox-bind DIR` for every
-  sandbox, `--sandbox-bind NAME=DIR` for the repo registered under that name,
-  and the same two grammars in the workbench settings (*revised 2026-08-30,
-  grilling configurable-paths*; *settled 2026-08-20, building stage 02*, this
+  configured in two places — `--sandbox-bind DIR` for every sandbox,
+  `--sandbox-bind NAME=DIR` for the repo registered under that name, and the
+  same two grammars in the workbench settings (*revised 2026-08-30, grilling
+  configurable-paths*; *settled 2026-08-20, building stage 02*, this
   was the installer's alone, because each bind is a hole in the boundary and
-  widening one was held to be theirs). The two sets union the way the watched
-  paths do, and each keeps its own answer to a bind that is not there: the
-  flag's refuses startup, the setting's is skipped for that session with a line
-  in the log. What makes the browser half safe is not that a bind stopped being
-  a hole but that reaching the page is already reaching the machine — the
+  widening one was held to be theirs). It is the only path list left of the
+  two that were said this way (*revised 2026-09-06, onboarding stage 01*: the
+  watched paths were the other, and went). The two sets union, and each keeps
+  its own answer to a bind that is not there: the flag's refuses startup, the
+  setting's is skipped for that session with a line in the log. What makes the
+  browser half safe is not that a bind stopped being a hole but that reaching
+  the page is already reaching the machine — the
   tailnet is the perimeter and there is one human behind it — while a *phone* is
   no place to be told a typo cost every session in a repository its start. On a
   hardened nix install the unit's namespace still binds what the module was
@@ -847,14 +847,17 @@ Timeline events:
   the middle pane and a details pane beside it: the credentials as one github
   card, each Agent Profile, each registered Repo — the shared Rust build cache,
   whose card says how it stands and whose pane holds the switch and the size,
-  and **Paths**, whose card counts the watched paths and the global binds and
-  whose pane edits both (*added 2026-08-30, grilling configurable-paths*). The
-  Paths card sits directly above the Repos, because a watched path is what a
-  Repo is registered from and a machine with none has nothing to put on that
-  list; a Repo's own pane carries the binds said for its name under a **Sandbox
-  configuration** heading, the same rows out of the same read and the same
-  save, because a page listing every path would carry a column of `name=…`
-  entries nobody could scan. **A bind written for a name no Repo is registered
+  and **Paths**, whose card counts the global binds and whose pane edits them
+  (*added 2026-08-30, grilling configurable-paths*; *revised 2026-09-06,
+  onboarding stage 01*: it counted the watched paths as well and its pane edited
+  both). The Paths card sits directly below the Repos (*revised 2026-09-06,
+  onboarding stage 01*: it sat directly above them, because a watched path was
+  what a Repo was registered from and a machine with none had nothing to put on
+  that list — with the boundary gone the Repos are what a machine is set up by
+  and the binds are the afterthought); a Repo's own pane carries the binds said
+  for its name under a **Sandbox configuration** heading, the same rows out of
+  the same read and the same save, because a page listing every path would
+  carry a column of `name=…` entries nobody could scan. **A bind written for a name no Repo is registered
   under goes back on the Paths pane**, because that split leaves it no pane of
   its own and a row drawn nowhere is a row nobody can take away — which is what
   unregistering a Repo makes of every bind said for it. The Paths card's count
@@ -885,23 +888,28 @@ Timeline events:
   endpoint answering **one directory per request**, never a walk, because a
   browse is a level at a time and a tree nobody will read the whole of is not
   worth crossing a wire. Every refusal — relative, missing, not a directory,
-  outside the boundary, unreadable — is a named outcome the dropdown draws where
-  its rows would be rather than a status code, a field halfway through a word
-  being the ordinary state of one.
-- **The browse is bounded by whatever bounds the field's own value**, in two
-  scopes. A field whose value the server refuses outside the Watched Paths —
-  the path a Repo is registered from, an Agent Profile's account paths — browses
-  inside them, opening on the roots themselves and stopping there on the way
-  back out, decided by the same admission the save is about to make, so the
-  dropdown cannot offer a wasted press. A field the boundary says nothing about
-  — a Watched Path being added, a Sandbox Configuration bind — browses anywhere
-  the server can read. **That second scope is a wider disclosure than anything
-  else here makes and was taken deliberately**: a watched path is how the
-  boundary is *said*, so a field bounded by it could only ever offer what is
-  already watched, and reaching the page is already reaching the machine — the
-  tailnet is the perimeter and there is one human behind it. What it discloses
-  is a listing of names, and nothing outside a Watched Path is written, worked
-  in or registered on the strength of it.
+  unreadable — is a named outcome the dropdown draws where its rows would be
+  rather than a status code, a field halfway through a word being the ordinary
+  state of one (*revised 2026-09-06, onboarding stage 01*: *outside the
+  boundary* was in that list).
+- **Every field browses anywhere the server can read**, one scope for all of
+  them (*revised 2026-09-06, onboarding stage 01*: there were two, a field whose
+  value the boundary bounded browsing inside the watched paths and one it said
+  nothing about browsing anywhere; with the boundary gone the second is what is
+  left). **That is a wider disclosure than anything else here makes and was
+  taken deliberately**: reaching the page is already reaching the machine — the
+  tailnet is the perimeter and there is one human behind it — and a field that
+  could not reach the directory it is about to be pointed at would be a field
+  nobody could fill in. What it discloses is a listing of names.
+- **A browse with nothing typed in the field opens on the server's own `HOME`**
+  (*added 2026-09-06, onboarding stage 01*). The watched paths were what a
+  bounded field started from, and nothing else stands where they were: an empty
+  field answered from the top of the machine would open several levels above
+  anything the human meant, and `HOME` is where a repository and an agent
+  account both actually live. A starting point rather than a ceiling — the
+  listing walks up out of it like any other directory, and a `HOME` the server
+  cannot read falls back to the top of the machine, which on Windows is the
+  drive list rather than a root.
 
 ## Build and migration
 

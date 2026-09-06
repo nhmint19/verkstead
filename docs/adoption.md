@@ -64,41 +64,55 @@ On a NixOS host, import the flake and enable the service:
 ```nix
 services.verkstead = {
   enable = true;
-  watchedPaths = [ "/home/you/src" ];
+  paths = [ "/home/you/src" "/home/you/.claude" ];
   home = "/home/you";                 # optional; the service's own by default
   sandboxBinds = [ "verkstead=/var/cache/verkstead-node" ];
 };
 ```
 
-Three of those are worth understanding before the first Conversation, because
-each is a boundary rather than a convenience:
+Three of those are worth understanding before the first Conversation:
 
-- **`watchedPaths`** is what Verkstead may operate inside. There is no default
-  and no scan; a **Repo** is registered only from within one, and a path that
-  merely reads as inside one is refused. The module refuses to build with none:
-  the server itself would start, because the settings page says Watched Paths
-  too, but a directory this unit was never told about is one its hardened
-  namespace does not hold — so on NixOS this is the list that counts.
+- **`paths`** is the list of directories bound read-write into the unit — the
+  repositories it is to work in and the agent accounts it is to run under,
+  alike. It says nothing to Verkstead: the server is never told the list
+  exists, and inside the unit every path it is given is treated alike. What it
+  is for is that `ProtectHome` and `ProtectSystem` hide everything the unit is
+  not told to bind, so a directory not named here is not there as far as the
+  service is concerned. **A repository or an account you did not name here is
+  answered *missing*** — the same answer as a path that genuinely is not there,
+  because inside the namespace it genuinely is not — and `paths` is where to
+  add it. There is no default, no scan and no minimum: a build naming none of
+  them is a legal build, and what it comes up as is a workbench with nowhere
+  yet to point at.
 - **`home`** is only what `HOME` means for the service; nothing is read out of
   it and nothing of it reaches a Sandbox. Credentials and identity are said
   instead: a token in `secrets.yaml` and a `git_author` in `config.yaml`, both
   in the data directory, reaching each session as `GH_TOKEN` and git's own
-  `GIT_CONFIG_*`.
+  `GIT_CONFIG_*`. It is bound in **read-only**, which is the whole of what
+  naming one buys — so an **Agent Profile**'s account kept under it that a
+  session has to *write*, which is every Claude account, goes in `paths` as
+  well. That is the one composition worth saying outright, and it is why the
+  example above names `/home/you/.claude` beside the repositories.
 - **`sandboxBinds`** is the **Sandbox Configuration** — every entry is a hole
   in the boundary, which is why one that is not there refuses startup rather
   than being skipped. A bare path goes to every session; `name=path` goes only
   to sessions working in the Repo registered under that name.
 
-The workbench says both lists as well, on the settings page's **Paths** section
-and on each Repo's own pane, and what a session gets is the union of the two.
-Those entries are saved into `config.yaml` in the data directory, read afresh
-every time they are used, and never fatal: one the server cannot see is reported
-on the page rather than refused, and simply covers nothing. **On this module,
-that report is the one to read** — the unit's namespace holds what the options
-above name and nothing else, so a path typed into the settings page saves, says
-the server cannot see it, and does nothing until it is added here too. A bare
-binary outside NixOS has no such namespace and needs no flags at all: see
-[development.md](development.md#quickstart).
+The workbench says the binds as well, on the settings page's **Paths** section —
+which holds those and nothing else — and on each Repo's own pane, and what a
+session gets is the union of the two. Those entries are saved into `config.yaml`
+in the data directory, read afresh every time they are used, and never fatal:
+one the server cannot see is reported on the page rather than refused, and
+simply covers nothing. **On this module, that report is the one to read** — the
+unit's namespace holds what the options above name and nothing else, so a bind
+typed into the settings page saves, says the server cannot see it, and does
+nothing until it is added to `sandboxBinds` here too. A repository or an account
+outside the namespace has no such report to read, only the *missing* it is
+refused with, which is why `paths` above is the list to reach for when a
+directory you can see from a shell is one the workbench says is not there.
+
+A bare binary outside NixOS has no namespace like this and needs no options at
+all: see [development.md](development.md#quickstart).
 
 A Rust build cache is not one of them, and there is nothing to configure for
 one. The **Build Cache** is the server's own: the module makes

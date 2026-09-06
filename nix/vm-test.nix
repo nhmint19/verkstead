@@ -796,7 +796,7 @@ testers.runNixOSTest {
         assert len(profiles) == 1, f"expected the one Profile, got:\n{profiles}"
         profile_id = profiles[0]["id"]
         assert profiles[0]["broken"] is None, (
-            "the Profile's pair is inside a Watched Path and on disk, so the "
+            "the Profile's pair is named in `paths` and on disk, so the "
             f"service should be able to reach it: {profiles[0]}"
         )
 
@@ -848,9 +848,9 @@ testers.runNixOSTest {
         assert grilling == '"Started"', f"grilling was answered {grilling}"
 
         # The worktree is where the design says it is — under the State
-        # Directory, which is Verkstead's own, rather than inside a Watched
-        # Path. `ProtectSystem = "strict"` leaves exactly that one directory
-        # writable, which is the half no crate test can ask.
+        # Directory, which is Verkstead's own, rather than inside one of the
+        # directories `paths` bound. `ProtectSystem = "strict"` leaves exactly
+        # that one directory writable, which is the half no crate test can ask.
         view = json.loads(
             machine.succeed(
                 f"curl -sf http://127.0.0.1:8422/api/ui/conversations/{conversation}"
@@ -934,7 +934,8 @@ testers.runNixOSTest {
             f"checkout the worktree was made from: {reported['repo-holds']!r}"
         )
         assert reported["sibling"] == "absent", (
-            "another repository under the same Watched Path is another Conversation's"
+            "another repository under the same bound directory is another "
+            "Conversation's"
         )
         assert reported["home"] == ".claude .claude.json", (
             f"everything else in the service's home is absent inside: {reported['home']!r}"

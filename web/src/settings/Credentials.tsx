@@ -276,9 +276,8 @@ export function GithubPane(props: {
     cleanup: heldCleanup(told()),
     // And how a conflicted pull request is resolved, likewise.
     conflict_resolution: told()?.conflict_resolution ?? "Merge",
-    // And the Watched Paths and the binds the settings hold, again for that
-    // reason — a list this form left out would be a list it emptied, and one
-    // of them is the boundary itself. See [`heldPaths`].
+    // And the binds the settings hold, again for that reason — a list this
+    // form left out would be a list it emptied. See [`heldPaths`].
     ...heldPaths(told()),
   });
 
