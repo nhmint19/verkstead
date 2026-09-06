@@ -65,6 +65,7 @@ use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::platform::Platform;
+use verkstead_server::sandbox::container;
 use verkstead_server::sandbox::{Executable, Homes, Reachable, SandboxConfig};
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
@@ -273,6 +274,43 @@ static UNHURRIED: LazyLock<Pace> = LazyLock::new(|| Pace {
     merges: Duration::from_secs(600),
     cleanup: Duration::from_secs(600),
 });
+
+/// Where every directory this suite makes goes: the machine's temporary
+/// directory, spelled the way the filesystem holds it.
+///
+/// **Because a container cannot expand a short name.** The `windows-2025`
+/// runner hands `%TEMP%` out in its 8.3 spelling, the account `runneradmin`
+/// reached as `RUNNER~1` — and expanding one of those means listing `C:\Users`,
+/// which is the human's own profile and is exactly what a session inside an
+/// AppContainer is refused. So a program in there that hands .NET a path with a
+/// `~` in it is told the path is denied, which is the whole of what
+/// `[System.IO.Directory]::GetCurrentDirectory()` did the day this suite first
+/// ran inside one.
+///
+/// **And nothing Verkstead composes is spelled that way.** A Data Directory is
+/// under `%LOCALAPPDATA%` and a Worktree under it, both of which the shell
+/// answers in full — so the short name here is the runner's own and not
+/// anything a session would meet, and resolving it once is what gives this
+/// suite's directories the shape the product's have.
+///
+/// The verbatim prefix `canonicalize` answers with is taken off again: `\\?\`
+/// turns off the normalization every path a program is handed goes through, and
+/// a `USERPROFILE` spelled that way is not one anything expects.
+static SOMEWHERE: LazyLock<PathBuf> = LazyLock::new(|| {
+    let temporary = std::env::temp_dir();
+    let resolved = std::fs::canonicalize(&temporary).unwrap_or(temporary);
+    let spelled = resolved.display().to_string();
+
+    PathBuf::from(spelled.strip_prefix(r"\\?\").unwrap_or(&spelled))
+});
+
+/// One of them made, which is every temporary directory in this file — for the
+/// reason above.
+fn somewhere() -> tempfile::TempDir {
+    tempfile::Builder::new()
+        .tempdir_in(&*SOMEWHERE)
+        .expect("a directory under the machine's own temporary one")
+}
 
 /// A Conversation with a session running under a stand-in agent, and everything
 /// holding its directories open.
@@ -567,10 +605,10 @@ async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
         .await
         .expect("the suite's room is never closed");
 
-    let watched = tempfile::tempdir().unwrap();
-    let state = tempfile::tempdir().unwrap();
-    let scripts = tempfile::tempdir().unwrap();
-    let evidence = tempfile::tempdir().unwrap();
+    let watched = somewhere();
+    let state = somewhere();
+    let scripts = somewhere();
+    let evidence = somewhere();
 
     std::fs::write(state.path().join("config.yaml"), THE_AUTHOR).unwrap();
 
@@ -965,10 +1003,11 @@ fn read<T: DeserializeOwned>(body: &str) -> T {
 /// Two paths compared as the filesystem has them rather than as they are
 /// spelled.
 ///
-/// Which matters on this platform twice over: a temporary directory is reached
-/// through a short name (`RUNNER~1`) and a session's handoff directory is
-/// reached through a junction, so two names for one file are the ordinary case
-/// rather than the corner.
+/// Which matters on this platform: a session's handoff directory is reached
+/// through a junction and its profile is joined together out of them, so two
+/// names for one file are the ordinary case rather than the corner. What is no
+/// longer among the reasons is the short name a temporary directory is reached
+/// through — see [`SOMEWHERE`], which is why this suite's are spelled in full.
 fn the_same_file(one: &Path, another: &Path) {
     assert_eq!(
         std::fs::canonicalize(one)
@@ -1336,6 +1375,16 @@ async fn force_stop_ends_a_session_where_it_stands() {
 /// really there; what a session throws away lands in it; and the account the
 /// Profile named is really there, joined in by the junction and the hard link
 /// the open rendering makes.
+///
+/// **Four of the five are the value Verkstead composed and one of them is not.**
+/// Windows stamps its own `LOCALAPPDATA` over what a process inside an
+/// AppContainer was handed: a container has a private folder of its own, at
+/// `Packages\<the profile's name>\AC` under whatever local half the process was
+/// started with, and that is the name it is told. Which is still inside this
+/// Conversation's own profile, and so still goes when the profile does — the
+/// fresh profile's whole claim — and it is asserted here rather than allowed
+/// for, because a container whose private folder landed in the human's own
+/// local half would be a different fact entirely.
 #[tokio::test]
 async fn a_session_runs_in_a_profile_of_the_conversations_own() {
     let fixture = grilling(
@@ -1363,6 +1412,16 @@ async fn a_session_runs_in_a_profile_of_the_conversations_own() {
     let local = profile.join("AppData").join("Local");
     let temporary = local.join("Temp");
 
+    // And the container's own private folder inside that local half, which is
+    // what Windows tells a session `LOCALAPPDATA` is — see this test's own
+    // documentation. Named off the same function the rendering makes the
+    // container under, because what the folder is called is what the profile is
+    // called.
+    let its_own = local
+        .join("Packages")
+        .join(container::profile(fixture.state.path(), fixture.id))
+        .join("AC");
+
     // Compared as they are spelled rather than as the filesystem has them,
     // which is the stricter of the two here: every one of these is built out of
     // the Data Directory this fixture handed in, so a name that differs at all
@@ -1371,7 +1430,7 @@ async fn a_session_runs_in_a_profile_of_the_conversations_own() {
         ("userprofile", profile.clone()),
         ("home", profile.clone()),
         ("appdata", roaming.clone()),
-        ("localappdata", local.clone()),
+        ("localappdata", its_own),
         ("temp", temporary.clone()),
         ("tmp", temporary.clone()),
     ] {
@@ -1627,8 +1686,8 @@ async fn no_compile_server_comes_up_on_this_platform() {
     // resolves is the whole of the reason — see [`LOGGING`].
     LazyLock::force(&LOGGING);
 
-    let state = tempfile::tempdir().unwrap();
-    let cache = tempfile::tempdir().unwrap();
+    let state = somewhere();
+    let cache = somewhere();
 
     on_the_path("sccache").unwrap_or_else(|| {
         panic!(
@@ -1679,7 +1738,7 @@ async fn no_compile_server_comes_up_on_this_platform() {
 /// a crate is downloaded once for the machine, and compiled once per session.
 #[tokio::test]
 async fn a_session_gets_the_shared_cargo_home_and_no_compiler_wrapper() {
-    let cache = tempfile::tempdir().unwrap();
+    let cache = somewhere();
 
     let fixture = grilling_caching(
         r#"
