@@ -977,6 +977,14 @@ mod tests {
     /// `UnauthorizedAccessException` is a boundary and `FileNotFoundException`
     /// is a path that was never there, and a test that could not tell them
     /// apart would pass against a description that named nothing at all.
+    ///
+    /// **And not one cmdlet in it.** Windows PowerShell starts inside a
+    /// container and runs what it is given, and the commands it would
+    /// ordinarily import from a module at startup are not there — the
+    /// `windows-2025` job answered `CommandNotFoundException` for
+    /// `Write-Output` the first time a probe of this shape ran inside one. So
+    /// what a probe is written in is the language and the framework: a cast
+    /// rather than `Out-Null`, `[Console]::Out` rather than `Write-Output`.
     fn attempted(sid: &str, paths: &[(&str, &PathBuf)]) -> String {
         let asked = paths
             .iter()
@@ -1004,12 +1012,12 @@ mod tests {
             .arg(format!(
                 "foreach ($asked in @({asked})) {{ \
                    try {{ \
-                     [System.IO.File]::ReadAllText($asked[1]) | Out-Null; \
-                     Write-Output ($asked[0] + '=read') \
+                     [void][System.IO.File]::ReadAllText($asked[1]); \
+                     [Console]::Out.WriteLine($asked[0] + '=read') \
                    }} catch {{ \
                      $why = $_.Exception; \
                      while ($why.InnerException) {{ $why = $why.InnerException }}; \
-                     Write-Output ($asked[0] + '=' + $why.GetType().Name) \
+                     [Console]::Out.WriteLine($asked[0] + '=' + $why.GetType().Name) \
                    }} \
                  }}"
             ))

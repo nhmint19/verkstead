@@ -16,6 +16,14 @@
 //! says a process is inside is [`container::around`], which reads the SID off
 //! the token Windows gave it.
 //!
+//! **What a probe inside a container is written in.** Windows PowerShell starts
+//! in there and parses and runs what it is given, and the commands it would
+//! ordinarily import from a module at startup are not there — the
+//! `windows-2025` job answered `CommandNotFoundException` for `Write-Output`
+//! the first time one of these ran inside a container. So a probe here is the
+//! language and the framework and nothing else: `[Console]::Out` rather than
+//! `Write-Output`, a `Thread` rather than `Start-Sleep`.
+//!
 //! Everything made here is taken back: a [`Container`] deletes its profile as
 //! it is dropped, and the tests that prove that is so are the ones that make a
 //! profile twice under one name.
@@ -89,7 +97,7 @@ async fn a_session_on_a_console_runs_inside_its_container() {
         .arg("-NoProfile")
         .arg("-NonInteractive")
         .arg("-Command")
-        .arg("Write-Output 'inside'; Start-Sleep 600")
+        .arg("[Console]::Out.WriteLine('inside'); [System.Threading.Thread]::Sleep(600000)")
         .inside(container.sid());
 
     let child = terminal

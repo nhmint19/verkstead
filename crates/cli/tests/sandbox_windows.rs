@@ -34,6 +34,16 @@
 //! rather than merely chosen: the container is granted the pipe as it is made,
 //! and a container the pipe was never told about is refused it.
 //!
+//! **A probe inside a container is written without cmdlets**, which is what the
+//! `windows-2025` job answered the first time one ran there. Windows PowerShell
+//! starts inside a container and parses and runs what it is given, and the
+//! commands it would ordinarily import from a module at startup are not there:
+//! `New-Object` and `Write-Output` alike came back
+//! `CommandNotFoundException`. So the probe below is the language and the
+//! framework and nothing else — a constructor rather than `New-Object`,
+//! `[Console]::Out` rather than `Write-Output` — which is what a program has
+//! inside a boundary whatever the shell managed to load.
+//!
 //! **Why here rather than in the server crate's Windows sessions suite.** That
 //! suite cannot run this command at all: it is a server-crate test, so what a
 //! session finds first on its `PATH` is the test binary's own directory and
@@ -107,25 +117,6 @@ const INSIDE: Duration = Duration::from_secs(10);
 /// The two words the probe inside the container prints, one of which it is.
 const REACHED: &str = "the loopback answered";
 const REFUSED: &str = "the loopback did not answer";
-
-/// What a probe on this platform is handed to run at all: the names nothing on
-/// Windows starts without.
-///
-/// `crates/server/tests/container_windows.rs` keeps the same list for the same
-/// reason — a rendering is the whole of a program's environment, and a shell
-/// with no `SystemRoot` will not start.
-const NEEDED: [&str; 10] = [
-    "ComSpec",
-    "PATH",
-    "PATHEXT",
-    "SystemDrive",
-    "SystemRoot",
-    "TEMP",
-    "TMP",
-    "USERPROFILE",
-    "APPDATA",
-    "LOCALAPPDATA",
-];
 
 /// A Conversation part-way through its first grilling, and the server it is
 /// asking — which it can only ask over a pipe.
@@ -587,14 +578,15 @@ fn the_loopback_is_refused_from_inside_a_container() {
         .arg(dialling(address))
         .inside(&container);
 
-    // The names nothing on Windows starts without, taken from this process's
-    // own environment: a rendering is the whole of what a program is handed,
-    // and what is under test here is the network rather than what a session may
-    // reach.
-    for name in NEEDED {
-        if let Some(value) = std::env::var_os(name) {
-            probe.set(name, value);
-        }
+    // The session's own environment rather than a list of names taken off this
+    // process, which is what this used to hand over and is a thing a container
+    // is refused: a `USERPROFILE` read out here is the human's own profile, and
+    // the whole point of the boundary the probe is standing inside is that it
+    // cannot reach one. What a session gets instead points at the profile the
+    // description grants it, so this is both what a session really has and a
+    // set of paths the container can open.
+    for (name, value) in rendering.env() {
+        probe.set(name, value);
     }
 
     let output = off_a_console(&probe, b"").expect("a probe inside the session's container");
@@ -615,12 +607,17 @@ fn the_loopback_is_refused_from_inside_a_container() {
 /// whole point: a connect that is being dropped rather than refused comes back
 /// only when Windows has finished retrying it, which is far longer than a test
 /// should sit on.
+///
+/// **Not one cmdlet in it**, which is the whole of why this reads the way it
+/// does — see this file's own documentation for what the machine said when it
+/// had two.
 fn dialling(address: SocketAddr) -> String {
     format!(
-        "$client = New-Object System.Net.Sockets.TcpClient; \
+        "$client = [System.Net.Sockets.TcpClient]::new(); \
          try {{ $reached = $client.ConnectAsync('{}', {}).Wait({}) }} \
          catch {{ $reached = $false }}; \
-         if ($reached) {{ Write-Output '{REACHED}' }} else {{ Write-Output '{REFUSED}' }}",
+         if ($reached) {{ [Console]::Out.WriteLine('{REACHED}') }} \
+         else {{ [Console]::Out.WriteLine('{REFUSED}') }}",
         address.ip(),
         address.port(),
         INSIDE.as_millis(),

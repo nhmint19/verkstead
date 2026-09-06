@@ -152,6 +152,16 @@ const SAYS_WHICH_BUILD: &str = "the server's own image would be here\n";
 ///
 /// The innermost exception is the one asked, because a .NET method called from
 /// PowerShell arrives wrapped.
+///
+/// **And not one cmdlet in the whole of it**, which is a rule rather than a
+/// style. Windows PowerShell starts inside a container and parses and runs what
+/// it is given, and the commands it would ordinarily import from a module at
+/// startup are not there: the `windows-2025` job answered
+/// `CommandNotFoundException` for `Write-Output` the first time a probe of this
+/// shape ran inside one. So this is the language and the framework and nothing
+/// else — `[System.IO.Path]::Combine` rather than `Join-Path`, a `[void]` cast
+/// rather than `Out-Null`, `[Console]::Out` rather than `Write-Output` — which
+/// is what a program has in there whatever the shell managed to load.
 const CLASSIFYING: &str = r#"
 $ErrorActionPreference = 'Stop'
 
@@ -171,7 +181,7 @@ function Unexpected($caught) {
 function Report($name, $said) { [Console]::Out.WriteLine($name + '=' + $said) }
 
 function Directory($path) {
-    $probe = Join-Path $path '.verkstead-probe'
+    $probe = [System.IO.Path]::Combine($path, '.verkstead-probe')
 
     try {
         $handle = [System.IO.File]::Open($probe, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write)
@@ -185,7 +195,7 @@ function Directory($path) {
     }
 
     try {
-        [System.IO.Directory]::GetFileSystemEntries($path) | Out-Null
+        [void][System.IO.Directory]::GetFileSystemEntries($path)
         return 'read'
     } catch {
         $why = Why $_
@@ -208,7 +218,7 @@ function File($path) {
     }
 
     try {
-        [System.IO.File]::ReadAllBytes($path) | Out-Null
+        [void][System.IO.File]::ReadAllBytes($path)
         return 'read'
     } catch {
         $why = Why $_
