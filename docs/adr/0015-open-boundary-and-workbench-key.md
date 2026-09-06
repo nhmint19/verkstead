@@ -36,6 +36,15 @@ said nothing about. The settings' resolution report — *the server cannot see
 this* — goes with the section it stood on; the refusal a Repo or an account
 the server cannot see gets is *missing*, which it already was.
 
+**An unbounded browse opens at the server's own `HOME`, not at the filesystem
+root.** The Watched Paths were what a bounded field started from, and nothing
+else stands where they were: an unbounded browse asked with no path answers
+the root, or the drive list on Windows, and every field the boundary used to
+seed would now open several levels above anything the human meant. `HOME` is
+where a repository and an account both actually live, so it is the one
+directory worth starting at, and it is a starting point rather than a
+boundary — the browse walks up out of it like any other.
+
 **The NixOS module keeps an option, because the unit's namespace is not the
 server's to widen.** `ProtectHome=tmpfs` and `ProtectSystem=strict` hide
 everything the unit is not told to bind, so `watchedPaths` becomes **`paths`**:

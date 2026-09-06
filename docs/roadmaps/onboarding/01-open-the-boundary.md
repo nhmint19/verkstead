@@ -4,11 +4,12 @@
 
 The Watched Path is gone from Verkstead. Demonstrable: a bare `verkstead
 serve --data-dir .` with no flags registers a git repository root anywhere the
-server can read and saves an Agent Profile over `~/.claude`; the settings
-page's Paths section holds sandbox binds and nothing else; the NixOS VM test
-registers a repo the unit was told to bind and reports one it was not as
-*missing*, naming the `paths` option; `nix flake check` passes with the module
-built without a minimum.
+server can read and saves an Agent Profile over `~/.claude`; its path fields
+open at the server's `HOME` rather than at `/`; the settings page's Paths
+section holds sandbox binds and nothing else; the NixOS VM test registers a
+repo the unit was told to bind and reports one it was not as *missing*, naming
+the `paths` option; `nix flake check` passes with the module built without a
+minimum.
 
 ## Decisions in force
 
@@ -21,6 +22,13 @@ bears on this stage:
   browses anywhere the server can read, which `BrowseScope::Anywhere` already
   is. Keeping it as an installation-only flag was rejected as two behaviours
   for one boundary stage 02 replaces.
+- **The unbounded browse opens at `HOME`.** `BrowseScope::Watched` with no
+  path was seeded from the watched roots, and `Anywhere`'s no-path case is
+  `topmost()` — `/`, or the drive list on Windows. Every field the boundary
+  used to seed would open at the root once they are one scope, so the no-path
+  ask answers the server's own `HOME` instead. A starting point and not a
+  boundary: the listing walks up out of it like any other, and a `HOME` the
+  server cannot read falls back to `topmost()`.
 - **What is left of the rule is the Sandbox.** A session reaches the Worktree,
   the Repo's git directory and the account, composed from what the
   Conversation names. Nothing about that composition changes here.
@@ -57,10 +65,13 @@ bears on this stage:
      succeeds; a relative path and a non-root are still refused by name.
    - A Profile over the server's own `~/.claude` saves and reads unbroken.
 2. **Server: startup and browsing.** Remove the flag, the env var and the
-   resolve-at-startup; collapse the browser to the one unbounded scope and
-   drop the `scope` query parameter from the wire type.
+   resolve-at-startup; collapse the browser to the one unbounded scope, seed
+   its no-path ask from `HOME`, and drop the `scope` query parameter from the
+   wire type.
    - `verkstead serve --data-dir .` starts with no other flag and the startup
      line no longer says `watched`.
+   - A browse with no path lists the server's `HOME`, and one with a path
+     above it lists that, so nothing is out of reach.
 3. **Workbench: the Paths section and the path fields.** The Paths card and
    pane hold sandbox binds only; `PathField` loses `scope`; the repo and
    profile forms browse anywhere; the `heldPaths` writer sends binds alone.

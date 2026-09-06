@@ -96,16 +96,18 @@ modal, serving the compose page and a draft's composer alike — one control,
 so a draft moved onto a repo made there is the same move as picking a
 registered one.
 
-Create takes a parent directory and a name, makes the directory, runs `git
-init` on `main`, and commits a `README.md` holding the name as the configured
-author — an empty repository has a default branch but no commit, and a
-Conversation cannot take a base from one. When a token is saved it offers
-**Create on GitHub too**, ticked and private, through `gh repo create` after
-the initial commit; without a token it says a remote is needed before the
-work is finished, since the pipeline ends in a push and a pull request. Open
-is the registration form's path field in a modal, browsing anywhere with
-repositories marked, refusing as the settings page does. Either way the Repo
-is registered and becomes the draft's.
+Create takes a parent directory and a name. The parent is browsed from the
+server's `HOME`, which is where ADR-0015 starts an unbounded browse and the
+only answer a first run has, there being no last parent to remember yet. It
+makes the directory, runs `git init` on `main`, and commits a `README.md`
+holding the name as the configured author — an empty repository has a default
+branch but no commit, and a Conversation cannot take a base from one. When a
+token is saved it offers **Create on GitHub too**, ticked and private,
+through `gh repo create` after the initial commit; without a token it says a
+remote is needed before the work is finished, since the pipeline ends in a
+push and a pull request. Open is the registration form's path field in a
+modal, browsing anywhere with repositories marked, refusing as the settings
+page does. Either way the Repo is registered and becomes the draft's.
 
 ## Considered Options
 

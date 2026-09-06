@@ -31,13 +31,14 @@ All from [ADR-0016](../../adr/0016-onboarding.md); what bears on this stage:
   them too. The `Listbox` has no action rows today; add them as a row kind
   rather than a second control.
 - **Create repo** is a modal on the existing `Modal`: a parent directory
-  (`PathField` browsing anywhere, remembering the last parent on the device)
-  and a name. The server makes the directory, `git init -b main`, writes a
-  `README.md` holding the name, commits it as the configured `git_author`
-  the way `publishing.rs` commits, registers it, and answers with the
-  `RepoView`. Refusals are named outcomes in a 200 body like registration's:
-  the parent missing, the directory existing, a name git will not take, no
-  author configured, `git` failing.
+  (`PathField` browsing anywhere, remembering the last parent on the device
+  and opening at the server's `HOME` where there is none, which on a first run
+  there never is) and a name. The server makes the directory, `git init -b
+  main`, writes a `README.md` holding the name, commits it as the configured
+  `git_author` the way `publishing.rs` commits, registers it, and answers with
+  the `RepoView`. Refusals are named outcomes in a 200 body like
+  registration's: the parent missing, the directory existing, a name git will
+  not take, no author configured, `git` failing.
 - **Create on GitHub too**: drawn only when a token is saved, ticked,
   private, `gh repo create <name> --private --source . --remote origin
   --push` after the initial commit, authenticated as the token the way the
@@ -71,7 +72,8 @@ All from [ADR-0016](../../adr/0016-onboarding.md); what bears on this stage:
 
 ## Re-verify at start
 
-- Stage 01 landed: `PathField` has no `scope`, registration admits any root.
+- Stage 01 landed: `PathField` has no `scope`, registration admits any root,
+  and a browse with no path opens at the server's `HOME`.
 - Stage 03 landed if it went first: the wizard ends on `/compose`, so the
   finish lands in this page's zero state.
 - `Panes.tsx` still stands two panes when `conversations` is absent.
