@@ -887,6 +887,88 @@ mod tests {
         crate::sandbox::container::taken_back(held.path(), 1);
     }
 
+    /// And the one rule that is in no description: a directory a session is
+    /// told to look for a program in is read from inside where it is the
+    /// human's own, and is not where it is not.
+    ///
+    /// **Asked here rather than in `crates/server/tests/sandbox_windows.rs`**,
+    /// which asks every other kind by attempting it, and for a reason of that
+    /// suite's rather than of this rule's: what a session's `PATH` holds is the
+    /// *server process's* own `PATH` with Verkstead's bin in front of it, so a
+    /// suite that wanted a directory of its own on one would have to write into
+    /// the environment of the process running the tests. In here the whole
+    /// chain is reachable without that — [`super::entries`] takes the `PATH`
+    /// off the description, [`super::beneath`] decides which of them are the
+    /// human's, and [`write`] is what a session start calls.
+    ///
+    /// **The two directories differ in one thing only**: which of them is under
+    /// the profile handed in. Otherwise they are both on the same `PATH`, both
+    /// really there and both holding a file — so a rule that granted
+    /// everything on a `PATH`, or nothing on one, fails this either way.
+    #[test]
+    fn a_path_entry_under_the_humans_profile_is_read_from_inside_and_one_elsewhere_is_not() {
+        use std::ffi::OsString;
+
+        use crate::sandbox::surface::Surface;
+
+        let held = tempfile::tempdir().expect("a directory to lay a machine out in");
+
+        // What stands for the human's own profile, with a tool installed under
+        // it the way npm installs one — and, outside it, what stands for a
+        // machine-wide install, which a container reaches without any entry
+        // and which this therefore expects to be granted nothing.
+        let profile = held.path().join("Users").join("ada");
+        let theirs = profile.join("AppData").join("Roaming").join("npm");
+        let everybodys = held.path().join("Program Files").join("Git").join("cmd");
+
+        for (directory, said) in [
+            (&theirs, "a per-user install"),
+            (&everybodys, "a machine's"),
+        ] {
+            std::fs::create_dir_all(directory).unwrap();
+            std::fs::write(directory.join("a-tool.txt"), said).unwrap();
+        }
+
+        let mut surface = Surface::starting_in(held.path().to_owned());
+        surface.set(
+            "Path",
+            OsString::from(format!("{};{}", theirs.display(), everybodys.display())),
+        );
+
+        let container = Container::for_conversation(held.path(), 2)
+            .expect("this machine to make an AppContainer");
+
+        let entries = super::super::entries(&surface, Some(&profile));
+
+        write(&entries, container.sid()).expect("the entries this description comes to");
+        container
+            .wrote(entries)
+            .expect("the entries to be written down");
+
+        let said = attempted(
+            container.sid(),
+            &[
+                ("per-user", &theirs.join("a-tool.txt")),
+                ("machine-wide", &everybodys.join("a-tool.txt")),
+            ],
+        );
+
+        assert!(
+            said.contains("per-user=read"),
+            "a tool installed under the human's own profile is what this rule \
+             is for — an agent npm installed is exactly that — and the probe \
+             said: {said:?}"
+        );
+        assert!(
+            said.contains("machine-wide=UnauthorizedAccessException"),
+            "and nothing else on a `PATH` is granted by it: what makes Program \
+             Files readable is that it is Program Files, which this stand-in \
+             for one is not. The probe said: {said:?}"
+        );
+
+        crate::sandbox::container::taken_back(held.path(), 2);
+    }
+
     /// Read each of `paths` from inside the container `sid` names, and hand
     /// back the `name=word` lines it printed.
     ///

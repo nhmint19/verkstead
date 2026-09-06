@@ -1048,7 +1048,9 @@ async fn a_second_conversations_worktree_is_refused_to_the_firsts_session() {
 /// A `PATH` entry under the human's profile is the same kind of entry as the
 /// skills — a read-only grant on a real directory — and is in no description
 /// here, this fixture's human profile being a temporary directory that nothing
-/// on the machine's `PATH` is under.
+/// on the machine's `PATH` is under. Where that rule is proved against a real
+/// container is the server's own `sandbox::granting::writing` tests, which can
+/// say what the `PATH` is without saying it to this whole process.
 #[tokio::test]
 async fn closing_a_conversation_takes_its_profile_and_every_entry_written_for_it() {
     let fixture = grilling().await;
