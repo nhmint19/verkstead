@@ -84,6 +84,16 @@ pub(crate) struct Remembered {
 /// that cannot write one refuses the session rather than granting anything —
 /// which is the same answer a profile that will not be created gets (ADR-0014,
 /// Q18).
+///
+/// **And atomically**, through the settings files' own
+/// [`crate::settings::write_atomically`]: a record is rewritten at every
+/// session start, so a truncate-then-write would put a window on every one of
+/// them in which the file is half of a record. What a crash inside that window
+/// leaves is the one thing this module exists to prevent — a record the next
+/// server cannot parse, and so a profile and a set of entries on the human's
+/// own directories that nothing will ever take back, because a Conversation
+/// that has finished never runs another session to write the record again. A
+/// rename makes it the old record or the new one and never a half of either.
 pub(crate) fn wrote(data_dir: &Path, remembered: &Remembered) -> io::Result<()> {
     let directory = directory(data_dir);
 
@@ -95,9 +105,13 @@ pub(crate) fn wrote(data_dir: &Path, remembered: &Remembered) -> io::Result<()> 
         entries: remembered.entries.iter().map(Line::of).collect(),
     };
 
-    let body = serde_json::to_vec_pretty(&written).map_err(io::Error::other)?;
+    let body = serde_json::to_string_pretty(&written).map_err(io::Error::other)?;
 
-    std::fs::write(record(data_dir, remembered.conversation), body)
+    crate::settings::write_atomically(
+        &record(data_dir, remembered.conversation),
+        &body,
+        crate::settings::ORDINARY_MODE,
+    )
 }
 
 /// Read one back, or nothing where there is none to read.
@@ -155,13 +169,20 @@ pub(crate) fn left_behind(data_dir: &Path) -> Vec<Remembered> {
 
         let path = entry.path();
 
+        let name = path.file_name().and_then(|name| name.to_str());
+
+        // The neighbouring file a record is written through, caught before the
+        // arm below says it is a stranger: [`wrote`] writes into this same
+        // directory and renames, so a sweep running while a session starts can
+        // see one — and one left behind is a rename that failed rather than
+        // anything to warn about twice.
+        if name.is_some_and(|name| name.starts_with('.')) {
+            continue;
+        }
+
         // A name that is not a Conversation's id is not a record this wrote:
         // every one of them is named by [`record`] and by nothing else.
-        let Some(conversation) = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .and_then(|name| name.parse::<i64>().ok())
-        else {
+        let Some(conversation) = name.and_then(|name| name.parse::<i64>().ok()) else {
             tracing::warn!(
                 path = %path.display(),
                 "something that is not a container's record is in the containers directory, \
