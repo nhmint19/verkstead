@@ -7,9 +7,8 @@ serve --data-dir .` with no flags registers a git repository root anywhere the
 server can read and saves an Agent Profile over `~/.claude`; its path fields
 open at the server's `HOME` rather than at `/`; the settings page's Paths
 section holds sandbox binds and nothing else; the NixOS VM test registers a
-repo the unit was told to bind and reports one it was not as *missing*, naming
-the `paths` option; `nix flake check` passes with the module built without a
-minimum.
+repo the unit was told to bind and reports one it was not as *missing*;
+`nix flake check` passes with the module built without a minimum.
 
 ## Decisions in force
 
@@ -42,12 +41,16 @@ bears on this stage:
   and accounts alike, no minimum, the assertion gone. It has no Verkstead
   meaning. `home` stays `BindReadOnlyPaths`; an account under it that a
   session must write is named in `paths` as well, and the docs say so. The
-  missing-path refusal on that install says which option to name it in — the
-  server knows it is the nix install the way `adoption.md` already describes
-  the namespace report.
+  missing-path refusal stays bare — nothing on the wire says which install a
+  server is running as — so `adoption.md` is what says `paths` is where to
+  add a directory the unit was not told to bind. *(Settled while planning the
+  stage, 2026-09-06; ADR-0015 is amended to match.)*
 - **The settings' resolution report goes with its section.** `PathsView`
   keeps the binds' `PathSource` and `PathResolution`; the watched half of it
-  is deleted rather than emptied.
+  is deleted rather than emptied. **The Paths section moves below the Repos**:
+  it sat above them because a watched path was what a Repo was registered
+  from, and binds alone do not carry that reason. *(Settled while planning the
+  stage, 2026-09-06.)*
 - **The security cost is accepted and named.** The UI API is reachable from a
   session over the loopback and was before; stage 02 is what closes it. Do
   not compensate for that here.
@@ -78,8 +81,8 @@ bears on this stage:
    - The settings save no longer carries `watched_paths`, and the fixtures
      `cargo test` writes for the web suite are regenerated.
 4. **NixOS module and VM test.** Rename to `paths`, drop the assertion,
-   bind read-write, document the account case; the VM test asserts the
-   *missing* refusal names the option.
+   bind read-write, document the account case; the VM test asserts that a
+   repo the unit was not told to bind is refused as *missing*.
    - `nix build .#checks.x86_64-linux.vm` passes.
 5. **Docs and vocabulary.** CONTEXT.md, `adoption.md`, `development.md`, the
    design doc's product decisions, and the config example in `settings.rs`'s

@@ -55,6 +55,14 @@ cannot see, with a sentence naming the option on that install. `home` stays
 bound read-only, so an account under it that a session must write is named in
 `paths` as well.
 
+Amended: **the refusal stays bare, and the documentation is what names the
+option.** Nothing on the wire says which install a server is running as, so a
+refusal carrying that sentence would have meant the unit telling the server what
+kind of install it was — a mechanism built to hold one sentence. A Repo or an
+account the unit was not told to bind is answered *missing* exactly as anywhere
+else, and `adoption.md` is where somebody learns that `paths` is where to add
+it.
+
 **The cost, named.** A session's network is the host's own, and one listener
 serves both the Conversation-scoped session API and the workbench's own
 `/api/ui/`. The boundary capped what a session reaching the UI API could
