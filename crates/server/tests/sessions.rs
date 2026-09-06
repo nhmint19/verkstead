@@ -11774,6 +11774,21 @@ async fn a_merge_github_has_not_worked_out_dispatches_nothing() {
 
     worked_to_empty(&fixture).await;
 
+    // Waited for rather than counted on, because the window below is a window
+    // of the wrap-up's own polls and the wrap-up has to have started for it to
+    // be one. [`worked_to_empty`] ends at the finish commit reaching the
+    // Timeline, and what is between that and the move is a session being seen
+    // out and a pull request being opened — microseconds here and over a second
+    // on a machine running everything else in this file at once, with no
+    // ceiling that a fixed pause could be written under.
+    //
+    // Read as *left Implementing* rather than as *reached Wrapping*, so that a
+    // run which wrongly hurried past the state fails on the assertion below
+    // saying where it got to instead of on a poll that missed the moment.
+    fixture
+        .until(|view| (view.state != Lifecycle::Implementing).then_some(()))
+        .await;
+
     // Long enough for many polls of a pull request GitHub will not commit itself
     // about.
     pause(Duration::from_millis(1500)).await;
