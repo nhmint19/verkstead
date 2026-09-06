@@ -1442,34 +1442,6 @@ async fn a_session_reaches_what_the_description_names_and_is_refused_what_it_doe
     );
 }
 
-/// And the Conversation says, in the one value three places on the workbench
-/// read, that none of this is sandboxed.
-///
-/// The trade this whole stage is: a Windows session runs, and it runs with the
-/// reach of the account running the server until the sandbox stage lands. What
-/// is asserted here is the server's half — that the value the composer, the
-/// session pane and the terminal pane all draw from is true on the platform it
-/// is about, and that a session ran under it all the same.
-#[tokio::test]
-async fn a_windows_conversation_says_its_sessions_are_not_sandboxed() {
-    let fixture = grilling(
-        r#"
-        Say 'reading the brief'
-        Idle
-        "#,
-    )
-    .await;
-
-    let event = fixture.running().await;
-    fixture.printed(event, "reading the brief").await;
-
-    assert!(
-        fixture.view().await.unsandboxed,
-        "a Conversation on this platform is one whose sessions run unsandboxed, \
-         and the view is what says so",
-    );
-}
-
 /// A Conversation's own terminal comes up on PowerShell, in the Conversation's
 /// Worktree.
 ///

@@ -373,19 +373,61 @@ arguments at all. Started that way there is no console to print in, so the log
 file is the whole account of the run; started from a terminal, whatever stops
 it is said there as well.
 
-**Sessions run on Windows, and they run unsandboxed.** Two things stood between
-a Windows Verkstead and a session — the pseudo-terminal and the Sandbox — and
-this is the first of them alone: a session runs on a pseudoconsole Verkstead
-opens for it, as an ordinary process of your own account's, with nothing between
-it and the rest of the machine. Whatever you can reach, an agent working for you
-can reach. The workbench says so rather than leaving it to be found out, in all
-three of the places a session is set going, watched, or typed into: above
-**Start work** on the composer, beside the terminal on the session pane, and on
-a Conversation Terminal's own pane, that last one being a shell of yours with
-the same reach. The AppContainer that closes it is a later stage's, and nothing
-about this download changes when it lands.
+**Sessions run on Windows**, and what one may reach is the same description as
+on Linux and a Mac rendered over an **AppContainer** — the platform's own
+deny-by-default identity, the one Windows runs its browsers' renderers inside.
+A session runs on a pseudoconsole Verkstead opens for it and inside a container
+of its Conversation's own: the Conversation's Worktree, the Repo's git
+directory and the handoff directory writable, each Companion Repo at the mode
+it was set to, the Sandbox Configuration's entries, the Build Cache with the
+shared `CARGO_HOME` inside it, a profile of the Conversation's own with the
+Agent Profile's account joined into it, the Skills and the `verkstead` a
+session asks with read-only, Windows and Program Files read-only, a temporary
+directory of the session's own, the internet — and nothing else of the machine.
+Not your Documents, not the rest of your profile, and not another
+Conversation's Worktree.
 
-**What a session does get is a profile of the Conversation's own**, under
+**The boundary refuses rather than hides**, as a Mac's does and unlike Linux's:
+your home directory is in plain sight from inside a session and every byte of
+it is refused. `verkstead ask` goes through a **named pipe** the server opens
+beside its socket, because a container is refused every connection to this
+machine — including the loopback the CLI would otherwise ask over.
+
+**What has no equivalent on either other platform is that the boundary is
+written on your own directories.** A container reaches what its identity has
+been granted and nothing else, so there is nothing to mount and no policy to
+hand a process: each real path the description names gets an access-control
+entry for that identity — a grant on the Worktree at the reach the description
+says, a grant on the Agent Profile's account, and an entry in front of the
+account's own skills that refuses them. Three things about those entries are
+worth knowing, because they are on directories of yours rather than on
+anything of Verkstead's:
+
+- **They are per Conversation.** One AppContainer profile is made at a
+  Conversation's first session and shared by every session and terminal after
+  it, so an entry grants that Conversation's identity and no other's. Which is
+  what stops one session reaching another Conversation's Worktree, and it is
+  asserted rather than assumed: the Windows suite attempts it and reads back
+  the refusal.
+- **Closing takes them away.** A Conversation closing removes its container in
+  the same breath as its Worktree: every entry written for that identity comes
+  off the directory it was written on, and the profile is deleted. What that is
+  read off is a record Verkstead writes under its own Data Directory as each
+  container is made — the profile's name, its SID and every entry written for
+  it — because a Closed Conversation has no Worktree left to work the list out
+  from again.
+- **A crash is swept up at the next startup.** A server that stopped between
+  the two would leave entries on your directories, so the next one to start
+  reads those records and takes back every container whose Conversation is Done
+  or Closed or gone from the record altogether — entries off, profile deleted,
+  record removed.
+
+**A container that cannot be made refuses the session**, the way a missing
+`bwrap` does on Linux: a profile that will not create, an entry that will not
+be written, a pipe that will not take the identity. There is no unsandboxed
+session to fall back to, and the log says which of the three it was.
+
+**The profile a session runs in is the Conversation's own**, under
 `%APPDATA%\Verkstead\homes`, emptied and made again as each of that
 Conversation's sessions starts. `USERPROFILE` and `HOME` point at it, and
 `APPDATA`, `LOCALAPPDATA`, `TEMP` and `TMP` point inside it — so what npm

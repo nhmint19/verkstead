@@ -57,6 +57,15 @@ flowchart LR
   Terminal. [ADR-0014](../adr/0014-windows-sessions.md) is why the terminal and
   the Sandbox land as two stages rather than one; the AppContainer of its third
   is what takes the note away again.)
+  (*revised 2026-09-06, windows sessions stage 03*: it did. A Windows session
+  runs inside an AppContainer now, so the one description of what a session may
+  reach has a third rendering and there is no unsandboxed session on any
+  platform — the note is gone from the composer, the session pane and the
+  Terminal pane, and the value the three drew it from is gone with it. What is
+  different about this rendering is that reach is an access-control entry on the
+  human's own directories rather than a mount or a policy, so a container is per
+  Conversation, goes with the Worktree, and is swept at the next startup where a
+  crash left one standing.)
 - **Single user, no app-level auth; the tailnet is the perimeter.** Unchanged
   from askance.
 - **Fresh database.** No import of askance history.

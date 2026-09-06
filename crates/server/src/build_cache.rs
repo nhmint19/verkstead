@@ -127,7 +127,7 @@ fn compiling_home(data_dir: &Path) -> PathBuf {
 /// one to reach, and the workbench saying compiles are not cached.
 ///
 /// A function of the platform rather than a `cfg!`, for the reason
-/// [`crate::sessions::unsandboxed_on`] is one: the arm this machine will never
+/// [`crate::platform::Platform`] is a value: the arm this machine will never
 /// run is still an arm its tests call.
 pub fn compiles_through_an_sccache(platform: Platform) -> bool {
     match platform {

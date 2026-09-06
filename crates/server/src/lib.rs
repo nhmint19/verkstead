@@ -529,35 +529,6 @@ pub fn router_watching(pool: SqlitePool, watched: WatchedPaths, data_dir: PathBu
     )
 }
 
-/// The same again, answering as a build whose sessions run outside a Sandbox
-/// does — which today is a Windows one.
-///
-/// The arm the machine running these tests will never be, stood up so that they
-/// can ask it: nothing is refused, and every Conversation the viewer is handed
-/// says the session it would start has the human's own account's reach. A rule
-/// about the build rather than about the platform's filesystem, so it is asked
-/// wherever the suite runs — see [`sessions::unsandboxed_on`], which is where a
-/// real server's own answer comes from.
-///
-/// Watching `watched` and keeping what it makes in `data_dir`, as
-/// [`router_watching`] does: what these tests read is a Conversation with a
-/// Repo behind it.
-pub fn router_running_unsandboxed(
-    pool: SqlitePool,
-    watched: WatchedPaths,
-    data_dir: PathBuf,
-) -> Router {
-    routed(
-        pool,
-        updates::Updates::nothing_learned(),
-        watched,
-        nothing_bound(),
-        data_dir,
-        sessions::Sessions::unsandboxed_here(),
-        Gh::on_path(),
-    )
-}
-
 /// The same, over the whole of what the *installation* configured — the Watched
 /// Paths its flags named and the Sandbox Configuration binds beside them — and
 /// reaching GitHub through `gh`.

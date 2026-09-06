@@ -1289,26 +1289,6 @@ ready_to_grill: boolean,
  */
 compiles_uncached: boolean, 
 /**
- * Whether a session on this Conversation runs outside a Sandbox — with the
- * human's own account's reach rather than inside the boundary the product
- * promises.
- *
- * True on a Windows build and nowhere else, and only until the Sandbox
- * lands there: the pseudo-terminal came first, so a Windows session runs
- * the agent as an ordinary process in the meantime. Said rather than
- * hidden, because what is different about it is the one thing a human
- * would want to know before pressing anything.
- *
- * A fact about the build rather than about this Conversation, and the same
- * answer on every Conversation one server sends. Carried here for the
- * reason [`ConversationView::compiles_uncached`] is: it is read where the
- * work is started from, and nothing else on this payload says it. One
- * value, drawn in three places — above the press that starts the work,
- * beside the session's own terminal, and on a Conversation Terminal's
- * pane, a shell in the same nothing.
- */
-unsandboxed: boolean, 
-/**
  * Whether there is driving to start again: the Conversation is in a state
  * something ought to be driving, and nothing is.
  *
