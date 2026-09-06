@@ -27,6 +27,16 @@
 //! that way, no grant above can reach into the tree at all — and the deny says
 //! in words what the missing grant would only imply, so an entry re-granted
 //! above by some other hand still refuses.
+//!
+//! **And it is put back as it was, copies and all** — see [`restored`]. Those
+//! copies are the whole cost of the mechanism, and they are on a directory of
+//! the human's rather than of Verkstead's: left behind, a second Conversation
+//! would copy them down in its turn and a third would copy those, so one
+//! directory of theirs would grow a few entries every time a Conversation
+//! closed and stop following anything they later changed above it. So putting
+//! the inheritance back is followed by taking off every entry of the
+//! directory's own that says exactly what one it inherits says, which is the
+//! copies and nothing else.
 
 use std::io;
 use std::path::Path;
@@ -157,13 +167,8 @@ pub(crate) fn write(entries: &[Entry], sid: &str) -> io::Result<()> {
 /// container has already ended by the time anything could be refused. An entry
 /// that will not come off is named in the log and the rest go.
 ///
-/// **What a refused path is left as is what `icacls` leaves one.** Cutting its
-/// inheritance kept the entries it had been given from above as its own — that
-/// being the only way to cut it without taking the human's own reach away with
-/// it — and putting the inheritance back does not know which of the entries
-/// there now were those copies. So they stay beside the ones that come back
-/// from above: the same reach, said twice, on the one directory a description
-/// ever refuses.
+/// **A refused path is left as it was found**, copies and all — see
+/// [`restored`], which is where the whole of that is.
 pub(crate) fn strip(entries: &[Entry], sid: &str) {
     let Ok(sid) = Sid::of(sid) else {
         return;
@@ -177,11 +182,11 @@ pub(crate) fn strip(entries: &[Entry], sid: &str) {
         }
 
         // A refusal cut the inheritance on that directory as well as writing a
-        // deny, so taking it back is putting the inheritance back — see this
-        // module's own documentation, and [`refuse`].
+        // deny, so taking it back is more than taking an entry off — see
+        // [`restored`], and [`refuse`] for what it is undoing.
         let taken = match entry.wanted {
             Wanted::Granted(_) => revoked(&sid, &entry.path, DACL_SECURITY_INFORMATION),
-            Wanted::Refused => revoked(&sid, &entry.path, UNPROTECTED_DACL_SECURITY_INFORMATION),
+            Wanted::Refused => restored(&sid, &entry.path),
         };
 
         if let Err(error) = taken {
@@ -266,6 +271,104 @@ fn refuse(sid: &Sid, path: &Path) -> io::Result<()> {
     )
 }
 
+/// And a refused path put back the way it was found: the deny taken off, the
+/// inheritance the refusal cut put back on, and the copies it made taken off
+/// with them.
+///
+/// **Three steps because the second one has to happen before the third can
+/// see.** What [`refuse`] copied down are the entries the directory was
+/// inheriting at the time, kept as its own so that cutting the inheritance took
+/// nothing away from the human — and while the inheritance is still cut there
+/// is nothing to tell those copies apart from entries the directory always had
+/// of its own. Putting the inheritance back is what makes them tellable: the
+/// ones from above come back marked as inherited, and a copy is then an entry
+/// of the directory's own that says exactly what one of them says.
+///
+/// **A copy whose original has changed is left as an entry of the directory's
+/// own**, which is the one case this does not put back exactly. Somebody who
+/// re-cut the account's permissions while a Conversation was open would find
+/// the old reach standing on this one directory rather than the new one — kept
+/// rather than dropped, because an entry that matches nothing above it is
+/// indistinguishable from one they wrote there themselves, and losing a
+/// human's own entry is the worse of the two mistakes.
+fn restored(sid: &Sid, path: &Path) -> io::Result<()> {
+    revoked(sid, path, UNPROTECTED_DACL_SECURITY_INFORMATION)?;
+
+    uncopied(path)
+}
+
+/// Every entry of `path`'s own that says exactly what one it inherits says,
+/// taken off — which is what [`refuse`] left there and nothing else.
+///
+/// **Nothing is written where nothing is a copy**, which is the ordinary answer
+/// on a path this never refused and the answer on one whose entries are all
+/// genuinely its own.
+///
+/// What goes on is the directory's own entries alone. The ones from above are
+/// not written back with them and are not lost: a list that is not protected is
+/// merged with whatever the parent hands down as it is set, which is what
+/// `icacls /reset` leaves a directory holding — and the step before this is
+/// what took the protection off.
+fn uncopied(path: &Path) -> io::Result<()> {
+    let held = Held::of(path)?;
+
+    let Some(existing) = held.list() else {
+        return Ok(());
+    };
+
+    let (from_above, its_own): (Vec<Vec<u8>>, Vec<Vec<u8>>) =
+        existing.into_iter().partition(|ace| inherited(ace));
+
+    let kept: Vec<Vec<u8>> = its_own
+        .iter()
+        .filter(|ace| !from_above.iter().any(|above| alike(ace, above)))
+        .cloned()
+        .collect();
+
+    if kept.len() == its_own.len() {
+        return Ok(());
+    }
+
+    written(path, &only(&kept)?, DACL_SECURITY_INFORMATION)
+}
+
+/// Whether an entry is one the path was handed from above rather than one of
+/// its own.
+fn inherited(ace: &[u8]) -> bool {
+    ace.get(1).is_some_and(|flags| flags & INHERITED != 0)
+}
+
+/// And whether two entries say the same thing, which is every byte of them but
+/// the one bit that says where an entry came from.
+fn alike(one: &[u8], other: &[u8]) -> bool {
+    one.len() == other.len()
+        && one.len() > 1
+        && one[0] == other[0]
+        && one[1] | INHERITED == other[1] | INHERITED
+        && one[2..] == other[2..]
+}
+
+/// A list holding `aces` and nothing else, in the order they are in.
+fn only(aces: &[Vec<u8>]) -> io::Result<Vec<u32>> {
+    let size = size_of::<ACL>() + aces.iter().map(Vec::len).sum::<usize>();
+    let mut list = vec![0u32; size.div_ceil(size_of::<u32>())];
+
+    if unsafe {
+        InitializeAcl(
+            list.as_mut_ptr().cast::<ACL>(),
+            u32::try_from(size).unwrap_or(u32::MAX),
+            ACL_REVISION,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+
+    added(list.as_mut_ptr().cast::<ACL>(), aces)?;
+
+    Ok(list)
+}
+
 /// A list with the container denied at the front of it and `kept` behind, in
 /// the order they were in.
 ///
@@ -303,7 +406,16 @@ fn denial(sid: &Sid, kept: &[Vec<u8>]) -> io::Result<Vec<u32>> {
         return Err(io::Error::last_os_error());
     }
 
-    for ace in kept {
+    added(acl, kept)?;
+
+    Ok(list)
+}
+
+/// `aces` put on the end of `acl`, in the order they are in.
+///
+/// Safety: `acl` is a list this file has just initialised with room for them.
+fn added(acl: *mut ACL, aces: &[Vec<u8>]) -> io::Result<()> {
+    for ace in aces {
         if unsafe {
             AddAce(
                 acl,
@@ -318,7 +430,7 @@ fn denial(sid: &Sid, kept: &[Vec<u8>]) -> io::Result<Vec<u32>> {
         }
     }
 
-    Ok(list)
+    Ok(())
 }
 
 /// Whether `path` already says what a grant of `rights` would say.
@@ -604,6 +716,49 @@ mod tests {
         // And an entry of a shape whose SID is somewhere else is one nothing
         // here claims to know — see [`ALLOWED`].
         assert_eq!(whose(&[5, 3, 8, 0, 0, 0, 0, 0, 9]), None);
+    }
+
+    /// The inheritance a grant is written with, as a header keeps its flags:
+    /// one byte, where the constant a call is handed is a word.
+    const BOTH_WAYS: u8 = SUB_CONTAINERS_AND_OBJECTS_INHERIT as u8;
+
+    /// One entry as this file builds one for a test: a kind, the flags, a mask
+    /// and a SID standing for whoever.
+    fn ace(kind: u8, flags: u8, mask: u32, whose: u8) -> Vec<u8> {
+        let mut ace = vec![kind, flags, 12, 0];
+
+        ace.extend_from_slice(&mask.to_le_bytes());
+        ace.extend_from_slice(&[1, 2, 3, whose]);
+
+        ace
+    }
+
+    /// And a copy is told from what it is a copy of by every byte but the one
+    /// bit that says where an entry came from — which is what [`uncopied`]
+    /// turns on.
+    #[test]
+    fn an_entry_is_a_copy_of_one_it_says_the_same_thing_as() {
+        const EVERYTHING: u32 = 0x001f_01ff;
+
+        let above = ace(ALLOWED, BOTH_WAYS | INHERITED, EVERYTHING, 4);
+        let copy = ace(ALLOWED, BOTH_WAYS, EVERYTHING, 4);
+
+        assert!(inherited(&above));
+        assert!(!inherited(&copy));
+        assert!(alike(&copy, &above));
+
+        // And two that say different things are two entries: a copy taken off
+        // in error is a human's own reach taken off their own directory.
+        for (what, other) in [
+            ("a narrower one", ace(ALLOWED, BOTH_WAYS, 0x0012_0089, 4)),
+            ("somebody else's", ace(ALLOWED, BOTH_WAYS, EVERYTHING, 5)),
+            ("one that denies", ace(DENIED, BOTH_WAYS, EVERYTHING, 4)),
+        ] {
+            assert!(
+                !alike(&other, &above),
+                "{what} is not a copy of what is above"
+            );
+        }
     }
 
     /// An identity this machine cannot read is the whole description refused,

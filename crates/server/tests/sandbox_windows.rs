@@ -441,6 +441,17 @@ impl Grilling {
         self.home.path().join("Documents")
     }
 
+    /// The account's own skills, on the host: the one path a description
+    /// refuses rather than grants.
+    ///
+    /// The real directory rather than the name a session finds it under. What
+    /// the description names is the path inside the profile, which is inside a
+    /// junction — and a junction is followed, so the entry lands here, which is
+    /// where a reader with `icacls` would go looking for it.
+    fn their_skills(&self) -> PathBuf {
+        self.account.join(".claude").join("skills")
+    }
+
     /// The directories of the human's and the machine's own that this
     /// fixture's description grants — which is what a container's ending has to
     /// leave as it found them.
@@ -1031,13 +1042,22 @@ async fn a_second_conversations_worktree_is_refused_to_the_firsts_session() {
 ///
 /// The kinds are the ones this fixture's description names: the Worktree and the
 /// git directory behind it, the account, the skills, the image and the two
-/// configured binds. A `PATH` entry under the human's profile is the same kind
-/// of entry as the skills — a read-only grant on a real directory — and is in no
-/// description here, this fixture's human profile being a temporary directory
-/// that nothing on the machine's `PATH` is under.
+/// configured binds — and beside them the one path a description refuses rather
+/// than grants, which is left as it was found rather than merely un-denied.
+///
+/// A `PATH` entry under the human's profile is the same kind of entry as the
+/// skills — a read-only grant on a real directory — and is in no description
+/// here, this fixture's human profile being a temporary directory that nothing
+/// on the machine's `PATH` is under.
 #[tokio::test]
 async fn closing_a_conversation_takes_its_profile_and_every_entry_written_for_it() {
     let fixture = grilling().await;
+
+    // Read before anything is written, because what a refusal has to leave
+    // behind is this and not merely the absence of a deny — see the server's
+    // `sandbox::granting::writing::restored`.
+    let refused = fixture.their_skills();
+    let as_it_was = listed(&refused);
 
     let (rendering, closing) = fixture
         .sandbox()
@@ -1054,7 +1074,7 @@ async fn closing_a_conversation_takes_its_profile_and_every_entry_written_for_it
     let name = container::profile(fixture.state.path(), fixture.conversation.id);
     let granted = fixture.granted();
 
-    for path in &granted {
+    for path in granted.iter().chain([&refused]) {
         assert!(
             names(&sid, &name, path),
             "{} should be carrying an entry for the session's own identity \
@@ -1068,7 +1088,7 @@ async fn closing_a_conversation_takes_its_profile_and_every_entry_written_for_it
     // close that reaches it.
     containers::remove(fixture.state.path(), fixture.conversation.id);
 
-    for path in &granted {
+    for path in granted.iter().chain([&refused]) {
         assert!(
             !names(&sid, &name, path),
             "{} should have been left as the human's own again, and it says: {}",
@@ -1076,6 +1096,17 @@ async fn closing_a_conversation_takes_its_profile_and_every_entry_written_for_it
             listed(path),
         );
     }
+
+    // And the refused one down to the entry, which the assertion above cannot
+    // see: cutting the inheritance kept what the directory was inheriting as
+    // its own, and a close that put the inheritance back and left those copies
+    // would grow this list by a few entries every time a Conversation ended.
+    assert_eq!(
+        listed(&refused),
+        as_it_was,
+        "the one directory a description refuses should read exactly as it did \
+         before the container was made",
+    );
 
     assert!(
         Container::named(&name).is_ok(),
@@ -1102,6 +1133,9 @@ async fn closing_a_conversation_takes_its_profile_and_every_entry_written_for_it
 async fn a_container_a_crash_left_behind_is_swept_at_the_next_startup() {
     let fixture = grilling().await;
 
+    let refused = fixture.their_skills();
+    let as_it_was = listed(&refused);
+
     let (rendering, closing) = fixture
         .sandbox()
         .command(&[POWERSHELL])
@@ -1125,7 +1159,7 @@ async fn a_container_a_crash_left_behind_is_swept_at_the_next_startup() {
     // where they are, and this process stops knowing about either.
     container::forgotten(fixture.state.path(), fixture.conversation.id);
 
-    for path in &granted {
+    for path in granted.iter().chain([&refused]) {
         assert!(
             names(&sid, &name, path),
             "{} should still be carrying the entry a crash left on it",
@@ -1136,7 +1170,7 @@ async fn a_container_a_crash_left_behind_is_swept_at_the_next_startup() {
     // What the next server does before it serves anything.
     containers::swept(&fixture.pool, fixture.state.path()).await;
 
-    for path in &granted {
+    for path in granted.iter().chain([&refused]) {
         assert!(
             !names(&sid, &name, path),
             "{} should have been left as the human's own again, and it says: {}",
@@ -1144,6 +1178,17 @@ async fn a_container_a_crash_left_behind_is_swept_at_the_next_startup() {
             listed(path),
         );
     }
+
+    // Down to the entry on the one path a description refuses, the sweep having
+    // exactly the close's job here and no more of the description to do it
+    // from — see the close's own test, where the reason this is asserted
+    // separately is.
+    assert_eq!(
+        listed(&refused),
+        as_it_was,
+        "the sweep should leave the account's own skills reading as they did \
+         before the container was made",
+    );
 
     assert!(
         Container::named(&name).is_ok(),
