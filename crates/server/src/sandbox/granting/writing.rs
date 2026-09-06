@@ -39,25 +39,37 @@
 //! copies and nothing else.
 //!
 //! **Except on a directory that was taking nothing from above to begin
-//! with**, which is the one thing none of that can read off the list in front
-//! of it — see [`inheriting`], which is why the answer is read before the
-//! description is written and carried with the entries into the record. A
-//! Windows filesystem holds two ages of the same idea: on a tree whose lists
-//! were written the way Windows has written them since automatic inheritance
-//! arrived, what a directory takes from above is marked as taken from above;
-//! on an older one — which is what the `windows-2025` runner's temporary
-//! directory is — the same entries were copied down unmarked when the
-//! directory was made, and are the directory's own as far as anything can
-//! tell. Granting the directory *above* one of those is what converts it:
-//! Windows recomputes the tree and the entries arrive a second time, marked.
-//! So a refusal reading only the list in front of it would find entries from
-//! above that were not there when the session started, copy them down, and —
-//! putting the inheritance back at the end — take the directory's *own*
-//! entries off as though they were the copies, leaving a directory of the
-//! human's holding nothing of its own and following whatever is above it.
-//! Read first, the answer is what it was: a directory that was inheriting has
-//! its inheritance cut and given back, and one that was not keeps its list its
-//! own at both ends.
+//! with**, which is the one thing none of that can read off the list once the
+//! inheritance has been cut — see [`inheriting`], which is why the answer is
+//! read before the description is written and carried with the entries into
+//! the record. A Windows filesystem holds two ages of the same idea: on a tree
+//! whose lists were written the way Windows has written them since automatic
+//! inheritance arrived, what a directory takes from above is marked as taken
+//! from above; on an older one — which is what the `windows-2025` runner's
+//! temporary directory is — the same entries were copied down unmarked when
+//! the directory was made, and are the directory's own as far as anything can
+//! tell. On the first, putting the inheritance back is what gives the human
+//! their reach back and the copies are what then have to go; on the second
+//! there is no inheritance to put back and the whole list is theirs to keep.
+//! So a directory that was inheriting has its inheritance cut and given back,
+//! and one that was not keeps its list its own at both ends.
+//!
+//! **And a refusal is written before any grant of the same description**,
+//! which is what keeps that answer true of the list the refusal is looking at.
+//! Writing a grant on a directory makes Windows walk the tree beneath it and
+//! bring every list under it up to date, and on a tree of the older age that
+//! walk is a conversion rather than an addition: the entries a directory below
+//! holds of its own are the very ones the parent hands down, so they are
+//! re-marked as taken from above. A refusal written after the grant on the
+//! account would therefore find a directory of the human's whose every entry
+//! now says it came from somewhere else, keep none of them as its own, and
+//! leave — once the inheritance was put back at the end — a directory holding
+//! nothing of its own and following whatever is above it. Written first, what
+//! [`refuse`] sees is the list [`inheriting`] saw, and the grant that follows
+//! walks past a directory that is already protected. [`strip`] undoes it the
+//! other way round: every grant comes off before a refusal is put back, so
+//! what [`uncopied`] tells a copy from is the human's own list above it rather
+//! than one still carrying this container's grant.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -140,13 +152,17 @@ const INHERITED: u8 = 0x10;
 /// Which of the paths `entries` refuses are taking entries from above, read
 /// before a word of the description has been written.
 ///
-/// **What [`refuse`] and [`restored`] between them cannot read off the list
-/// in front of them**, and the reason it is read here rather than there is
-/// this module's own: a grant written on the directory a refused path is
-/// inside makes Windows recompute the tree, so by the time the refusal is
-/// written the list can be carrying entries from above that were not there
-/// when the session started. Read first, the answer is the one about the
+/// **What [`restored`] cannot read off the list in front of it**, which is the
+/// reason it is read here at all: a refusal cuts the inheritance on the path
+/// it refuses, so from the moment a container exists that directory reads as
+/// one that was never inheriting anything — and putting an inheritance back
+/// that was never cut takes the directory's own entries off it. Read while
+/// there is still an answer to read, and the answer is the one about the
 /// machine as the session found it.
+///
+/// **[`refuse`] is looking at the same list**, because a description writes
+/// its refusals before its grants — see this module's own documentation, which
+/// is where the reason for that order is.
 ///
 /// **And it is the caller's to keep**, because the taking-back is a later
 /// server's as often as it is this one's: what comes back is remembered with
@@ -187,13 +203,23 @@ pub(crate) fn inheriting(entries: &[Entry]) -> Vec<PathBuf> {
 /// so what comes back says which path and what the machine said about it, and
 /// the caller starts nothing.
 ///
+/// **The refusals go on first and the grants after them**, which is an order
+/// of this function's own rather than the description's — see this module's
+/// own documentation. A grant makes Windows bring every list below it up to
+/// date, and on a directory the same description then refuses that walk is
+/// what puts the list out of step with what [`inheriting`] read of it a moment
+/// earlier. Refused first, the directory is protected before any grant above
+/// it is written and the walk goes past it. Nothing else turns on the order:
+/// a path said twice is already the second one by the time a description comes
+/// to entries at all — see [`super::super::Sandbox::surface`].
+///
 /// `cut` is what [`inheriting`] said of these same entries a moment ago, which
 /// is what a refusal needs and cannot ask for itself.
 pub(crate) fn write(entries: &[Entry], sid: &str, cut: &[PathBuf]) -> io::Result<()> {
     let sid = Sid::of(sid)?;
     let _one = one_at_a_time();
 
-    for entry in entries {
+    for entry in refusals_first(entries) {
         if !entry.path.exists() {
             continue;
         }
@@ -230,6 +256,12 @@ pub(crate) fn write(entries: &[Entry], sid: &str, cut: &[PathBuf]) -> io::Result
 /// [`restored`], which is where the whole of that is. `cut` is what
 /// [`inheriting`] said of those paths before any of this was written, read back
 /// off the record where this is a later server's doing.
+///
+/// **And it is put back after every grant has come off**, which is [`write`]'s
+/// order the other way round and is [`uncopied`]'s to need: what tells a copy
+/// from an entry of the directory's own is that the list above says the same
+/// thing, so a grant of this container's still standing up there is one more
+/// thing for a copy to be told from.
 pub(crate) fn strip(entries: &[Entry], cut: &[PathBuf], sid: &str) {
     let Ok(sid) = Sid::of(sid) else {
         return;
@@ -237,7 +269,7 @@ pub(crate) fn strip(entries: &[Entry], cut: &[PathBuf], sid: &str) {
 
     let _one = one_at_a_time();
 
-    for entry in entries {
+    for entry in grants_first(entries) {
         if !entry.path.exists() {
             continue;
         }
@@ -260,6 +292,30 @@ pub(crate) fn strip(entries: &[Entry], cut: &[PathBuf], sid: &str) {
             );
         }
     }
+}
+
+/// `entries` with every refusal in front of every grant, each half in the order
+/// the description said it.
+///
+/// See [`write`], which is where the reason for the order is.
+fn refusals_first(entries: &[Entry]) -> impl Iterator<Item = &Entry> {
+    let refused = |entry: &&Entry| entry.wanted == Wanted::Refused;
+
+    entries
+        .iter()
+        .filter(refused)
+        .chain(entries.iter().filter(move |entry| !refused(entry)))
+}
+
+/// And the same list the other way round, which is what taking it all back
+/// needs — see [`strip`].
+fn grants_first(entries: &[Entry]) -> impl Iterator<Item = &Entry> {
+    let granted = |entry: &&Entry| entry.wanted != Wanted::Refused;
+
+    entries
+        .iter()
+        .filter(granted)
+        .chain(entries.iter().filter(move |entry| !granted(entry)))
 }
 
 /// `path` reachable at `reach`, and everything under it with it.
@@ -317,13 +373,14 @@ fn refuse(sid: &Sid, path: &Path, cut: bool) -> io::Result<()> {
     let kept: Vec<Vec<u8>> = existing
         .iter()
         .filter(|ace| whose(ace).is_none_or(|theirs| !sid.is(theirs)))
-        // And nothing this description put here itself. A directory that was
-        // taking nothing from above when the session started and is taking
-        // something now is one that the grant on the directory it is inside
-        // recomputed a moment ago — see this module's own documentation. Those
-        // entries are not the human's own reach to keep: copied down, they are
-        // what a restored list would then be unable to tell from the entries the
-        // directory really does hold of its own.
+        // And, on a directory that was taking nothing from above, nothing that
+        // says it came from above. There is ordinarily no such entry to leave
+        // out — this is written before any grant of the description, so what is
+        // in front of it is what [`inheriting`] read — and the one that could
+        // be there is an entry some other hand wrote above this directory in
+        // between. Copied down, it would be one more thing a restored list
+        // could not tell from an entry the directory really does hold of its
+        // own.
         .filter(|ace| cut || !inherited(ace))
         .map(|ace| {
             // Kept as the directory's own rather than as something it inherits,
@@ -910,6 +967,48 @@ mod tests {
         }
     }
 
+    /// A description is written refusals first and taken back grants first,
+    /// which is the one thing about either that is not the description's own
+    /// order — see [`write`], which is where the reason is, and
+    /// [`a_refused_directory_is_left_holding_exactly_the_entries_it_held`],
+    /// which is the machine saying the same thing by attempting it.
+    ///
+    /// Asserted on the order alone, because the two calls it belongs to write
+    /// on real directories and this is the whole of what they do differently.
+    #[test]
+    fn a_refusal_is_written_before_a_grant_and_taken_back_after_one() {
+        let entry = |path: &str, wanted| Entry {
+            path: PathBuf::from(path),
+            wanted,
+        };
+
+        let entries = vec![
+            entry("account", Wanted::Granted(Reach::ReadWrite)),
+            entry("account/skills", Wanted::Refused),
+            entry("worktree", Wanted::Granted(Reach::ReadWrite)),
+        ];
+
+        let said = |order: Vec<&Entry>| {
+            order
+                .iter()
+                .map(|entry| entry.path.display().to_string())
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            said(refusals_first(&entries).collect()),
+            ["account/skills", "account", "worktree"],
+            "a refusal goes on before the grant on the directory it is inside, \
+             and the grants keep the order the description said them in",
+        );
+
+        assert_eq!(
+            said(grants_first(&entries).collect()),
+            ["account", "worktree", "account/skills"],
+            "and comes off after it",
+        );
+    }
+
     /// An identity this machine cannot read is the whole description refused,
     /// before a single entry is written.
     ///
@@ -951,11 +1050,14 @@ mod tests {
     /// is what a refusal owes a directory of the human's own.
     ///
     /// **The grant beside it is the point rather than the setting.** Writing an
-    /// entry on the directory a refused path is inside makes Windows recompute
-    /// the tree under it, so what the refusal finds in front of it is not what
-    /// the session found a moment earlier — see this module's own
-    /// documentation, and [`inheriting`], which is read here where a session
-    /// start reads it.
+    /// entry on the directory a refused path is inside makes Windows bring
+    /// every list beneath it up to date, and on a tree of the older age that
+    /// walk re-marks the refused directory's own entries as ones it takes from
+    /// above — so a refusal written after the grant would be reading a list
+    /// that says something other than the one the session found, and would keep
+    /// none of it. What makes the two agree is the order [`write`] puts them
+    /// in; see this module's own documentation, and [`inheriting`], which is
+    /// read here where a session start reads it.
     ///
     /// Read as the list of entries rather than through `icacls`, which is what
     /// `tests/sandbox_windows.rs` asks the same question with: in here the
