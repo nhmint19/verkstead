@@ -949,11 +949,13 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
     // asks through. Here rather than with the bind, because its name comes off
     // the Data Directory — see [`pipe`] — and that is only settled above.
     //
-    // Granting nobody beyond the account this runs as: the identity a
-    // container's sessions run under is what the further argument is for, and
-    // there are no containers yet.
+    // Granting nobody beyond the account this runs as, because there are no
+    // containers yet: what it is opened against is the set this process's own
+    // containers put themselves into as they are made, so a Conversation
+    // starting its first session an hour from now is granted then — see
+    // [`pipe::Grants`].
     #[cfg(windows)]
-    let pipe = pipe::Listener::open(&data_dir, None)
+    let pipe = pipe::Listener::open(&data_dir, &pipe::Grants::of_this_process())
         .context("opening the named pipe a Windows session asks through")?;
 
     tracing::info!(

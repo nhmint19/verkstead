@@ -22,6 +22,14 @@
 //! — a connection from inside to `127.0.0.1` and to the machine's own address
 //! both time out. What it asks Verkstead through instead is the named pipe.
 //!
+//! **Which is why a container tells the pipe about itself as it is made.** The
+//! server opened its pipe at startup, before this profile existed, and the one
+//! thing a session inside here can reach Verkstead by is that pipe granting
+//! this identity — so the SID goes into [`crate::pipe::Grants`] the moment it
+//! is read back, and comes out of it again when the profile goes. A pipe that
+//! will not take it refuses the container, which refuses the session: a session
+//! that cannot ask is not one to start.
+//!
 //! **What creates one is what deletes it, and the entries go with it.** A
 //! [`Container`] takes back every access-control entry written for its identity
 //! and then deletes its profile as it is dropped, so a boundary proved by
@@ -194,6 +202,26 @@ impl Container {
             )));
         };
 
+        // And the pipe told, before anything is inside the container to ask
+        // through it. A session cannot dial the loopback from in there — which
+        // is the whole reason there is a pipe (ADR-0014) — so a container the
+        // pipe was never told about is one whose session can reach Verkstead by
+        // no route at all, and a session that cannot ask is refused rather than
+        // started. The profile goes with the refusal: what is left behind
+        // otherwise is a name the next attempt would be turned away by.
+        //
+        // Not through the [`Container`] being dropped, which is what would
+        // ordinarily delete it: this is called from [`held`], which is holding
+        // the lock a drop takes.
+        if let Err(refused) = crate::pipe::Grants::of_this_process().to(&sid) {
+            unsafe { DeleteAppContainerProfile(name_w.as_ptr()) };
+
+            return Err(io::Error::other(format!(
+                "the AppContainer {name} was made and the pipe a session asks Verkstead through \
+                 could not be told to grant it, so it was deleted again: {refused}"
+            )));
+        }
+
         Ok(Container {
             name: name.to_owned(),
             sid,
@@ -235,12 +263,20 @@ impl Drop for Container {
         // running — see [`held`], which replaces a profile nothing is holding.
         // Its profile is not this one's to delete, and the entries this wrote
         // are the same SID's, so they go to it rather than being taken back
-        // from under it.
+        // from under it. Nor is the pipe told to stop granting the identity:
+        // it is that container's identity as much as this one's, and what is
+        // running inside it is asking through the pipe right now.
         if let Some(taken) = profiles.get(&self.name).and_then(Weak::upgrade) {
             taken.wrote(granted);
 
             return;
         }
+
+        // The pipe before either of the two below, and for their reason: an
+        // identity still granted on a pipe whose profile has been deleted is an
+        // entry naming nobody, which is exactly what an access-control entry
+        // left behind on a directory would be.
+        crate::pipe::Grants::of_this_process().no_longer(&self.sid);
 
         // The entries first and the profile after them, which is the order the
         // probe was careful about on the human's own directories: the SID is

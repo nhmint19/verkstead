@@ -17,6 +17,23 @@
 //! human's own route, asked of the same router in this process, which is the
 //! one way in that does not put a socket back.
 //!
+//! **Except in the one test that asks why.** A pipe is only worth the trouble
+//! if the loopback really is closed to a container, and the probe found that it
+//! closes by *timing out* rather than by refusing — which a test has to be
+//! written for, because a connection that hangs and a connection that is
+//! refused look the same to a test with no deadline of its own. So
+//! [`the_loopback_is_refused_from_inside_a_container`] binds a socket that is
+//! genuinely listening, reaches it from out here to prove that it answers, and
+//! then fails to reach it from inside the same container a session runs in
+//! (ADR-0014).
+//!
+//! **And a session really is inside one now.** A Windows rendering names an
+//! AppContainer, which `std::process::Command` has no way to start — so what
+//! runs the CLI here is [`off_a_console`], the same call the server's own
+//! [`Sandbox`] work stands on. Which makes the pipe load-bearing in this file
+//! rather than merely chosen: the container is granted the pipe as it is made,
+//! and a container the pipe was never told about is refused it.
+//!
 //! **Why here rather than in the server crate's Windows sessions suite.** That
 //! suite cannot run this command at all: it is a server-crate test, so what a
 //! session finds first on its `PATH` is the test binary's own directory and
@@ -26,10 +43,9 @@
 
 mod support;
 
-use std::io::Write;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, Output};
 use std::time::{Duration, Instant};
 
 use axum::Router;
@@ -41,8 +57,9 @@ use verkstead_schema::{QuestionSet, Response};
 use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
+use verkstead_server::pipe::Grants;
 use verkstead_server::platform::Platform;
-use verkstead_server::sandbox::{Executable, Homes, Reachable, Sandbox};
+use verkstead_server::sandbox::{Executable, Homes, Reachable, Rendering, Sandbox, off_a_console};
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
 use verkstead_server::store;
@@ -72,6 +89,43 @@ answers:
   - label: Q1
     free_text: It did, over the pipe.
 ";
+
+/// How long a connection to a socket on this machine is given from out here,
+/// where it is a loopback connection to a listener in this process and takes no
+/// time at all. Long only by the standards of what it is measuring.
+const OUT_HERE: Duration = Duration::from_secs(5);
+
+/// And from inside a container, where the probe found the connection is dropped
+/// rather than refused — so this is a wait rather than a timeout, and what
+/// running out of it says is that nothing arrived.
+///
+/// Well past the round trip out here, which is a fraction of a millisecond on
+/// the same machine, and well short of the twenty-odd seconds Windows spends
+/// retrying a connection nothing answers.
+const INSIDE: Duration = Duration::from_secs(10);
+
+/// The two words the probe inside the container prints, one of which it is.
+const REACHED: &str = "the loopback answered";
+const REFUSED: &str = "the loopback did not answer";
+
+/// What a probe on this platform is handed to run at all: the names nothing on
+/// Windows starts without.
+///
+/// `crates/server/tests/container_windows.rs` keeps the same list for the same
+/// reason — a rendering is the whole of a program's environment, and a shell
+/// with no `SystemRoot` will not start.
+const NEEDED: [&str; 10] = [
+    "ComSpec",
+    "PATH",
+    "PATHEXT",
+    "SystemDrive",
+    "SystemRoot",
+    "TEMP",
+    "TMP",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+];
 
 /// A Conversation part-way through its first grilling, and the server it is
 /// asking — which it can only ask over a pipe.
@@ -199,6 +253,24 @@ impl Grilling {
         }
     }
 
+    /// Whether the server has been asked nothing at all, which is what a
+    /// session that could not open the pipe leaves behind.
+    ///
+    /// The store rather than the CLI's own complaint: what is being asked is
+    /// whether the Set got through, and a session refused the transport is one
+    /// whose Set was never written down.
+    fn nothing_was_asked(&self) -> bool {
+        self.runtime.block_on(async {
+            let pool = verkstead_server::open_database(&self.database)
+                .await
+                .unwrap();
+            let stored = store::load_set(&pool, 1).await.unwrap();
+            pool.close().await;
+
+            stored.is_none()
+        })
+    }
+
     /// Answer a Set the way the human's device does: YAML through the
     /// Conversation the Set was asked from, which is the route their browser
     /// posts to.
@@ -234,8 +306,24 @@ impl Grilling {
     }
 }
 
-/// Stand one up.
+/// Stand one up, its pipe granting every container this process makes — which
+/// is what a real server's does.
 fn grilling() -> Grilling {
+    standing(&Grants::of_this_process())
+}
+
+/// And one whose pipe was told about nobody: a server that opened its pipe and
+/// never heard of the container the session it started runs in.
+///
+/// Which is not a thing a real Verkstead does — a container tells the pipe as
+/// it is made — and is the only way to ask, on a machine where every process is
+/// the same account, whether the descriptor is what lets a session in.
+fn a_pipe_told_about_nobody() -> Grilling {
+    standing(&Grants::none())
+}
+
+/// One Conversation part-way through a grilling, its pipe granting `granting`.
+fn standing(granting: &Grants) -> Grilling {
     let watched = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
@@ -318,7 +406,7 @@ fn grilling() -> Grilling {
         // The pipe the server would have opened, named after the Data Directory
         // the database is in — and opened on this runtime, because tokio's
         // pipes register with its reactor.
-        let listener = verkstead_server::pipe::Listener::open(state.path(), None)
+        let listener = verkstead_server::pipe::Listener::open(state.path(), granting)
             .expect("nothing else holds this Data Directory's pipe");
         let pipe = listener.asked_through().to_owned();
 
@@ -378,10 +466,10 @@ fn a_windows_session_is_told_the_pipe_its_server_opened() {
     );
 }
 
-/// The whole round trip, made by the binary a session is equipped with and over
-/// the only transport it has: the Set goes through the pipe onto this
-/// Conversation's Timeline, the human answers it, and the Response comes back
-/// on the session's stdout.
+/// The whole round trip, made by the binary a session is equipped with, from
+/// inside the container a session runs in and over the only transport it has:
+/// the Set goes through the pipe onto this Conversation's Timeline, the human
+/// answers it, and the Response comes back on the session's stdout.
 #[test]
 fn a_session_asks_through_the_pipe_and_the_response_comes_back() {
     let fixture = grilling();
@@ -390,18 +478,14 @@ fn a_session_asks_through_the_pipe_and_the_response_comes_back() {
         .command(&["verkstead", "ask"])
         .expect("a session's sandbox to be one this machine can make");
 
-    let mut asking = Command::try_from(&rendering)
-        .expect("a rendering with no container")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("a session's rendering on this platform is an ordinary process");
+    assert!(
+        rendering.container().is_some(),
+        "a Windows session runs inside an AppContainer, and this one names none"
+    );
 
-    // Dropping the handle closes the pipe, which is the CLI's end of input.
-    let mut stdin = asking.stdin.take().unwrap();
-    stdin.write_all(SET.as_bytes()).unwrap();
-    drop(stdin);
+    // On a thread, because the ask does not end until the human has answered it
+    // and the human is this thread — see [`off_a_console`], which waits.
+    let asking = std::thread::spawn(move || off_a_console(&rendering, SET.as_bytes()));
 
     let asked = fixture.await_asked_set(1);
 
@@ -412,7 +496,7 @@ fn a_session_asks_through_the_pipe_and_the_response_comes_back() {
 
     fixture.answer(1, ANSWERED);
 
-    let output = asking.wait_with_output().unwrap();
+    let output = finished(asking);
     let printed = String::from_utf8(output.stdout).unwrap();
 
     assert!(
@@ -430,4 +514,123 @@ fn a_session_asks_through_the_pipe_and_the_response_comes_back() {
         1,
         "and it is the human's own answer that came back, got {response:?}"
     );
+}
+
+/// And a container the pipe was never told about cannot open it, so the same
+/// ask goes nowhere.
+///
+/// Which is what makes the test above about the descriptor rather than about
+/// this machine being permissive: every process here is the same account, so
+/// the one thing separating a session that gets in from one that does not is
+/// the entry written for its identity.
+#[test]
+fn a_container_the_pipe_was_not_told_about_cannot_open_it() {
+    let fixture = a_pipe_told_about_nobody();
+    let (rendering, _closing) = fixture
+        .sandbox()
+        .command(&["verkstead", "ask"])
+        .expect("a session's sandbox to be one this machine can make");
+
+    let asking = std::thread::spawn(move || off_a_console(&rendering, SET.as_bytes()));
+    let output = finished(asking);
+
+    assert!(
+        !output.status.success(),
+        "the ask should have failed for want of a pipe it may open, and it exited {:?} \
+         having printed:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    assert!(
+        fixture.nothing_was_asked(),
+        "and nothing of it should have reached the server"
+    );
+}
+
+/// The loopback, from inside the container a session runs in: refused, against
+/// a socket that is genuinely listening and that answers this process at once.
+///
+/// **The deadline is the probe's own.** ADR-0014 records that a connection from
+/// inside a container times out rather than being refused outright, so what
+/// says *refused* here is a connect that did not finish inside a wait far
+/// longer than the one out here takes — a test with no deadline of its own
+/// would hang instead of failing, and one with no listener to reach would be
+/// proving that nothing is nothing.
+#[test]
+fn the_loopback_is_refused_from_inside_a_container() {
+    let fixture = grilling();
+    let (rendering, _closing) = fixture
+        .sandbox()
+        .command(&["verkstead", "guide"])
+        .expect("a session's sandbox to be one this machine can make");
+
+    let container = rendering
+        .container()
+        .expect("a Windows session runs inside an AppContainer")
+        .to_owned();
+
+    // A socket nothing serves anything on: what is being asked is whether a
+    // connection can be made at all, and a listener with a backlog answers that
+    // without anything having to accept.
+    let listening = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("a port of this machine's");
+    let address = listening.local_addr().unwrap();
+
+    std::net::TcpStream::connect_timeout(&address, OUT_HERE)
+        .expect("this process, outside every container, to reach a socket on its own machine");
+
+    let mut probe = Rendering::running("powershell.exe");
+    probe
+        .arg("-NoProfile")
+        .arg("-NonInteractive")
+        .arg("-Command")
+        .arg(dialling(address))
+        .inside(&container);
+
+    // The names nothing on Windows starts without, taken from this process's
+    // own environment: a rendering is the whole of what a program is handed,
+    // and what is under test here is the network rather than what a session may
+    // reach.
+    for name in NEEDED {
+        if let Some(value) = std::env::var_os(name) {
+            probe.set(name, value);
+        }
+    }
+
+    let output = off_a_console(&probe, b"").expect("a probe inside the session's container");
+    let said = String::from_utf8_lossy(&output.stdout).into_owned();
+
+    assert!(
+        said.contains(REFUSED),
+        "a container should not reach {address}, and the probe said: {said:?} \
+         having complained: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// What the probe above runs: a connection to `address`, waited out, and one
+/// word about how it went.
+///
+/// `ConnectAsync` rather than the blocking connect, because the wait is the
+/// whole point: a connect that is being dropped rather than refused comes back
+/// only when Windows has finished retrying it, which is far longer than a test
+/// should sit on.
+fn dialling(address: SocketAddr) -> String {
+    format!(
+        "$client = New-Object System.Net.Sockets.TcpClient; \
+         try {{ $reached = $client.ConnectAsync('{}', {}).Wait({}) }} \
+         catch {{ $reached = $false }}; \
+         if ($reached) {{ Write-Output '{REACHED}' }} else {{ Write-Output '{REFUSED}' }}",
+        address.ip(),
+        address.port(),
+        INSIDE.as_millis(),
+    )
+}
+
+/// What a thread running a rendering off a console came back with.
+fn finished(asking: std::thread::JoinHandle<std::io::Result<Output>>) -> Output {
+    asking
+        .join()
+        .expect("the thread running the session to have finished rather than panicked")
+        .expect("a rendering this machine can start")
 }
