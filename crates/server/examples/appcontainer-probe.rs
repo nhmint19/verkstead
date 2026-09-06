@@ -78,9 +78,9 @@ mod probe {
         CreateAppContainerProfile, DeleteAppContainerProfile,
     };
     use windows_sys::Win32::Security::{
-        ACL, DACL_SECURITY_INFORMATION, FreeSid, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
-        SECURITY_CAPABILITIES, SID_AND_ATTRIBUTES, SUB_CONTAINERS_AND_OBJECTS_INHERIT, TOKEN_QUERY,
-        TOKEN_USER, TokenUser,
+        ACL, DACL_SECURITY_INFORMATION, FreeSid, NO_INHERITANCE, PSECURITY_DESCRIPTOR, PSID,
+        SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES, SID_AND_ATTRIBUTES,
+        SUB_CONTAINERS_AND_OBJECTS_INHERIT, TOKEN_QUERY, TOKEN_USER, TokenUser,
     };
     use windows_sys::Win32::Storage::FileSystem::{
         CreateFileW, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE, OPEN_EXISTING,
@@ -174,13 +174,18 @@ mod probe {
 
         say(&format!("playground     = {}", playground.display()));
 
-        // The playground itself readable so the container can walk into it, and
-        // then the leaves at the reach the description would give each of them.
-        // Nothing above the playground is granted anything at all, which is the
-        // question: a machine where an AppContainer needs traverse on every
-        // ancestor is a machine where the rendering has to grant the human's
-        // whole profile on the way to a Worktree.
-        written.grant(&playground, FILE_GENERIC_READ | FILE_GENERIC_EXECUTE);
+        // The playground itself walkable and **nothing under it made reachable
+        // by that**, which is the whole reason this one is `grant_here`: an
+        // inheriting grant here would reach every path below, and the ungranted
+        // one this lays out to ask about would be granted after all. The first
+        // run of this probe made exactly that mistake and reported an ungranted
+        // directory as readable.
+        //
+        // Nothing *above* the playground is granted anything at all, which is
+        // the other question: a machine where an AppContainer needs traverse on
+        // every ancestor is a machine where the rendering has to grant the
+        // human's whole profile on the way to a Worktree.
+        written.grant_here(&playground, FILE_GENERIC_READ | FILE_GENERIC_EXECUTE);
         written.grant(
             &playground.join("granted-rw"),
             FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE,
@@ -200,6 +205,8 @@ mod probe {
         // asked.
         let held = exe.parent().unwrap_or(Path::new(".")).to_owned();
         written.grant(&held, FILE_GENERIC_READ | FILE_GENERIC_EXECUTE);
+
+        say(&format!("entries        = {}", written.refusals()));
 
         // Something outside to dial, on both of the addresses the ADR wonders
         // about: the loopback, and this machine's own.
@@ -284,7 +291,16 @@ mod probe {
         // its own directory granted. The first answer is what says whether
         // Program Files really is readable by every container; the second is
         // what says whether a per-user install can be granted instead.
-        for tool in ["node", "pwsh", "git"] {
+        //
+        // **Windows PowerShell is in the list beside `pwsh`**, and it is the
+        // one that cannot be missing: ADR-0014 opens a Conversation Terminal on
+        // `pwsh` where somebody installed PowerShell 7 and on Windows
+        // PowerShell where nobody has, so the fallback is on every machine and
+        // is what has to work. `node` and `npm` are there because an agent is
+        // ordinarily an npm install, which is the per-user case the grant is
+        // for — a machine without them leaves that question open rather than
+        // answered, and says so.
+        for tool in ["node", "npm", "pwsh", "powershell", "git"] {
             say(&format!(
                 "tool {tool:10} = {}",
                 ran_tool(&profile, tool, &mut written)
@@ -450,29 +466,45 @@ mod probe {
         Ok(())
     }
 
+    /// What each tool is asked, which is whatever that tool answers.
+    ///
+    /// `--version` for the three that take one, and a command that does nothing
+    /// for the two shells: Windows PowerShell has no `--version` and would take
+    /// it for a script to run, so a machine where it works perfectly would
+    /// report it as having failed.
+    fn asks(tool: &str) -> Vec<OsString> {
+        match tool {
+            "pwsh" | "powershell" => ["-NoProfile", "-NonInteractive", "-Command", "exit 0"]
+                .iter()
+                .map(OsString::from)
+                .collect(),
+            _ => vec![OsString::from("--version")],
+        }
+    }
+
     /// One tool, asked twice: as the machine keeps it, and with its own
     /// directory granted.
     fn ran_tool(profile: &Profile, tool: &str, written: &mut Written) -> String {
         let Some(path) = on_the_path(tool) else {
-            return String::from("not on this machine's PATH");
+            return String::from("not on this machine's PATH, so this went unasked");
         };
 
         let held = path.parent().unwrap_or(Path::new(".")).to_owned();
         let under_profile = home().is_some_and(|home| held.starts_with(home));
 
-        let version = [OsString::from("--version")];
+        let asked = asks(tool);
 
-        let ungranted = match started(profile, path.as_os_str(), &version, None, true) {
+        let ungranted = match started(profile, path.as_os_str(), &asked, None, true) {
             Ok(outcome) if outcome.exit == Some(0) => String::from("ran"),
-            Ok(outcome) => format!("exited {:?}", outcome.exit),
+            Ok(outcome) => format!("exited {}", ended(outcome.exit)),
             Err(error) => format!("refused: {error}"),
         };
 
         written.grant(&held, FILE_GENERIC_READ | FILE_GENERIC_EXECUTE);
 
-        let granted = match started(profile, path.as_os_str(), &version, None, true) {
+        let granted = match started(profile, path.as_os_str(), &asked, None, true) {
             Ok(outcome) if outcome.exit == Some(0) => String::from("ran"),
-            Ok(outcome) => format!("exited {:?}", outcome.exit),
+            Ok(outcome) => format!("exited {}", ended(outcome.exit)),
             Err(error) => format!("refused: {error}"),
         };
 
@@ -583,12 +615,19 @@ mod probe {
             return format!("no console: CreatePseudoConsole said {opened:#010x}");
         }
 
-        // The console holds its own copies now, and ours are what would keep
-        // the read below waiting forever.
+        // The console holds its own copies of the two ends it was given, and
+        // ours are what would keep the read below waiting forever.
         drop(printing);
         drop(typing);
-        drop(writing);
 
+        // **`writing` is not dropped with them**, and the first run of this
+        // probe is why. It is this end of the console's *input*, and a console
+        // whose input has no writer left is one at end of file from the moment
+        // it opens: the shell inside read end-of-input before it had printed
+        // anything, and died on `STATUS_CONTROL_C_EXIT` — which read as a
+        // console that does not survive the boundary and was nothing of the
+        // sort. So it is held until the process has gone, exactly as a real
+        // terminal holds it for as long as the session runs.
         let marker = format!("conpty-{}", std::process::id());
         let comspec = std::env::var("ComSpec").unwrap_or_else(|_| String::from("cmd.exe"));
 
@@ -604,8 +643,10 @@ mod probe {
             false,
         );
 
-        // The console goes before the read: what it holds of the printing end
+        // And now the process has gone, so the input this was holding open for
+        // it can go too — and then the console, whose copy of the printing end
         // is what stands between a drained pipe and an end of file.
+        drop(writing);
         unsafe { ClosePseudoConsole(console) };
 
         let said = drained(&reading);
@@ -617,10 +658,26 @@ mod probe {
                 String::from("the marker came back off the console, so a console handed in works")
             }
             Ok(outcome) => format!(
-                "started and exited {:?}, but the marker never came back; the console said {:?}",
-                outcome.exit,
+                "started and exited {}, but the marker never came back; the console said {:?}",
+                ended(outcome.exit),
                 said.chars().take(200).collect::<String>()
             ),
+        }
+    }
+
+    /// How a process ended, in the spelling a Windows status code is read in.
+    ///
+    /// Decimal is what a status code is least legible as: `3221225786` says
+    /// nothing and `0xC000013A` is one search away from being
+    /// `STATUS_CONTROL_C_EXIT`. The two that this probe has actually seen are
+    /// named outright, because they are the two a reader will meet.
+    fn ended(exit: Option<u32>) -> String {
+        match exit {
+            None => String::from("nothing — it was still running when the wait ran out"),
+            Some(0) => String::from("0"),
+            Some(0xC000_013A) => String::from("0xC000013A (STATUS_CONTROL_C_EXIT)"),
+            Some(0xC000_0022) => String::from("0xC0000022 (STATUS_ACCESS_DENIED)"),
+            Some(code) => format!("{code:#010x}"),
         }
     }
 
@@ -953,6 +1010,12 @@ mod probe {
     struct Written {
         sid: PSID,
         paths: Vec<PathBuf>,
+
+        /// And the ones that would not be written, which is a fact about this
+        /// machine rather than a failure to report at the end: a per-user
+        /// process cannot write the access-control list of a directory it does
+        /// not own, and Program Files is the case that matters.
+        refused: Vec<String>,
     }
 
     impl Written {
@@ -960,6 +1023,7 @@ mod probe {
             Written {
                 sid,
                 paths: Vec::new(),
+                refused: Vec::new(),
             }
         }
 
@@ -967,19 +1031,45 @@ mod probe {
         /// everything under it — which is what a rendering granting a directory
         /// means by granting it.
         fn grant(&mut self, path: &Path, rights: u32) {
-            if self.entry(path, rights, SET_ACCESS).is_ok() {
-                self.paths.push(path.to_owned());
-            }
+            self.wrote(path, rights, SET_ACCESS, SUB_CONTAINERS_AND_OBJECTS_INHERIT);
+        }
+
+        /// And `path` alone reachable, with nothing under it made reachable by
+        /// its being so.
+        ///
+        /// Which is what a directory a session only has to *walk through* gets,
+        /// and the difference matters more than it looks: an inheriting grant
+        /// on a directory grants everything beneath it, so a playground laid
+        /// out under one would have no ungranted path left in it to ask about.
+        fn grant_here(&mut self, path: &Path, rights: u32) {
+            self.wrote(path, rights, SET_ACCESS, NO_INHERITANCE);
         }
 
         /// And `path` refused, whatever a grant above it says.
         fn deny(&mut self, path: &Path) {
-            if self
-                .entry(path, FILE_GENERIC_READ | FILE_GENERIC_WRITE, DENY_ACCESS)
-                .is_ok()
-            {
-                self.paths.push(path.to_owned());
+            self.wrote(
+                path,
+                FILE_GENERIC_READ | FILE_GENERIC_WRITE,
+                DENY_ACCESS,
+                SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+            );
+        }
+
+        /// One entry written down, or why it could not be.
+        fn wrote(&mut self, path: &Path, rights: u32, mode: i32, inheritance: u32) {
+            match self.entry(path, rights, mode, inheritance) {
+                Ok(()) => self.paths.push(path.to_owned()),
+                Err(error) => self.refused.push(format!("{} ({error})", path.display())),
             }
+        }
+
+        /// Everything that would not be written, for the line that says so.
+        fn refusals(&self) -> String {
+            if self.refused.is_empty() {
+                return String::from("every entry this probe asked for was written");
+            }
+
+            format!("could not be written: {}", self.refused.join("; "))
         }
 
         /// Everything written, unwritten. Hands back how many paths it cleared.
@@ -988,7 +1078,7 @@ mod probe {
             let mut cleared = 0;
 
             for path in &paths {
-                if self.entry(path, 0, REVOKE_ACCESS).is_ok() {
+                if self.entry(path, 0, REVOKE_ACCESS, NO_INHERITANCE).is_ok() {
                     cleared += 1;
                 }
             }
@@ -998,7 +1088,13 @@ mod probe {
 
         /// One entry for the container, added to whatever `path`'s access
         /// control list already says.
-        fn entry(&self, path: &Path, rights: u32, mode: i32) -> Result<(), String> {
+        fn entry(
+            &self,
+            path: &Path,
+            rights: u32,
+            mode: i32,
+            inheritance: u32,
+        ) -> Result<(), String> {
             let name = wide(path.as_os_str());
 
             let mut existing: *mut ACL = ptr::null_mut();
@@ -1024,7 +1120,7 @@ mod probe {
             let access = EXPLICIT_ACCESS_W {
                 grfAccessPermissions: rights,
                 grfAccessMode: mode,
-                grfInheritance: SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+                grfInheritance: inheritance,
                 Trustee: TRUSTEE_W {
                     pMultipleTrustee: ptr::null_mut(),
                     MultipleTrusteeOperation: NO_MULTIPLE_TRUSTEE,
