@@ -28,6 +28,7 @@ use std::path::{Path, PathBuf};
 use verkstead_render::{DirectoryEntry, DirectoryListing, EntryKind};
 
 use crate::platform::{Environment, Platform};
+use crate::resolved::{Resolved, resolve};
 
 /// What `path` holds, or the named reason it holds nothing.
 ///
@@ -35,19 +36,21 @@ use crate::platform::{Environment, Platform};
 /// server's own home — see [`opening`], which is also where a server with no
 /// home to read falls back to the top of the machine.
 ///
+/// Resolved through [`crate::resolved`], which is what the save behind the
+/// field resolves through: *absolute* and *there* are one pair of questions
+/// rather than one pair per caller, so a dropdown cannot come to answer them
+/// differently from the save it is filling a field in for.
+///
 /// Blocking: the directory is opened, and every entry in it is asked what it is.
 pub(crate) fn list(path: Option<PathBuf>) -> DirectoryListing {
     let Some(path) = path else {
         return opening(home());
     };
 
-    if !path.is_absolute() {
-        return DirectoryListing::NotAbsolute;
-    }
-
-    match path.canonicalize() {
-        Ok(real) => entries_of(&real),
-        Err(_) => DirectoryListing::Missing,
+    match resolve(&path) {
+        Resolved::At(real) => entries_of(&real),
+        Resolved::NotAbsolute => DirectoryListing::NotAbsolute,
+        Resolved::Missing => DirectoryListing::Missing,
     }
 }
 
@@ -62,18 +65,22 @@ fn home() -> Option<PathBuf> {
 /// Where a browse with nothing typed in the field opens.
 ///
 /// `home` where it lists, and the top of the machine where it does not: a home
-/// nothing says, a home that has gone, and a home that is not a directory are
-/// one answer between them, because none of them is something the human could
-/// correct from a dropdown. The fallback is what this endpoint answered an empty
-/// field with before there was a home in it at all, so nothing is out of reach
-/// either way.
+/// nothing says, a home that will not resolve, and a home that is not a
+/// directory are one answer between them, because none of them is something the
+/// human could correct from a dropdown. The fallback is what this endpoint
+/// answered an empty field with before there was a home in it at all, so
+/// nothing is out of reach either way.
+///
+/// Resolved the way a typed path is — see [`list`] — so a `HOME` that is
+/// relative is one of the homes there is no listing to be had of, rather than a
+/// directory read from wherever the server happened to be started.
 fn opening(home: Option<PathBuf>) -> DirectoryListing {
-    let listing = home
-        .and_then(|home| home.canonicalize().ok())
-        .map(|real| entries_of(&real));
+    let Some(Resolved::At(real)) = home.as_deref().map(resolve) else {
+        return topmost();
+    };
 
-    match listing {
-        Some(listed @ DirectoryListing::Listed { .. }) => listed,
+    match entries_of(&real) {
+        listed @ DirectoryListing::Listed { .. } => listed,
         _ => topmost(),
     }
 }
@@ -337,15 +344,24 @@ mod tests {
     }
 
     /// And a home there is no listing to be had of falls back to the top of the
-    /// machine — one answer for the three ways that happens, none of them
+    /// machine — one answer for the four ways that happens, none of them
     /// something the human could correct from a dropdown.
+    ///
+    /// The relative one is there because the home is resolved the way a typed
+    /// path is: it is refused rather than read from wherever the server was
+    /// started.
     #[test]
     fn a_home_that_cannot_be_read_opens_on_the_topmost_listing_instead() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("notes.md");
         std::fs::write(&file, "# notes\n").unwrap();
 
-        for home in [None, Some(dir.path().join("never-made")), Some(file)] {
+        for home in [
+            None,
+            Some(dir.path().join("never-made")),
+            Some(file),
+            Some(PathBuf::from("src")),
+        ] {
             assert_eq!(opening(home), topmost());
         }
     }
