@@ -67,6 +67,14 @@ model already say enough — reading *Default* only where a name must be shown.
 Nothing found says what to run to make one (`claude` once, then log in),
 keeps probing on the same cadence, and offers the manual form under it.
 
+**The step's Continue needs a Profile**, ticked or made in the manual form —
+one of the three the objective is, and the only one a step could otherwise
+walk past. Unticking everything and pressing Continue would clear the mode
+with nothing saved and land on exactly the empty state a skip was rejected
+for, until the next start put the human through the wizard again. The
+dependency step has its rows and the git step has its required fields; this
+is the same rule said for the step that had none.
+
 **The git step asks for what git needs**: author name and email, required,
 and the token, optional. The settings module's rule is *told, not found*, and
 a prefill the human confirms is still telling: name and email come from the

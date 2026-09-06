@@ -47,7 +47,10 @@ All from [ADR-0016](../../adr/0016-onboarding.md); what bears on this stage:
   where the harness is present, greyed where not. A ticked one saves through
   the existing profile create with a **null name** and every model
   `KNOWN_MODELS` lists for the harness. Nothing found says what to run,
-  keeps probing, and offers the manual form under it.
+  keeps probing, and offers the manual form under it. **Continue needs at
+  least one Profile** — ticked or made in the form — because otherwise the
+  step walks past one of the three things the objective is, and the mode
+  clears onto the empty state a skip was rejected for.
 - **The unnamed Profile** is this stage's store change: the name column
   becomes nullable, uniqueness becomes *at most one unnamed per harness*
   and *no two named alike*, and every reading of a Profile's name — the
@@ -83,7 +86,10 @@ All from [ADR-0016](../../adr/0016-onboarding.md); what bears on this stage:
 5. **The dependencies step.** Rows, the distro tabs, the instruction
    content, the ready state, Continue.
 6. **The accounts step.** Detected rows with ticks, the nothing-found state
-   and its probing, the manual form under it, the autoconfigured save.
+   and its probing, the manual form under it, the autoconfigured save, and
+   Continue held until a Profile exists.
+   - Unticking every detected account leaves Continue refused, and saving one
+     from the manual form releases it.
 7. **The git step and the finish.** Prefill with sources, the save, the
    verification's login, the last Continue clearing the mode.
 8. **Docs and vocabulary.** CONTEXT.md gains **Onboarding Mode** and amends
