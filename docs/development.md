@@ -195,7 +195,7 @@ what the settings page saves through:
 $ curl http://127.0.0.1:8422/api/ui/settings
 {"git_author":{"name":"","email":""},"github_token":null,
  "rust_build_cache":{"enabled":true,"size":"30G","size_configured":false,
-   "compiles_cached":true},
+   "compiles":"Cached"},
  "cleanup":{"trim":{"enabled":true,"days":3,"days_configured":false},
    "delete":{"enabled":false,"days":30,"days_configured":false}},
  "conflict_resolution":"Merge",
@@ -214,7 +214,7 @@ $ curl -X POST -H 'Content-Type: application/json' \
 {"settings":{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
   "github_token":{"last_four":"cdef","at":"2026-08-23T08:23:15.041950412Z"},
   "rust_build_cache":{"enabled":true,"size":"30G","size_configured":false,
-    "compiles_cached":true},
+    "compiles":"Cached"},
   "cleanup":{"trim":{"enabled":true,"days":3,"days_configured":false},
     "delete":{"enabled":false,"days":30,"days_configured":false}},
   "conflict_resolution":"Merge",
