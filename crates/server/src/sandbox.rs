@@ -2540,6 +2540,26 @@ impl Sandbox {
 
         #[cfg(windows)]
         if let Some(boundary) = boundary {
+            // What the machine says about the paths this description refuses,
+            // read before a word of it is written: a refusal cuts the
+            // inheritance on the path it refuses, so this is the last moment at
+            // which anything can tell whether that path was inheriting to begin
+            // with — see [`granting::writing::inheriting`].
+            //
+            // **After the rendering and before the profile**, which is the one
+            // window in which the answer is the machine's own. It cannot be
+            // read any earlier: what a description refuses is a path *inside*
+            // the profile, reached through the junction the rendering has just
+            // made, and there is nothing at that name until then. And it cannot
+            // be read any later, because making an AppContainer profile is
+            // itself a write to this machine — on the `windows-2025` runner,
+            // whose temporary directory is where a test's stand-in for the
+            // human's account lives, the account's own skills came back from it
+            // holding the same entries marked as taken from above. Anything
+            // Verkstead does before this reading is something this reading is
+            // answering about, so the profile is made after it.
+            let cut = granting::writing::inheriting(&boundary.entries);
+
             let container =
                 container::Container::for_conversation(boundary.data_dir, boundary.conversation)
                     .map_err(|refused| {
@@ -2549,13 +2569,6 @@ impl Sandbox {
                             boundary.conversation
                         ))
                     })?;
-
-            // And what the machine says about the paths this description
-            // refuses, read before a word of it is written: a refusal cuts the
-            // inheritance on the path it refuses, so this is the last moment at
-            // which anything can tell whether that path was inheriting to begin
-            // with — see [`granting::writing::inheriting`].
-            let cut = granting::writing::inheriting(&boundary.entries);
 
             // Remembered before it is written, and remembered by the container
             // rather than by the session: an entry names the container's

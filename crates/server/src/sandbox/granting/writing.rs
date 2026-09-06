@@ -164,6 +164,17 @@ const INHERITED: u8 = 0x10;
 /// its refusals before its grants — see this module's own documentation, which
 /// is where the reason for that order is.
 ///
+/// **And nothing of Verkstead's own has happened in between.** This is read in
+/// one window — after the rendering has made the profile the refused path is
+/// inside, and before the AppContainer profile is created — and the second half
+/// of that is not a nicety: creating a profile is a write to the machine, and
+/// on the `windows-2025` runner a directory under the temporary one came back
+/// from it holding the same entries marked as taken from above. Read after
+/// that, this would answer about a machine Verkstead had already changed, and
+/// the answer it gave would put [`restored`] on the wrong side of the one
+/// decision it cannot make for itself. See [`super::super::Sandbox::command`],
+/// which is where the order is.
+///
 /// **And it is the caller's to keep**, because the taking-back is a later
 /// server's as often as it is this one's: what comes back is remembered with
 /// the entries — see [`super::remembering`] — and handed to [`strip`] by
@@ -1112,6 +1123,125 @@ mod tests {
             .expect("a path this test has just made")
             .list()
             .expect("a directory under a temporary one to have a list of its own")
+    }
+
+    /// And the same list said in the three things a mistake here shows up in:
+    /// what each entry is, what it says about where it came from, and whose it
+    /// is.
+    ///
+    /// Read where a failure is being written rather than where one is being
+    /// asserted — a list of raw ACEs is what the machine holds and not
+    /// something anybody can read a failure off.
+    fn said_plainly(path: &Path) -> String {
+        listed(path)
+            .iter()
+            .map(|ace| {
+                format!(
+                    "{}{} flags {:#04x} mask {:#010x}",
+                    if ace[0] == DENIED { "deny" } else { "allow" },
+                    if inherited(ace) { " (from above)" } else { "" },
+                    ace[1],
+                    mask(ace),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ")
+    }
+
+    /// The shape a session's description really has, which the test above has
+    /// not got: **the account is junctioned into the profile, and what the
+    /// refusal names is the path inside**. So the entry is written through the
+    /// junction while the grant beside it goes on the real directory, and the
+    /// profile the junction sits in is granted too.
+    ///
+    /// **Which is the difference the `windows-2025` job found.** The test above
+    /// passes on that runner and the suite's two lifetime tests fail there, on
+    /// the same directory and with the same three entries turning into three
+    /// the directory takes from above — and what the failure said, once it was
+    /// made to say it, is that the refused path had been recorded as one that
+    /// was inheriting when the machine's own listing of it a moment earlier
+    /// said it was not.
+    ///
+    /// So this asks that one question where it can be asked on its own: read
+    /// the answer through the name a description uses, and check it against the
+    /// list the directory really holds.
+    #[test]
+    fn a_refusal_written_through_a_junction_reads_the_account_it_leads_to() {
+        let held = tempfile::tempdir().expect("a directory to lay a machine out in");
+
+        // The human's own account, with skills of its own inside it — the two
+        // directories the description names, one granted and one refused.
+        let account = held.path().join("account").join(".claude");
+        let skills = account.join("skills");
+
+        std::fs::create_dir_all(&skills).unwrap();
+        std::fs::write(skills.join("theirs.md"), "the account's own").unwrap();
+
+        // And the profile a session is given, with the account joined into it
+        // the way a rendering joins one — see [`super::super::junction::at`],
+        // which is what puts it there in a session start.
+        let profile = held.path().join("homes").join("1");
+
+        std::fs::create_dir_all(&profile).unwrap();
+        super::super::super::junction::at(&account, &profile.join(".claude"))
+            .expect("this machine to make a directory junction");
+
+        let inside = profile.join(".claude").join("skills");
+
+        let entries = vec![
+            Entry {
+                path: profile.clone(),
+                wanted: Wanted::Granted(Reach::ReadWrite),
+            },
+            Entry {
+                path: account.clone(),
+                wanted: Wanted::Granted(Reach::ReadWrite),
+            },
+            Entry {
+                path: inside.clone(),
+                wanted: Wanted::Refused,
+            },
+        ];
+
+        let before = said_plainly(&skills);
+
+        assert_eq!(
+            said_plainly(&inside),
+            before,
+            "the two names should be one directory before anything is written, \
+             which is the whole ground this stands on",
+        );
+
+        let cut = inheriting(&entries);
+
+        assert_eq!(
+            cut.is_empty(),
+            !listed(&skills).iter().any(|ace| inherited(ace)),
+            "what a refused path was taking from above should be what the \
+             directory it leads to really holds. The account says: {before}, \
+             read through the junction it says: {}, and what was recorded is: \
+             {cut:?}",
+            said_plainly(&inside),
+        );
+
+        write(&entries, NOBODY, &cut).expect("the entries this description comes to");
+
+        assert_ne!(
+            said_plainly(&skills),
+            before,
+            "the refusal should be on the account's own skills while the \
+             container is there, whichever name it was written under",
+        );
+
+        strip(&entries, &cut, NOBODY);
+
+        assert_eq!(
+            said_plainly(&skills),
+            before,
+            "and the directory should read as it did before once the container \
+             has gone. What was recorded as taking entries from above is: \
+             {cut:?}",
+        );
     }
 
     /// The whole of what this module is for, asked of the machine by attempting
