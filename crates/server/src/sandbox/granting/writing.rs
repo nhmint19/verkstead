@@ -185,7 +185,7 @@ pub(crate) fn strip(entries: &[Entry], sid: &str) {
         // deny, so taking it back is more than taking an entry off — see
         // [`restored`], and [`refuse`] for what it is undoing.
         let taken = match entry.wanted {
-            Wanted::Granted(_) => revoked(&sid, &entry.path, DACL_SECURITY_INFORMATION),
+            Wanted::Granted(_) => revoked(&sid, &entry.path),
             Wanted::Refused => restored(&sid, &entry.path),
         };
 
@@ -275,14 +275,17 @@ fn refuse(sid: &Sid, path: &Path) -> io::Result<()> {
 /// inheritance the refusal cut put back on, and the copies it made taken off
 /// with them.
 ///
-/// **Three steps because the second one has to happen before the third can
-/// see.** What [`refuse`] copied down are the entries the directory was
-/// inheriting at the time, kept as its own so that cutting the inheritance took
-/// nothing away from the human — and while the inheritance is still cut there
-/// is nothing to tell those copies apart from entries the directory always had
-/// of its own. Putting the inheritance back is what makes them tellable: the
-/// ones from above come back marked as inherited, and a copy is then an entry
-/// of the directory's own that says exactly what one of them says.
+/// **Three steps in two writes, because the second one has to happen before
+/// the third can see.** The deny and the inheritance come off in one written
+/// list — see [`undenied`], which is where a refusal's undoing stops looking
+/// anything like a grant's. What [`refuse`] copied down are the entries the
+/// directory was inheriting at the time, kept as its own so that cutting the
+/// inheritance took nothing away from the human — and while the inheritance
+/// is still cut there is nothing to tell those copies apart from entries the
+/// directory always had of its own. Putting the inheritance back is what
+/// makes them tellable: the ones from above come back marked as inherited,
+/// and a copy is then an entry of the directory's own that says exactly what
+/// one of them says.
 ///
 /// **A copy whose original has changed is left as an entry of the directory's
 /// own**, which is the one case this does not put back exactly. Somebody who
@@ -292,9 +295,53 @@ fn refuse(sid: &Sid, path: &Path) -> io::Result<()> {
 /// indistinguishable from one they wrote there themselves, and losing a
 /// human's own entry is the worse of the two mistakes.
 fn restored(sid: &Sid, path: &Path) -> io::Result<()> {
-    revoked(sid, path, UNPROTECTED_DACL_SECURITY_INFORMATION)?;
+    undenied(sid, path)?;
 
     uncopied(path)
+}
+
+/// The deny taken off and the inheritance put back on, which is one write and
+/// not two.
+///
+/// **A deny does not come off the way a grant does**, and that is Win32's rule
+/// rather than this file's: what `REVOKE_ACCESS` takes off a list is the
+/// trustee's *allowed* entries and its audit entries — the documented word is
+/// `ACCESS_ALLOWED_ACE`, and an `ACCESS_DENIED_ACE` is not one. So a refusal
+/// taken back the way a grant is left the deny standing exactly where it was,
+/// on a directory of the human's own, naming a profile that had been deleted
+/// out from under it.
+///
+/// So what goes on is the list as it stands with every entry of the
+/// container's taken out of it, written unprotected — the same write
+/// [`refuse`] made in the other direction, which puts the inheritance back in
+/// the same breath as it takes the deny off.
+///
+/// **What the directory inherits is not written back with it.** A list that is
+/// not protected is merged with whatever the parent hands down as it is set,
+/// so the entries from above come back on their own — and one written back
+/// here would come back as a copy of itself, which is the very thing
+/// [`uncopied`] then has to take off again.
+fn undenied(sid: &Sid, path: &Path) -> io::Result<()> {
+    let held = Held::of(path)?;
+
+    // No list at all is a path everybody reaches, which is the one shape
+    // [`refuse`] cut no inheritance on: it wrote its deny into a list of its
+    // own making, and that list is what is being read here.
+    let Some(existing) = held.list() else {
+        return Ok(());
+    };
+
+    let kept: Vec<Vec<u8>> = existing
+        .into_iter()
+        .filter(|ace| !inherited(ace))
+        .filter(|ace| whose(ace).is_none_or(|theirs| !sid.is(theirs)))
+        .collect();
+
+    written(
+        path,
+        &only(&kept)?,
+        DACL_SECURITY_INFORMATION | UNPROTECTED_DACL_SECURITY_INFORMATION,
+    )
 }
 
 /// Every entry of `path`'s own that says exactly what one it inherits says,
@@ -456,9 +503,13 @@ fn already(sid: &Sid, path: &Path, rights: u32) -> io::Result<bool> {
     }))
 }
 
-/// Everything this wrote for `sid` on `path`, taken off — and `what` said as
-/// well, which is how a refusal's cut inheritance is put back.
-fn revoked(sid: &Sid, path: &Path, what: OBJECT_SECURITY_INFORMATION) -> io::Result<()> {
+/// Every grant this wrote for `sid` on `path`, taken off.
+///
+/// **Grants and nothing else**, which is Win32's word rather than this file's:
+/// `REVOKE_ACCESS` removes the trustee's allowed entries and its audit
+/// entries, and has nothing to say about a deny. The one deny a description
+/// ever writes comes off in [`undenied`], which is where the reason is.
+fn revoked(sid: &Sid, path: &Path) -> io::Result<()> {
     let access = EXPLICIT_ACCESS_W {
         grfAccessPermissions: 0,
         grfAccessMode: REVOKE_ACCESS,
@@ -466,7 +517,7 @@ fn revoked(sid: &Sid, path: &Path, what: OBJECT_SECURITY_INFORMATION) -> io::Res
         Trustee: trustee(sid),
     };
 
-    merged(path, &access, what | DACL_SECURITY_INFORMATION)
+    merged(path, &access, DACL_SECURITY_INFORMATION)
 }
 
 /// One entry merged into whatever `path`'s list already says, and the result
