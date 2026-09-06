@@ -21,8 +21,9 @@
 //! values, both readable back. It is the one thing about a Sandbox here that
 //! nobody has to configure — it is on with nothing said, and the switch is the
 //! one that takes it away, where the paths below are holes somebody typed. One
-//! fact about it travels one way only: whether the server found an sccache to
-//! compile through, which is its own environment and nobody's setting.
+//! fact about it travels one way only: whether a session's compiling is cached
+//! as well as its downloads and, where it is not, why not — which is the
+//! server's own environment and its own platform, and nobody's setting.
 //!
 //! The Cleanup is the build cache's shape twice over: two rows, each a switch
 //! and a duration, each read back with the flag that says whether the duration
@@ -248,14 +249,43 @@ pub struct BuildCacheView {
     /// nobody chose should not look like a choice.
     pub size_configured: bool,
 
-    /// Whether the server found an sccache to compile through.
+    /// Whether a session's *compiling* is cached as well as its downloads, and
+    /// where it is not, why not.
     ///
     /// Read-only, and the one fact here nobody can set from a page: it is the
-    /// server's own environment. False means a session's crate downloads are
-    /// still shared and its dependencies are compiled every time — which is
-    /// what the workbench warns about on a Rust repository, and what installing
-    /// sccache on the server fixes.
-    pub compiles_cached: bool,
+    /// server's own environment and its own platform. Anything but
+    /// [`CompileCaching::Cached`] means a session's crate downloads are still
+    /// shared and its dependencies are compiled every time, which is a slow
+    /// build rather than a broken one.
+    pub compiles: CompileCaching,
+}
+
+/// Whether a session's compiling is cached, and where it is not, what would
+/// have to change — which is not the same question twice.
+///
+/// Two false answers rather than one, because they ask different things of the
+/// reader. One is a machine missing a program, which the human fixes by
+/// installing it; the other is a platform that cannot reach a compile server at
+/// all, which nobody fixes and which a page telling them to install something
+/// would be lying about.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum CompileCaching {
+    /// The server found an sccache, and every session compiles through the one
+    /// Compile Server this machine runs.
+    Cached,
+
+    /// It found none on its own `PATH`, so a session downloads once for the
+    /// machine and compiles for itself. Installing sccache where the server can
+    /// see it is the whole of what is missing.
+    NoSccache,
+
+    /// And a platform where no session compiles through one whatever is
+    /// installed: a Windows session runs inside an AppContainer, which is
+    /// refused the loopback an sccache client reaches its server over
+    /// (ADR-0014). The shared `CARGO_HOME` is unaffected — a directory is a
+    /// directory — so the downloads are shared there like everywhere else.
+    NotThroughAContainer,
 }
 
 /// The Cleanup as the settings page draws it: the two things that happen to an
@@ -417,9 +447,9 @@ pub struct SettingsEdit {
 /// one is *no size configured* rather than a size of nothing — which is what
 /// clearing the field means and what puts the default back.
 ///
-/// Whether an sccache was found is not here. It is the server's own
+/// Whether compiling is cached is not here. It is the server's own
 /// circumstance rather than anything a page can decide, so it travels one way
-/// only — see [`BuildCacheView::compiles_cached`].
+/// only — see [`BuildCacheView::compiles`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct BuildCacheEdit {

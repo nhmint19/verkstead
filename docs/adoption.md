@@ -415,6 +415,21 @@ it — so an agent npm installed as a `claude.cmd` starts as readily as an
 installer's `claude.exe`. Everything else there is what it is on the other two:
 the Repos, the Briefs, the Question Sets, the Timeline, the pull requests.
 
+**Rust builds share their downloads here and compile for themselves.** The
+Build Cache is a directory of Verkstead's own —
+`%LOCALAPPDATA%\Verkstead\Cache` unless you say otherwise — that a session
+reaches read-write with `CARGO_HOME` inside it, so a crate is downloaded once
+for the machine rather than once per Conversation, exactly as on the other two
+platforms. The other half of it, the compiled objects, is off on Windows and
+only on Windows: caching those needs an sccache client inside the session
+talking to a server outside it over the local machine's own loopback, and the
+boundary a Windows session runs behind is refused every connection to this
+machine ([ADR 0014](adr/0014-windows-sessions.md)). So a Rust session here
+compiles its dependencies once per session and downloads them never twice,
+which is a slower build rather than a broken one. Nothing about it is a
+setting: the workbench's build cache page says so rather than asking you to
+install anything.
+
 Out of a checkout instead — the same server, told `--data-dir .` so that
 `verkstead.db` and the rest land in the checkout rather than in the platform
 directory — is [development.md](development.md#quickstart).

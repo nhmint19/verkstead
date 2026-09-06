@@ -124,10 +124,10 @@ async fn a_session_on_a_console_runs_inside_its_container() {
 /// given at its standard input going the other way.
 ///
 /// The start everything that is not a session stands on: the boundary suite,
-/// the `verkstead ask` a session makes, the Compile Server. A `Command` cannot
-/// make this process at all — see [`off_a_console`] — so what proves it is a
-/// program inside a container reading what it was handed and printing what it
-/// made of it.
+/// and the `verkstead ask` a session makes. A `Command` cannot make this
+/// process at all — see [`off_a_console`] — so what proves it is a program
+/// inside a container reading what it was handed and printing what it made of
+/// it.
 #[test]
 fn what_a_rendering_printed_off_a_console_is_read_back() {
     let held = tempfile::tempdir().expect("a directory to keep a Data Directory in");

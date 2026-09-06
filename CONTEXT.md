@@ -195,15 +195,16 @@ well: its Worktree and the git directory behind it, both at that companion's
 own mode, so a read-only one is read-only through both. The **Build Cache** is
 inside as well, writable, with the `sccache` it compiles through read-only
 beside the executable — that one is a client, and what it reaches is the
-**Compile Server** in a Sandbox of Verkstead's own. The filesystem is the
-boundary and the network is not: inside, it is the host's own, whole and
-unfiltered, because what stops a session doing harm is that there is nothing
-within reach to harm. The `verkstead` a session asks with is the running
-server's own image, first on the `PATH` inside, so the CLI a session asks with
-and the server it asks are one build and cannot disagree about a schema — with
-the libraries that image was packed with, where it was packed with any,
-reached through a launcher of Verkstead's own so that nothing else the session
-runs loads out of them. What
+**Compile Server** in a Sandbox of Verkstead's own — the sccache half only on
+the two platforms whose sessions can reach one, which is the Build Cache's own
+entry. The filesystem is the boundary and the network is not: inside, it is the
+host's own, whole and unfiltered, because what stops a session doing harm is
+that there is nothing within reach to harm. The `verkstead` a session asks with
+is the running server's own image, first on the `PATH` inside, so the CLI a
+session asks with and the server it asks are one build and cannot disagree
+about a schema — with the libraries that image was packed with, where it was
+packed with any, reached through a launcher of Verkstead's own so that nothing
+else the session runs loads out of them. What
 it asks *through* is the loopback, scoped to the Conversation it is asking
 from — except on Windows, where it is a **named pipe** the server opens beside
 its socket and names in the session's environment, in the same
@@ -259,8 +260,14 @@ Sandbox gets one at all, and how
 big its compiled half may grow, is the human's, in the workbench settings. The
 one control there that only ever *closes* a hole — the **Sandbox
 Configuration** beside it opens them, and does so only for what somebody typed.
-Without an sccache it is still a cache — the crate downloads are shared —
-and the composer says so on a repository that builds Rust.
+Without an sccache it is still a cache — the crate downloads are shared — and
+the composer says so on a repository that builds Rust. **On Windows it is only
+ever that half**: a session there runs inside an **AppContainer**, which is
+refused the loopback an sccache client reaches the **Compile Server** over, so
+nothing installed on that machine would be reached and none is looked for. A
+Windows session downloads a crate once for the machine like every other and
+compiles it once per session, which is a slower build rather than a broken one;
+the settings page says why rather than telling anybody to install something.
 _Avoid_: sccache, cargo cache, artifact cache, shared target dir
 
 **Compile Server**:
@@ -269,12 +276,13 @@ The one `sccache` server the machine compiles through, run by Verkstead in a
 every Sandbox shares the host's network — so sessions left to start their own
 all reach for one port, and whichever lost the race has its compiles run inside
 another session's Sandbox, where its Worktree is not bound and the build fails.
-Started before the first session of a Conversation whose Repo builds Rust, and
-never on a machine that builds none. Its Sandbox holds the Worktrees directory —
-all of it, so a Conversation grilled later is one it can already compile for —
-and the Build Cache, and nothing else Verkstead keeps: `rustc` runs proc macros
-while it compiles, so the database and the settings files stay outside its
-reach.
+Started before the first session of a Conversation whose Repo builds Rust,
+never on a machine that builds none, and **never on Windows at all**, where no
+session inside an AppContainer could reach one. Its Sandbox holds the Worktrees
+directory — all of it, so a Conversation grilled later is one it can already
+compile for — and the Build Cache, and nothing else Verkstead keeps: `rustc`
+runs proc macros while it compiles, so the database and the settings files stay
+outside its reach.
 _Avoid_: daemon, sccache daemon, build server, compiler service
 
 **Log Directory**:

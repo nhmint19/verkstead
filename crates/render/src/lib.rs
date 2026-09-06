@@ -67,9 +67,9 @@ pub use repos::{
 };
 pub use settings::{
     Author, BindEntry, BuildCacheEdit, BuildCacheView, CleanupEdit, CleanupStepEdit,
-    CleanupStepView, CleanupView, ConflictResolution, IgnoreRule, IgnoredCommentsEdit,
-    PathResolution, PathSource, PathsView, RuleField, RuleRefused, SettingsEdit, SettingsSaved,
-    SettingsView, TokenEdit, TokenSaved, Verified, WatchedPathEntry,
+    CleanupStepView, CleanupView, CompileCaching, ConflictResolution, IgnoreRule,
+    IgnoredCommentsEdit, PathResolution, PathSource, PathsView, RuleField, RuleRefused,
+    SettingsEdit, SettingsSaved, SettingsView, TokenEdit, TokenSaved, Verified, WatchedPathEntry,
 };
 pub use sharing::{
     CommentedOn, MissedOut, SHARE_MARKER, ShareCommented, SharePublished, SharedCommit,

@@ -101,6 +101,15 @@ const THE_AUTHOR: &str = "git_author:\n  name: Verkstead Test\n  email: test@ver
 /// anything at all, and nothing that is going to say something comes near it.
 const PATIENCE: Duration = Duration::from_secs(180);
 
+/// And how long a thing that was going to happen has had to happen in — which
+/// is what the one test here about something *not* happening waits out.
+///
+/// Short, because what it is waiting on is already over: what would have
+/// started a compile server starts it before it returns, so this is slack for a
+/// loaded runner rather than a race being sat out. See
+/// [`no_compile_server_comes_up_on_this_platform`].
+const SETTLED: Duration = Duration::from_secs(5);
+
 /// What the stand-in is started as: Windows PowerShell, which every machine
 /// carries, running a script file.
 ///
@@ -473,10 +482,10 @@ async fn grilling(script: &str) -> Grilling {
     grilling_caching(script, None).await
 }
 
-/// The same, with a shared build cache behind it — which is what the tests
-/// about the sccache need and what nothing else here wants: a cache is a
-/// `RUSTC_WRAPPER` in every session's environment, and every other test in this
-/// file is about a session that builds nothing.
+/// The same, with a shared build cache behind it — which is what the test about
+/// the cache needs and what nothing else here wants: a cache is a `CARGO_HOME`
+/// and a granted directory in every session's environment, and every other test
+/// in this file is about a session that builds nothing.
 async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
     // Before the server exists, because what is worth reading is what it says
     // as it starts a session — see [`LOGGING`].
@@ -1550,33 +1559,43 @@ async fn a_terminal_runs_powershell_in_the_conversations_worktree() {
     until_there(&worktree.join("stood-here.txt")).await;
 }
 
-/// The shared compile server comes up on this platform too, as a plain process.
+/// No compile server comes up on this platform, however many sccaches are
+/// installed on it.
 ///
-/// The one thing the open rendering runs that is not a session: an sccache
-/// server, in a sandbox of its own, that every session's `rustc` goes through.
-/// Asked of the machine rather than of Verkstead — a process id `tasklist` can
-/// see is a process that is really running — because what is being proved is
-/// that the rendering starts something outside this process.
+/// **The runner has one**, which is what the workflow installs and what makes
+/// this worth asking: a machine with no sccache would start no compile server
+/// for want of a binary, and would prove nothing at all about the rule under
+/// test. What is being proved is that a server which can see one still starts
+/// none, because a session inside an AppContainer is refused the loopback a
+/// client reaches it over — see
+/// [`verkstead_server::build_cache::compiles_through_an_sccache`].
 ///
-/// **The runner needs an sccache**, which is what the workflow installs: this
-/// is the case that only exists where one is on the server's `PATH`, and a
-/// machine without one has nothing here to prove.
+/// Asked of the machine rather than of Verkstead — the process ids `tasklist`
+/// can see — because what a rendering starts is a process outside this one, and
+/// the absence of one is the same question the other way round.
 #[tokio::test]
-async fn the_shared_compile_server_comes_up_as_a_plain_process() {
-    // The one test here that builds no fixture, and the compile server has as
-    // much to say for itself as a session does — see [`LOGGING`].
+async fn no_compile_server_comes_up_on_this_platform() {
+    // The one test here that builds no fixture, and what the cache says as it
+    // resolves is the whole of the reason — see [`LOGGING`].
     LazyLock::force(&LOGGING);
 
     let state = tempfile::tempdir().unwrap();
     let cache = tempfile::tempdir().unwrap();
 
+    on_the_path("sccache").unwrap_or_else(|| {
+        panic!(
+            "this machine has no sccache on the server's PATH, so a server that \
+             started none would prove nothing: install one, as the Windows job does"
+        )
+    });
+
     let build_cache =
         BuildCache::resolve(Some(cache.path()), state.path()).expect("a cache to resolve");
 
     assert!(
-        build_cache.caches_compiles(),
-        "this machine has no sccache on the server's PATH, so there is no \
-         compile server to come up: install one, as the Windows job does",
+        !build_cache.caches_compiles(),
+        "an sccache is on this machine's PATH and the server still has none to \
+         hand out, because no session here could reach one",
     );
 
     let already = servers();
@@ -1584,69 +1603,75 @@ async fn the_shared_compile_server_comes_up_as_a_plain_process() {
 
     build_cache.compiling(settings.rust_build_cache());
 
-    let deadline = Instant::now() + PATIENCE;
+    // Long enough that one which was going to come up has: `compiling` spawns
+    // the process before it returns, so anything after that moment is slack
+    // rather than a race being waited out.
+    pause(SETTLED).await;
 
-    loop {
-        let started: BTreeSet<u32> = servers().difference(&already).copied().collect();
+    let started: BTreeSet<u32> = servers().difference(&already).copied().collect();
 
-        if !started.is_empty() {
-            break;
-        }
-
-        assert!(
-            Instant::now() < deadline,
-            "the compile server never came up: {already:?} were running before, \
-             and {:?} are now",
-            servers(),
-        );
-
-        pause(Duration::from_millis(200)).await;
-    }
+    assert!(
+        started.is_empty(),
+        "a compile server came up on a platform where nothing could reach it: \
+         {already:?} were running before, and {started:?} are new",
+    );
 }
 
-/// And a session whose server has one is told where it is.
+/// And a session in a Rust repo gets the shared cache and no wrapper: its
+/// downloads land in the one `CARGO_HOME` this machine shares, and nothing
+/// points its `rustc` at a server it could not talk to.
 ///
-/// The far end of the same fact: a session compiles through the server above,
-/// and what points it there is `RUSTC_WRAPPER`. On this platform that names the
-/// sccache where it really is — nothing is joined into a Windows sandbox, and
-/// a name with the extension taken off it would be one nothing there can start.
+/// **Both halves attempted rather than read.** That `RUSTC_WRAPPER` is unset is
+/// a variable the session prints, but that its `CARGO_HOME` is *writable* is
+/// only answered by writing there — the directory is granted to the container's
+/// identity like any other `Own`, and a grant that had not been written would
+/// look exactly the same from out here.
+///
+/// The cargo half is what the whole of the cache comes to on this platform:
+/// a crate is downloaded once for the machine, and compiled once per session.
 #[tokio::test]
-async fn a_session_is_told_where_the_sccache_it_compiles_through_is() {
+async fn a_session_gets_the_shared_cargo_home_and_no_compiler_wrapper() {
     let cache = tempfile::tempdir().unwrap();
 
     let fixture = grilling_caching(
         r#"
         Note 'wrapper' $env:RUSTC_WRAPPER
         Note 'cargo-home' $env:CARGO_HOME
+
+        New-Item -ItemType Directory -Force -Path $env:CARGO_HOME | Out-Null
+        Set-Content -LiteralPath (Join-Path $env:CARGO_HOME 'downloaded.crate') -Value 'here'
         "#,
         Some(cache.path()),
     )
     .await;
 
-    let sccache = on_the_path("sccache").unwrap_or_else(|| {
-        panic!(
-            "this machine has no sccache on the server's PATH, so a session has \
-             nothing to be told about: install one, as the Windows job does"
-        )
-    });
-
-    the_same_file(
-        Path::new(&fixture.written("wrapper").await),
-        Path::new(&sccache),
+    assert_eq!(
+        fixture.written("wrapper").await,
+        "",
+        "nothing on this platform compiles through an sccache, so a session is \
+         pointed at none: a RUSTC_WRAPPER here would be every Rust build inside \
+         failing rather than one running uncached",
     );
 
-    // Spelled rather than resolved, which is the one comparison here that has
-    // to be: `CARGO_HOME` is a directory the first `cargo` to run under it
-    // makes, and nothing in this test runs one — so what is being asked is that
-    // the server composed the name out of the cache directory it was handed,
-    // and a name is all there is to compare. The line above is the other way
-    // round: an sccache found on the `PATH` is a real file spelled however
-    // `where.exe` spells it.
+    // Spelled rather than resolved: `CARGO_HOME` is a directory the first
+    // `cargo` to run under it makes, and nothing in this test runs one — so
+    // what is being asked is that the server composed the name out of the cache
+    // directory it was handed, and a name is all there is to compare.
     assert_eq!(
         fixture.written("cargo-home").await,
         cache.path().join("cargo").display().to_string(),
         "a session's cargo downloads go under the shared cache the server was \
          given, which is what makes them shared",
+    );
+
+    let downloaded = cache.path().join("cargo").join("downloaded.crate");
+
+    until_there(&downloaded).await;
+
+    assert_eq!(
+        std::fs::read_to_string(&downloaded).unwrap().trim(),
+        "here",
+        "and the session really wrote it, from inside its container",
     );
 }
 

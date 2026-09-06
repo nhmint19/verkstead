@@ -480,12 +480,12 @@ pub const AGENT_TYPE: &str = "VERKSTEAD_AGENT";
 /// is why it is a function of where the Data Directory is rather than a name.
 /// See [`path`], [`Executable`] and [`crate::build_cache`].
 ///
-/// **A session on Windows leads its `PATH` with something else**, and this is
-/// the compile server's alone there: nothing is bound and nothing is linked, so
-/// what a session asks with is the running image where it really is — see
-/// [`Executable::at`] — and the directory holding *that* is what leads. The
-/// sccache is not in it either, and for the same reason — see
-/// [`sccache_inside`], which is where a session finds one on each platform.
+/// **Nothing on Windows reads this.** A session there leads its `PATH` with
+/// something else — nothing is bound and nothing is linked, so what a session
+/// asks with is the running image where it really is, see [`Executable::at`],
+/// and the directory holding *that* is what leads — and the compile server
+/// which is this function's other caller is not started on that platform at
+/// all, see [`crate::build_cache::compiles_through_an_sccache`].
 pub(crate) fn own_bin(platform: Platform, data_dir: &Path) -> PathBuf {
     under(&own_directory(platform, data_dir), BIN)
 }
@@ -499,13 +499,15 @@ pub(crate) fn own_bin(platform: Platform, data_dir: &Path) -> PathBuf {
 /// a `RUSTC_WRAPPER` and what the compile server runs are the same file, and
 /// two readings of where it is would be two ways for them to disagree.
 ///
-/// **Windows joins in nothing here, and needs to join in nothing.** There is no
-/// boundary on that platform yet, so the path outside *is* the path inside —
-/// and a hard link into Verkstead's own directory would drop the extension the
-/// name is found by, which is to say it would make a file nothing on that
-/// platform can start. What the description then says of it collapses to
-/// nothing at all: a path bound onto itself is a path already where it is — see
-/// [`Surface::elsewhere`].
+/// **Windows joins in nothing here, and asks this nothing at all.** No session
+/// on that platform compiles through an sccache — see
+/// [`crate::build_cache::compiles_through_an_sccache`] — so neither of the two
+/// callers reaches this with a Windows platform in hand. The arm is what a name
+/// would mean there rather than a claim that anything asks: the boundary on
+/// that platform is a grant written on the real path, so nothing is joined in
+/// and the path outside *is* the path inside, and what the description then
+/// says of it collapses to nothing at all — a path bound onto itself is a path
+/// already where it is, see [`Surface::elsewhere`].
 pub(crate) fn sccache_inside(platform: Platform, ours: &Path, sccache: &Path) -> PathBuf {
     match platform {
         Platform::Linux | Platform::MacOs => ours.join(build_cache::SCCACHE),
@@ -2814,6 +2816,13 @@ impl Sandbox {
             // cache of downloads and nothing else — see [`crate::build_cache`]
             // — and a `RUSTC_WRAPPER` naming a path that is not inside would be
             // every Rust build inside failing rather than one running uncached.
+            //
+            // Which is the whole of what a Windows session gets: there is never
+            // one to point at there, because a container is refused the
+            // loopback a client reaches its server over — see
+            // [`crate::build_cache::compiles_through_an_sccache`]. The
+            // `CARGO_HOME` above is a directory granted read-write like any
+            // other, and works on that platform exactly as it does here.
             //
             // What this reaches is the compile server Verkstead is running
             // outside, over the host's network — see

@@ -22,5 +22,5 @@ Roadmap stage: [03: The AppContainer](docs/roadmaps/windows-sessions/03-appconta
 - [x] 03: The pipe for the container — [details](03-the-pipe-for-the-container.md)
 - [x] 04: The AppContainer suite — [details](04-the-appcontainer-suite.md)
 - [x] 05: Per-Conversation profiles and the sweep — [details](05-profiles-and-the-sweep.md)
-- [ ] 06: sccache as the probe said — [details](06-sccache-as-the-probe-said.md)
+- [x] 06: sccache as the probe said — [details](06-sccache-as-the-probe-said.md)
 - [ ] 07: The note goes, and the docs say what is true — [details](07-the-note-goes.md)
