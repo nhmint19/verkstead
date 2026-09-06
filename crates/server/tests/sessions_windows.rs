@@ -61,6 +61,7 @@ use verkstead_render::{
     ProfileSaved, Registered, Shown, Size, Started, TerminalOpened, TerminalsView, TimelineEvent,
     Watching,
 };
+use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::platform::Platform;
@@ -524,6 +525,7 @@ async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
         skills,
         Executable::of_the_server(state.path()),
         Handoffs::under(state.path()),
+        Attachments::under(state.path()),
         Settings::in_data_dir(state.path()),
     )
     .at_pace(*UNHURRIED);
