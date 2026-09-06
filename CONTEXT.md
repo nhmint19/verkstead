@@ -197,9 +197,14 @@ inside as well, writable, with the `sccache` it compiles through read-only
 beside the executable — that one is a client, and what it reaches is the
 **Compile Server** in a Sandbox of Verkstead's own — the sccache half only on
 the two platforms whose sessions can reach one, which is the Build Cache's own
-entry. The filesystem is the boundary and the network is not: inside, it is the
-host's own, whole and unfiltered, because what stops a session doing harm is
-that there is nothing within reach to harm. The `verkstead` a session asks with
+entry. The filesystem is the boundary and the network is not, because what
+stops a session doing harm is that there is nothing within reach to harm:
+inside, it is the host's own, whole and unfiltered — **except on Windows,
+where an identity is granted the internet and nothing else**, so this machine's
+own loopback and everything else on the network it sits on are refused a
+session there as surely as the human's Documents are. Which is not a boundary
+drawn on purpose but the narrowest thing an AppContainer can be given, and it
+is what the pipe below exists for. The `verkstead` a session asks with
 is the running server's own image, first on the `PATH` inside, so the CLI a
 session asks with and the server it asks are one build and cannot disagree
 about a schema — with the libraries that image was packed with, where it was
