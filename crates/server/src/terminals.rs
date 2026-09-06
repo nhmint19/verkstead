@@ -420,7 +420,22 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
     // [`crate::sessions`], where the same value is held by the relay. Named for
     // what it is rather than for its type, `closing` in this module already
     // being the word down that a terminal is to end.
-    let (command, afterwards) = sandbox.command(&argv);
+    //
+    // And this is where a boundary that cannot be made refuses a terminal, for
+    // the reason it refuses a session: a shell in the Conversation's own
+    // profile with no boundary around it is exactly what the sandbox exists to
+    // stop. See [`crate::sandbox::Sandbox::command`].
+    let (command, afterwards) = match sandbox.command(&argv) {
+        Ok(rendered) => rendered,
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                conversation_id,
+                "a terminal's sandbox could not be made, so none was opened"
+            );
+            return Ok(TerminalOpened::Refused);
+        }
+    };
 
     let child = match terminal.spawn(&command) {
         Ok(child) => child,

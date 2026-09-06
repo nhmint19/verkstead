@@ -151,7 +151,10 @@ impl Grilling {
     /// What a session started right now would find in its environment under
     /// `name`.
     fn given(&self, name: &str) -> String {
-        let (rendering, _closing) = self.sandbox().command(&["verkstead", "guide"]);
+        let (rendering, _closing) = self
+            .sandbox()
+            .command(&["verkstead", "guide"])
+            .expect("a session's sandbox to be one this machine can make");
 
         rendering
             .env()
@@ -382,7 +385,10 @@ fn a_windows_session_is_told_the_pipe_its_server_opened() {
 #[test]
 fn a_session_asks_through_the_pipe_and_the_response_comes_back() {
     let fixture = grilling();
-    let (rendering, _closing) = fixture.sandbox().command(&["verkstead", "ask"]);
+    let (rendering, _closing) = fixture
+        .sandbox()
+        .command(&["verkstead", "ask"])
+        .expect("a session's sandbox to be one this machine can make");
 
     let mut asking = Command::try_from(&rendering)
         .expect("a rendering with no container")

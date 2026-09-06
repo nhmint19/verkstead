@@ -50,6 +50,23 @@ pub struct Closing {
     /// The files joined into a session's profile by a hard link, the account's
     /// own path first and the name inside the profile second.
     linked: Vec<(PathBuf, PathBuf)>,
+
+    /// And the AppContainer the session is running inside, held for as long as
+    /// it runs.
+    ///
+    /// **Held rather than seen to**: what this is for is the *first* half of
+    /// what a closing is, which is being alive. A profile is deleted and its
+    /// entries taken back when the last thing running inside it lets go — see
+    /// [`super::container::Container`] — and the thing running inside it is
+    /// the session this closing belongs to. So a session's boundary lasts
+    /// exactly as long as the session, without anything here having to say when
+    /// that is.
+    ///
+    /// Giving the profile the Conversation's own lifetime instead — granted at
+    /// the first session, deleted with the Worktree — is the task after this
+    /// one's, and this is the seam it moves.
+    #[cfg(windows)]
+    inside: Option<std::sync::Arc<super::container::Container>>,
 }
 
 impl Closing {
@@ -61,13 +78,33 @@ impl Closing {
     /// and a constructor that is the answer on two platforms is not a thing to
     /// hide on the third.
     pub fn nothing() -> Closing {
-        Closing { linked: Vec::new() }
+        Closing {
+            linked: Vec::new(),
+            #[cfg(windows)]
+            inside: None,
+        }
     }
 
     /// And the files a rendering joined in by hard link, each as the account's
     /// own path and the name a session found it under.
     pub(crate) fn of_links(linked: Vec<(PathBuf, PathBuf)>) -> Closing {
-        Closing { linked }
+        Closing {
+            linked,
+            #[cfg(windows)]
+            inside: None,
+        }
+    }
+
+    /// The same, holding the AppContainer the session runs inside — see the
+    /// field, which is where the whole of what holding it means is.
+    #[cfg(windows)]
+    pub(crate) fn inside(
+        mut self,
+        container: std::sync::Arc<super::container::Container>,
+    ) -> Closing {
+        self.inside = Some(container);
+
+        self
     }
 
     /// The names inside the profile this has anything left to do about — none

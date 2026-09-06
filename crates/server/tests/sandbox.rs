@@ -816,7 +816,11 @@ file() {
 fn probe(sandbox: &Sandbox, script: &str) -> BTreeMap<String, String> {
     let whole = format!("{PROBE}\n{script}\n");
 
-    let output = Command::try_from(&sandbox.command(&[SH, "-c", &whole]).0)
+    let rendered = sandbox
+        .command(&[SH, "-c", &whole])
+        .expect("a rendering on a platform with no identity to make");
+
+    let output = Command::try_from(&rendered.0)
         .expect("a rendering with no container")
         .stdin(Stdio::null())
         .output()
@@ -842,7 +846,11 @@ fn probe(sandbox: &Sandbox, script: &str) -> BTreeMap<String, String> {
 /// being asked here is what the *first* thing started inside gets, and a shell
 /// between it and the rendering is a shell that says something of its own.
 fn environment(sandbox: &Sandbox) -> BTreeMap<String, String> {
-    let output = Command::try_from(&sandbox.command(&[on_the_host("env")]).0)
+    let rendered = sandbox
+        .command(&[on_the_host("env")])
+        .expect("a rendering on a platform with no identity to make");
+
+    let output = Command::try_from(&rendered.0)
         .expect("a rendering with no container")
         .stdin(Stdio::null())
         .output()
@@ -1585,7 +1593,10 @@ async fn an_account_on_another_volume_is_a_session_that_is_not_started() {
 /// back is what a session's relay holds until the process has gone, and the two
 /// tests about a session's ending are the only ones that ask it anything.
 fn made(sandbox: &Sandbox) -> Closing {
-    sandbox.command(&["the-agent"]).1
+    sandbox
+        .command(&["the-agent"])
+        .expect("a rendering on a platform with no identity to make")
+        .1
 }
 
 /// GitHub auth is said rather than found: the token the human configured, in

@@ -30,11 +30,10 @@ use std::process::{Command, ExitStatus, Output, Stdio};
 use std::ptr;
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, HANDLE, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, LocalFree,
-    SetHandleInformation, WAIT_FAILED,
+    CloseHandle, HANDLE, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, SetHandleInformation,
+    WAIT_FAILED,
 };
-use windows_sys::Win32::Security::Authorization::ConvertStringSidToSidW;
-use windows_sys::Win32::Security::{PSID, SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES};
+use windows_sys::Win32::Security::{SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES};
 use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
     CREATE_UNICODE_ENVIRONMENT, CreateProcessW, DeleteProcThreadAttributeList,
@@ -43,6 +42,7 @@ use windows_sys::Win32::System::Threading::{
     STARTF_USESTDHANDLES, STARTUPINFOEXW, UpdateProcThreadAttribute, WaitForSingleObject,
 };
 
+use super::container::Sid;
 use super::rendering::Rendering;
 
 /// `rendering` run to its end with nothing watching it, and everything it
@@ -61,7 +61,7 @@ use super::rendering::Rendering;
 /// that is not.
 ///
 /// **A rendering that names no container is an ordinary `Command`**, which is
-/// what the two Unix platforms and an unsandboxed Windows process are. One that
+/// what the two Unix platforms and the Compile Server are. One that
 /// names a container is the whole reason this exists: the security
 /// capabilities go on an attribute list, and a list is precisely what the
 /// standard library will not carry.
@@ -301,7 +301,7 @@ impl Capabilities {
         let held = Sid::of(sid)?;
 
         let capabilities = SECURITY_CAPABILITIES {
-            AppContainerSid: held.0,
+            AppContainerSid: held.as_psid(),
             Capabilities: ptr::null_mut(),
             CapabilityCount: 0,
             Reserved: 0,
@@ -316,35 +316,6 @@ impl Capabilities {
     /// What goes on the attribute list, and how much of it there is to read.
     pub(crate) fn attribute(&self) -> *const c_void {
         ptr::from_ref(&self.capabilities).cast::<c_void>()
-    }
-}
-
-/// One SID, read out of the spelling a person writes and freed when it is let
-/// go of.
-struct Sid(PSID);
-
-impl Sid {
-    fn of(sid: &str) -> io::Result<Sid> {
-        let mut read: PSID = ptr::null_mut();
-
-        if unsafe { ConvertStringSidToSidW(wide(OsStr::new(sid)).as_ptr(), &mut read) } == 0 {
-            return Err(io::Error::other(format!(
-                "the container {sid} is not a SID this machine can read: {}",
-                io::Error::last_os_error()
-            )));
-        }
-
-        Ok(Sid(read))
-    }
-}
-
-impl Drop for Sid {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            // Allocated by `ConvertStringSidToSidW`, which says a local
-            // allocation and this is how one is given back.
-            unsafe { LocalFree(self.0.cast()) };
-        }
     }
 }
 

@@ -2,9 +2,11 @@
 //!
 //! One description, and three renderings of it: bubblewrap's flags on Linux —
 //! see [`super::bwrap`] — a deny-by-default policy on macOS — see
-//! [`super::seatbelt`] — and the process itself on Windows, which has no
-//! boundary yet — see [`super::open`]. No rendering is the description, and
-//! nothing above [`super::Sandbox`] learns which one it got.
+//! [`super::seatbelt`] — and an identity on Windows, whose reach is an
+//! access-control entry on each real path this names — see [`super::granting`],
+//! and [`super::open`] for the process that identity is carried on. No
+//! rendering is the description, and nothing above [`super::Sandbox`] learns
+//! which one it got.
 //!
 //! **The order is part of it.** A bind is applied in the order bwrap is given
 //! it, so a directory said twice is the second one, and a temporary filesystem

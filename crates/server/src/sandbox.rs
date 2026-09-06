@@ -8,14 +8,20 @@
 //! the description, no two of them are the same boundary, and nothing above
 //! this module learns which one it got (ADR-0012).
 //!
-//! **And on Windows into the process itself, with no boundary at all** — see
-//! [`open`]. That arm sets the environment, starts in the Worktree and runs the
-//! vector, which is the whole of what a rendering with nothing to hide behind
-//! comes to: a session there runs with the reach of the account running the
-//! server, and the workbench says so in words rather than pretending otherwise
-//! (ADR-0014). The description is the same description, which is what lets the
-//! stage that gives that platform a boundary change the renderer and nothing
-//! above it.
+//! **And on Windows into an identity, which is that platform's whole boundary**
+//! — see [`container`] for the AppContainer a session runs inside and
+//! [`granting`] for the access-control entries that are the entirety of what it
+//! reaches. There is nothing to mount and no policy to write there: a process
+//! started with that identity on its token reaches the paths the identity has
+//! been granted and is refused the rest of the machine, which the description
+//! above becomes one entry at a time (ADR-0014). [`open`] is the process half
+//! of it — the environment said, the Worktree started in, the vector run — and
+//! carries the identity rather than standing in front of the program.
+//!
+//! **A boundary that cannot be made refuses the session** on that platform, the
+//! way a missing `bwrap` does on this one: a profile that will not be created
+//! and an entry that will not be written are both answered by starting nothing,
+//! with no unsandboxed session to fall back to.
 //!
 //! Evolved from `tobico-scripts/bin/sandbox`, which is the working reference —
 //! but narrowed where it matters. That script binds the whole of `~/src`
@@ -91,6 +97,12 @@ mod seatbelt;
 // module.
 mod junction;
 pub(crate) mod open;
+// And the half of the Windows rendering that is the boundary: what a
+// description comes to as an access-control entry on each real path it names.
+// Built everywhere, because what a description comes to is a fact about the
+// description — only the writing of one is a Win32 call, and that is `cfg`-ed
+// inside.
+mod granting;
 // And the three ends of what a renderer is: the description going in, the
 // process coming out, and what is left to see to once that process has gone.
 // The last of those is nothing on the two platforms whose links follow their
@@ -611,8 +623,15 @@ pub(crate) fn emptied(path: &Path) -> std::io::Result<()> {
 
 /// And `surface` as the process that runs it, by whichever mechanism
 /// `platform` has one: bubblewrap wherever there is a kernel with namespaces to
-/// unshare, Apple's own on a Mac, and the open one where there is no boundary
-/// yet — see [`bwrap`], [`seatbelt`] and [`open`].
+/// unshare, Apple's own on a Mac, and the open one where the boundary is on the
+/// process's token rather than in front of it — see [`bwrap`], [`seatbelt`] and
+/// [`open`].
+///
+/// **The identity is not this function's**, which is why it hands back a
+/// rendering naming none: what an entry is written for is a profile that has to
+/// be created and held for as long as the session runs, and this is called by
+/// the compile server as well — see [`Sandbox::command`], which is where the
+/// two are put together.
 ///
 /// The one place any rendering is reached from, so that a sandbox is a
 /// description going in and a [`Rendering`] coming out wherever one is made.
@@ -667,9 +686,11 @@ fn machine_path(platform: Platform) -> OsString {
 /// Verkstead's own directory.
 ///
 /// What it costs is the one thing the other two arms buy: a session's `PATH` is
-/// a fact about how the server was launched. Which is the same trade the
-/// unsandboxed note is about — there is no boundary on this platform yet, so
-/// there is nothing here for a narrower `PATH` to protect.
+/// a fact about how the server was launched. What it does not cost is reach: a
+/// directory on this list is somewhere a session looks for a program rather
+/// than somewhere it may read, and the boundary grants only those of them that
+/// are under the human's own profile — see [`granting::entries`], which is
+/// where that rule is.
 fn servers_path() -> OsString {
     std::env::var_os("PATH").unwrap_or_default()
 }
@@ -1190,9 +1211,9 @@ const GITHUB: &str = "https://github.com";
 /// are inside it — see [`windows_names`] — so what npm caches, what a tool
 /// writes down and what a session throws away all land there rather than in
 /// the human's own. What keeps one Conversation out of another's is again
-/// that they are different directories; what keeps a session out of the rest
-/// of the machine is nothing yet, which is what the unsandboxed note says in
-/// words.
+/// that they are different directories, and what keeps a session out of the
+/// rest of the machine is the identity it runs under — see [`container`], whose
+/// profile is named per Conversation for the same reason this directory is.
 ///
 /// One is emptied as each of that Conversation's sessions starts rather than
 /// removed when the Conversation ends. What a session left in it is nothing
@@ -1209,6 +1230,13 @@ pub struct Homes {
     /// And the root a Conversation's own real one is made under, on the
     /// platform that cannot.
     root: PathBuf,
+
+    /// The Data Directory the root above is under, kept because one more thing
+    /// than a home is named from it: the AppContainer a Windows session runs
+    /// inside — see [`container::Container::for_conversation`]. Here rather
+    /// than passed beside a `Homes`, so that what a sandbox is built against is
+    /// one value however many things this machine names per Conversation.
+    data: PathBuf,
 
     /// Which of those a session gets. A value rather than a `cfg`, for the
     /// reason [`Platform`] is one: the arm this machine will never run is still
@@ -1244,6 +1272,7 @@ impl Homes {
         Homes {
             servers,
             root: data_dir.join("homes"),
+            data: data_dir.to_owned(),
             platform,
         }
     }
@@ -2061,7 +2090,7 @@ impl SandboxConfig {
 /// One `--sandbox-bind`, as the Repo it belongs to — `None` for every Repo — and
 /// the directory it binds.
 pub(crate) fn read_bind(bind: &str) -> anyhow::Result<(Option<String>, PathBuf)> {
-    if bind.starts_with('/') {
+    if absolute(bind) {
         return Ok((None, PathBuf::from(bind)));
     }
 
@@ -2077,7 +2106,7 @@ pub(crate) fn read_bind(bind: &str) -> anyhow::Result<(Option<String>, PathBuf)>
         anyhow::bail!("the sandbox bind {bind:?} names no Repo before its `=`");
     }
 
-    if !path.starts_with('/') {
+    if !absolute(path) {
         anyhow::bail!(
             "the sandbox bind {bind:?} is relative: a bind has to name one directory, \
              whichever directory the server was started in"
@@ -2085,6 +2114,36 @@ pub(crate) fn read_bind(bind: &str) -> anyhow::Result<(Option<String>, PathBuf)>
     }
 
     Ok((Some(repo.to_owned()), PathBuf::from(path)))
+}
+
+/// Whether `path` says where it is rather than where it is from here.
+///
+/// **Both platforms' spellings, on both platforms**, which is what makes this a
+/// function rather than the `starts_with('/')` it was. A Windows bind is
+/// `C:\cache` or a share as `\\host\share`, and neither begins with the one
+/// character this used to look for — so a Sandbox Configuration on that machine
+/// could name nothing at all, which went unnoticed while its rendering had
+/// nothing to do with a bind. It has now: the third rendering grants each
+/// configured directory to the session's identity like any other path in the
+/// description.
+///
+/// Read as a string rather than through [`Path::is_absolute`], for the reason
+/// [`separator`] is a `match`: that call answers for the platform the *server*
+/// was compiled for, and what is being read here is what a human typed for the
+/// machine they are running on.
+fn absolute(path: &str) -> bool {
+    if path.starts_with('/') || path.starts_with(r"\\") {
+        return true;
+    }
+
+    // A drive letter, its colon, and then a separator: `C:\cache` is a place and
+    // `C:cache` is a path relative to whatever directory that drive is sitting
+    // in, which is not one directory and so is not a bind.
+    let mut spelled = path.chars();
+
+    matches!(spelled.next(), Some(letter) if letter.is_ascii_alphabetic())
+        && spelled.next() == Some(':')
+        && matches!(spelled.next(), Some('\\' | '/'))
 }
 
 /// One session's sandbox: everything that decides what a command run inside can
@@ -2218,6 +2277,42 @@ pub struct Sandbox {
     /// will never run is still an arm a test can build a sandbox on. Everything
     /// outside a test hands over a `Homes` made with [`Platform::HERE`].
     platform: Platform,
+
+    /// Which Conversation this is, and the Data Directory it is running under.
+    ///
+    /// The two halves of what the identity a Windows session runs under is
+    /// named from — see [`container::Container::for_conversation`]. Nothing
+    /// else in a description needs either: the paths a session reaches are
+    /// resolved before they get here, and these are here because a *boundary*
+    /// on that platform is a name rather than a path.
+    conversation: i64,
+    data_dir: PathBuf,
+
+    /// And the home of whoever is running the server, which is the human's own
+    /// profile on the platform that has one.
+    ///
+    /// What the `PATH` rule is measured against — see
+    /// [`granting::entries`]: a per-user tool install is readable by a
+    /// container only where it has been granted, and which of a session's
+    /// `PATH` entries are per-user is which of them are under this.
+    servers_home: PathBuf,
+}
+
+/// What a description comes to on the platform whose boundary is an identity
+/// rather than a wrapper — see [`Sandbox::boundary`], which is where the whole
+/// of it is.
+#[derive(Debug)]
+struct Boundary<'a> {
+    /// The two halves the identity is named from: the Data Directory, so that
+    /// two Verksteads on one machine are two sets of containers, and the
+    /// Conversation, so that one Conversation's session is refused another's
+    /// Worktree — see [`container::Container::for_conversation`], which is what
+    /// puts them together.
+    data_dir: &'a Path,
+    conversation: i64,
+
+    /// And what has to be written for it, in the order the description said it.
+    entries: Vec<granting::Entry>,
 }
 
 impl Sandbox {
@@ -2332,6 +2427,9 @@ impl Sandbox {
             shell: None,
             build_cache: cache.shared(config.rust_build_cache()),
             platform: homes.platform(),
+            conversation: conversation.id,
+            data_dir: homes.data.clone(),
+            servers_home: homes.servers.clone(),
         })
     }
 
@@ -2374,8 +2472,89 @@ impl Sandbox {
     /// Terminal's follow loop, the two things that know when what they started
     /// is over. Nothing at all on the two platforms whose links follow their own
     /// target; see [`Closing`].
-    pub fn command<S: AsRef<OsStr>>(&self, argv: &[S]) -> (Rendering, Closing) {
-        rendered(self.platform, &self.surface(argv))
+    ///
+    /// **And it can refuse**, on the platform whose boundary is an identity: a
+    /// profile that will not be created and a grant that will not be written
+    /// are both a session that would otherwise run behind no boundary at all,
+    /// which is the one thing ADR-0014 refuses (Q18). What comes back says
+    /// which, and the caller starts nothing — the same answer a missing `bwrap`
+    /// gets on Linux. The two platforms with a wrapper never refuse here.
+    pub fn command<S: AsRef<OsStr>>(&self, argv: &[S]) -> std::io::Result<(Rendering, Closing)> {
+        let surface = self.surface(argv);
+
+        // Worked out before the rendering and used after it, so that a build
+        // for a machine with no identity to make still says what one would be
+        // — see [`Sandbox::boundary`].
+        let boundary = self.boundary(&surface);
+
+        // And said in the log wherever there is one, which is where somebody
+        // reading why a Windows session reached what it reached starts. *Asks
+        // for* rather than *was given*: this is the description, and whether
+        // the machine wrote any of it is the arm below.
+        if let Some(boundary) = &boundary {
+            tracing::debug!(
+                conversation_id = boundary.conversation,
+                data_dir = %boundary.data_dir.display(),
+                entries = boundary.entries.len(),
+                "this session's description asks for an AppContainer of its Conversation's \
+                 own and this many access-control entries on real directories"
+            );
+        }
+
+        // The process first, because it is what makes the description true on
+        // the filesystem: the profile is emptied, the account junctioned in and
+        // the temporary directory made here, and an entry cannot be written on
+        // a path nothing has put there yet.
+        #[allow(unused_mut)]
+        let (mut rendering, mut closing) = rendered(self.platform, &surface);
+
+        #[cfg(windows)]
+        if let Some(boundary) = boundary {
+            let container =
+                container::Container::for_conversation(boundary.data_dir, boundary.conversation)
+                    .map_err(|refused| {
+                        std::io::Error::other(format!(
+                            "the AppContainer a session of Conversation {} runs inside could \
+                             not be made, so no session was started: {refused}",
+                            boundary.conversation
+                        ))
+                    })?;
+
+            granting::writing::write(&boundary.entries, container.sid())?;
+
+            // Remembered by the container rather than by the session, because
+            // an entry names the container's identity and goes when it does —
+            // see [`container::Container::wrote`].
+            container.wrote(boundary.entries);
+
+            rendering.inside(container.sid());
+            closing = closing.inside(container);
+        }
+
+        Ok((rendering, closing))
+    }
+
+    /// The boundary this description asks for on the platform whose boundary is
+    /// an identity: whose identity it is, and every access-control entry that
+    /// has to be written for it.
+    ///
+    /// `None` on the two platforms that hide behind a wrapper, where what a
+    /// session may reach is said to `bwrap` or to a policy and there is no
+    /// identity in it at all.
+    ///
+    /// **Worked out here rather than inside the Windows arm**, for the reason
+    /// [`rendered`] renders on every machine: what a description comes to is a
+    /// fact about the description, and only the *writing* of an entry is a call
+    /// one platform has. So what a session would be granted is readable
+    /// wherever these are read — see [`granting::entries`], whose own tests ask
+    /// it on a machine that has never had an access-control list, the way the
+    /// bwrap tests read flags nothing runs.
+    fn boundary(&self, surface: &Surface) -> Option<Boundary<'_>> {
+        (self.platform == Platform::Windows).then(|| Boundary {
+            data_dir: &self.data_dir,
+            conversation: self.conversation,
+            entries: granting::entries(surface, Some(&self.servers_home)),
+        })
     }
 
     /// And what that mechanism is given: everything a session may reach, said

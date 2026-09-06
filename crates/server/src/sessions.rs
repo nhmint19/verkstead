@@ -1871,7 +1871,24 @@ impl Sessions {
         // the relay from here, which is the thing that knows when the session is
         // over. See [`crate::sandbox::Closing`], which is nothing at all on
         // either Unix.
-        let (command, afterwards) = sandbox.command(&argv);
+        //
+        // **And this is where a boundary that cannot be made refuses a
+        // session** — a Windows AppContainer that will not be created, or a
+        // grant on one of the paths the description names that will not be
+        // written. Refused rather than started anyway, which is the whole of
+        // ADR-0014's Q18: there is no unsandboxed session to fall back to, the
+        // way there is no session at all where `bwrap` is missing on Linux.
+        let (command, afterwards) = match sandbox.command(&argv) {
+            Ok(rendered) => rendered,
+            Err(error) => {
+                tracing::error!(
+                    error = ?error,
+                    conversation_id,
+                    "a grilling session's sandbox could not be made, so none was started"
+                );
+                return Ok(None);
+            }
+        };
 
         let child = match terminal.spawn(&command) {
             Ok(child) => child,

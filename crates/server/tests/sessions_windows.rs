@@ -6,9 +6,9 @@
 //! of its own rather than by making that one portable. `tests/sessions.rs`
 //! stands on a mount namespace, a `/bin/sh` probe and a `stty`, and what is
 //! being proved here is a different machine: a console rather than a
-//! pseudo-terminal, a rendering with no boundary in it, a profile joined
-//! together out of junctions and hard links, and a prompt that is not on the
-//! command line at all.
+//! pseudo-terminal, a boundary that is an identity the process carries rather
+//! than a wall in front of it, a profile joined together out of junctions and
+//! hard links, and a prompt that is not on the command line at all.
 //!
 //! **Everything here is real except the agent.** The repository is a
 //! repository, the worktree is one git made, the console is Verkstead's own
@@ -129,6 +129,15 @@ const POWERSHELL: [&str; 4] = ["powershell.exe", "-NoProfile", "-ExecutionPolicy
 /// say and is not going to exit, which is what the tests about a *running*
 /// session need.
 ///
+/// And `Reading` is how the boundary is asked anything: a file read, or the
+/// name of what stopped it. **The name and not a word of the test's own**,
+/// because the two answers that matter here look identical to anything coarser
+/// — a path the boundary refused says `UnauthorizedAccessException` and a path
+/// that was never there says `FileNotFoundException`, and a test that could not
+/// tell them apart would pass just as happily against a description that named
+/// nothing at all. The innermost exception is the one asked, because a .NET
+/// method called from PowerShell arrives wrapped.
+///
 /// The vector is written down by every stand-in rather than by the one test
 /// that reads it: what `$args[1]` and `$args[2]` are turns on Verkstead having
 /// built the line in the order it builds it, so a test failing anywhere in this
@@ -146,6 +155,15 @@ function Note($name, $value) {
 function Say($said) { [Console]::Out.WriteLine($said) }
 
 function Idle { while ($true) { Start-Sleep -Milliseconds 50 } }
+
+function Reading($path) {
+    try { return 'read: ' + [System.IO.File]::ReadAllText($path) }
+    catch {
+        $why = $_.Exception
+        while ($why.InnerException) { $why = $why.InnerException }
+        return 'failed: ' + $why.GetType().FullName
+    }
+}
 
 Note 'args' ($args -join "`n")
 
@@ -482,15 +500,42 @@ async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
     let database = state.path().join("verkstead.db");
     let pool = open_database(&database).await.unwrap();
 
+    // The Agent Profile's account, made before the stand-in is written because
+    // the stand-in is told where it is: what a session may reach of it is one
+    // of the things this suite attempts from inside. See [`account`].
+    let account = account(watched.path());
+
+    // And the home of whoever is running the server, with something private in
+    // it that no description ever names. A directory of the fixture's own
+    // rather than the machine's real profile: what a session may reach is
+    // measured against the home this server was given, so this *is* the
+    // human's own here, and asking about it costs nobody a file in their real
+    // Documents.
+    let humans = state.path().join("nobody");
+    std::fs::create_dir_all(humans.join("Documents")).unwrap();
+    std::fs::write(humans.join("Documents").join("private.txt"), THE_HUMANS).unwrap();
+
+    let skills =
+        Skills::installed(Platform::HERE, state.path()).expect("this binary carries skills");
+    let skills_inside = skills.inside().to_owned();
+
+    // Where the Repo will be and where its git directory will be — both said
+    // before either exists, because the stand-in is written first and the two
+    // are a path rather than a thing. See [`repository`], which makes them.
+    let repo = watched.path().join("verkstead");
+
     let stand_in = scripts.path().join("agent.ps1");
     std::fs::write(
         &stand_in,
-        format!(
-            "{}\n{script}\n",
-            PREAMBLE.replace(
-                "{evidence}",
-                &evidence.path().display().to_string().replace('\'', "''"),
-            ),
+        said(
+            &format!("{PREAMBLE}\n{script}\n"),
+            &[
+                ("{evidence}", evidence.path()),
+                ("{git}", &repo.join(".git")),
+                ("{skills}", &skills_inside),
+                ("{documents}", &humans.join("Documents")),
+                ("{their-skills}", &account.join(".claude").join("skills")),
+            ],
         ),
     )
     .unwrap();
@@ -500,10 +545,6 @@ async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
         .map(|word| (*word).to_owned())
         .chain(["-File".to_owned(), stand_in.display().to_string()])
         .collect();
-
-    let skills =
-        Skills::installed(Platform::HERE, state.path()).expect("this binary carries skills");
-    let skills_inside = skills.inside().to_owned();
 
     let build_cache = match cache {
         Some(dir) => BuildCache::resolve(Some(dir), state.path()).expect("a cache to resolve"),
@@ -515,12 +556,24 @@ async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
         // The server's own home, which this platform never hands a session:
         // every Conversation here gets one of its own under the Data
         // Directory. See `Homes::for_conversation`.
-        Homes::on(Platform::HERE, state.path().join("nobody"), state.path()),
+        Homes::on(Platform::HERE, humans.clone(), state.path()),
         Reachable::at(LISTENING),
-        // No configured binds: a Windows path is not one `--bind` takes, and
-        // there is nothing for one to do on a platform whose rendering binds
-        // nothing.
-        SandboxConfig::default(),
+        // The two directories this suite's own machinery lives in, configured
+        // as binds the way a human configures a build cache.
+        //
+        // **They have to be said, and that is the stage landing rather than a
+        // fixture growing a wart.** A session runs inside an AppContainer now,
+        // which reaches what its identity has been granted and nothing else —
+        // so a stand-in script under the machine's temporary directory is a
+        // file a session cannot read, and an evidence directory beside it is
+        // one it cannot write. Both are outside the description a session gets,
+        // exactly as they should be; what puts them inside is the same thing
+        // that puts a human's build cache inside.
+        SandboxConfig::resolve(&[
+            scripts.path().display().to_string(),
+            evidence.path().display().to_string(),
+        ])
+        .expect("two directories that are really there"),
         build_cache,
         skills,
         Executable::of_the_server(state.path()),
@@ -544,7 +597,7 @@ async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
         ]),
     );
 
-    let repo = repository(watched.path().join("verkstead"));
+    let repo = repository(repo);
     let registered: Registered =
         post(&app, "/api/ui/repos", &serde_json::json!({ "path": repo })).await;
     assert_eq!(registered, Registered::Added);
@@ -561,8 +614,6 @@ async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
     let Started::Started { id } = started else {
         panic!("expected the Conversation to start, got {started:?}");
     };
-
-    let account = account(watched.path());
 
     for role in ["grilling", "implementation", "review"] {
         let profile = profile(&app, &account, role).await;
@@ -631,11 +682,45 @@ fn account(watched: &Path) -> PathBuf {
     std::fs::write(account.join(".claude").join("marker.txt"), THE_ACCOUNTS).unwrap();
     std::fs::write(account.join(".claude.json"), "{}\n").unwrap();
 
+    // And the skills that account has of its own, which are the one thing
+    // inside it a session is meant to find nothing at — see the description's
+    // `Access::Nothing`, and the test below that attempts to read this file
+    // from inside a session's container.
+    std::fs::create_dir_all(account.join(".claude").join("skills")).unwrap();
+    std::fs::write(
+        account.join(".claude").join("skills").join("theirs.md"),
+        THEIR_SKILL,
+    )
+    .unwrap();
+
     account
 }
 
 /// What is in that file, which is a thing only the Profile's own account holds.
 const THE_ACCOUNTS: &str = "the account the Profile named";
+
+/// And the two files a session is meant not to be able to read at all: one the
+/// account keeps beside the pair Verkstead joins in, and one the human keeps in
+/// their own home.
+const THEIR_SKILL: &str = "a skill the account added for itself";
+const THE_HUMANS: &str = "something of the human's that no description names";
+
+/// `text` with each placeholder in `named` replaced by the path beside it, in
+/// the spelling a single-quoted PowerShell string takes.
+///
+/// The one escaping a Windows path needs there: a backslash is an ordinary
+/// character inside single quotes and a quote is doubled to mean itself. Which
+/// is why the stand-in reads these out of variables rather than having them
+/// spliced into a command line.
+fn said(text: &str, named: &[(&str, &Path)]) -> String {
+    let mut said = text.to_owned();
+
+    for (placeholder, path) in named {
+        said = said.replace(placeholder, &path.display().to_string().replace('\'', "''"));
+    }
+
+    said
+}
 
 /// An Agent Profile saved over that account, on models that are worth reading
 /// back.
@@ -1262,6 +1347,89 @@ async fn a_session_runs_in_a_profile_of_the_conversations_own() {
     assert!(
         fixture.account.join(".claude").join("marker.txt").is_file(),
         "the account itself is untouched",
+    );
+}
+
+/// What a session may reach and what it may not, asked from inside the
+/// container by attempting each of them.
+///
+/// **Asked by attempting rather than by reading the entries back.** The
+/// boundary is what is being tested, and a test that read the access-control
+/// list would be asserting itself: it would go on passing while Windows changed
+/// what an entry meant. So the session opens each path and says what the
+/// machine said, and this reads those words.
+///
+/// The four the description names, and the two it does not. The second pair is
+/// the whole point of there being a boundary at all: the human's own Documents,
+/// which nothing in a description ever mentions, and the account's own skills,
+/// which a description mentions in order to say a session finds nothing there.
+/// Both are refused rather than missing, and this tells the two apart — see
+/// [`PREAMBLE`]'s `Reading`, which is why the answers are exception names.
+#[tokio::test]
+async fn a_session_reaches_what_the_description_names_and_is_refused_what_it_does_not() {
+    let fixture = grilling(
+        r#"
+        Note 'worktree' (Reading (Join-Path (Get-Location).Path 'README.md'))
+        Note 'git' (Reading (Join-Path '{git}' 'HEAD'))
+        Note 'account' (Reading (Join-Path $env:USERPROFILE '.claude\marker.txt'))
+        Note 'skills' (Reading (Join-Path '{skills}' 'grilling\SKILL.md'))
+
+        Note 'documents' (Reading (Join-Path '{documents}' 'private.txt'))
+        Note 'their-skills' (Reading (Join-Path '{their-skills}' 'theirs.md'))
+
+        Say 'asked the boundary'
+        Idle
+        "#,
+    )
+    .await;
+
+    for (name, what) in [
+        ("worktree", "the Conversation's own checkout"),
+        ("git", "the Repo's git directory behind it"),
+        ("account", "the Profile's account, through the junction"),
+        ("skills", "the skills it is grilled by"),
+    ] {
+        let said = fixture.written(name).await;
+
+        assert!(
+            said.starts_with("read: "),
+            "{what} is in the description, so a session inside its container \
+             reaches it — and it said: {said:?}",
+        );
+    }
+
+    for (name, what) in [
+        (
+            "documents",
+            "the human's own Documents, which no description names",
+        ),
+        (
+            "their-skills",
+            "the account's own skills, which the description names as nothing \
+             at all",
+        ),
+    ] {
+        assert_eq!(
+            fixture.written(name).await,
+            "failed: System.UnauthorizedAccessException",
+            "{what} is refused from inside — refused rather than absent, the \
+             machine being there and denied",
+        );
+    }
+
+    // And from the host, which is the other half of the same claim: both files
+    // are still where they were and still say what they said. A boundary that
+    // worked by taking something away would be no boundary.
+    assert_eq!(
+        std::fs::read_to_string(
+            fixture
+                .account
+                .join(".claude")
+                .join("skills")
+                .join("theirs.md")
+        )
+        .expect("the account's own skills are the account's"),
+        THEIR_SKILL,
     );
 }
 

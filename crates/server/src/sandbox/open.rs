@@ -1,15 +1,18 @@
 //! The open rendering: a [`Surface`] as the process it describes, with nothing
 //! in front of it.
 //!
-//! The third of the three, and the one with no boundary in it. Where
-//! [`super::bwrap`] hides the rest of the machine behind a mount namespace and
-//! [`super::seatbelt`] refuses it with a policy, this does neither: it sets the
-//! environment, starts in the directory the description said, and runs the
-//! argument vector. A session rendered here reaches whatever the account
-//! running the server reaches, and the workbench says so in words — see the
-//! unsandboxed note on the Conversation view.
+//! The third of the three, and the one whose boundary is not in the process at
+//! all. Where [`super::bwrap`] hides the rest of the machine behind a mount
+//! namespace and [`super::seatbelt`] refuses it with a policy, this does
+//! neither: it sets the environment, starts in the directory the description
+//! said, and runs the argument vector, and what a session may reach is decided
+//! by the identity that process is *started with* — see
+//! [`super::container`] for the identity and [`super::granting`] for the
+//! access-control entries that are the whole of what it reaches. So this is
+//! open in the sense that nothing here stands in front of the program, rather
+//! than in the sense that a session is unbounded.
 //!
-//! **What it is still worth.** The environment is Verkstead's rather than
+//! **What it says on its own.** The environment is Verkstead's rather than
 //! whatever the service was launched with, the working directory is the
 //! Conversation's Worktree, and what runs is the vector the orchestrator built.
 //! Those are the three things every rendering says, and they are what makes a
@@ -38,11 +41,12 @@
 //! **And one thing it deliberately does not make.**
 //! [`super::Access::Nothing`] is the account's own skills hidden, which the
 //! other two platforms answer with an empty directory over them and a refusal
-//! of the path. There is neither here, and the answer that looks nearest is
-//! worse than none: that path is *inside* the account, which by now is a
-//! junction, so a directory made at it would be a directory made in the human's
-//! own account. So it is left as the account keeps it, and said in the log. The
-//! boundary that refuses it is the stage after this one's.
+//! of the path. There is nothing made here, and the answer that looks nearest
+//! would be worse than none: that path is *inside* the account, which by now is
+//! a junction, so a directory made at it would be a directory made in the
+//! human's own account. So nothing is put there and the path is refused
+//! instead, which on this platform is an entry rather than a mount — see
+//! [`super::granting::writing::refuse`].
 //!
 //! **Finding the program is this rendering's own work.** The two Unix
 //! renderings hand a vector to a wrapper and the wrapper's own `execvp` finds
@@ -224,16 +228,9 @@ fn realise(surface: &Surface) -> Vec<(PathBuf, PathBuf)> {
 
             // And the one thing left unmade on purpose — see this module's own
             // documentation, which says why the nearest answer would be worse
-            // than none.
-            Access::Nothing { inside, .. } => {
-                tracing::debug!(
-                    inside = %inside.display(),
-                    "there is no boundary on this platform yet, so what a session was to \
-                     find nothing at is whatever the account keeps there",
-                );
-
-                Ok(())
-            }
+            // than none. What refuses the path is an entry written after this,
+            // on the real directory the junction leads to.
+            Access::Nothing { .. } => Ok(()),
 
             // And what needs nothing made for it: a path of the host's is
             // already where the description says it is, and the process table
@@ -305,6 +302,24 @@ fn cleared(inside: &Path) -> std::io::Result<()> {
     }
 
     std::fs::remove_file(inside)
+}
+
+/// Every directory `surface` says a program is looked for in, in the order it
+/// said them.
+///
+/// The description's `PATH` taken apart, which is what [`found`] walks — said
+/// out here because the boundary has to walk the same list: a per-user tool
+/// install is readable by a container only where it has been granted, and which
+/// directories those are is exactly *where a session looks for a program*. See
+/// [`super::granting::entries`], the one caller outside this module.
+///
+/// Nothing at all where the description names no `PATH`, which is a description
+/// that can find no program by name either.
+pub(super) fn looked_in(surface: &Surface) -> impl Iterator<Item = &Path> {
+    said(surface, PATH)
+        .into_iter()
+        .flat_map(apart)
+        .map(Path::new)
 }
 
 /// What `surface` says `name` is, or nothing where it says nothing.
