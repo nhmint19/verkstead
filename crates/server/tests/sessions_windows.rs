@@ -136,7 +136,21 @@ const POWERSHELL: [&str; 4] = ["powershell.exe", "-NoProfile", "-ExecutionPolicy
 /// file never reads half of one. `Say` prints a line on the console, which is
 /// what reaches the Capture. `Idle` is a session that has said what it has to
 /// say and is not going to exit, which is what the tests about a *running*
-/// session need.
+/// session need. `Under` joins a name onto a directory, `Here` is the directory
+/// the session was started in, and `Waiting` is a pause.
+///
+/// **Not one cmdlet in any of it**, which is a rule rather than a style and is
+/// the rule `tests/container_windows.rs` and `tests/sandbox_windows.rs` are
+/// already written under. A session runs inside an AppContainer from this stage
+/// on, and Windows PowerShell starting in there parses and runs what it is
+/// given without the commands it would ordinarily import from a module as it
+/// starts: the `windows-2025` job answered `CommandNotFoundException` for
+/// `Write-Output` the first time a probe of this shape ran inside one. So every
+/// stand-in here is the language and the framework and nothing else —
+/// `[System.IO.Path]::Combine` rather than `Join-Path`, `[System.IO.File]`
+/// rather than `Set-Content` and `Get-Content`, a `Thread` rather than
+/// `Start-Sleep` — which is what a program has in there whatever the shell
+/// managed to load.
 ///
 /// And `Reading` is how the boundary is asked anything: a file read, or the
 /// name of what stopped it. **The name and not a word of the test's own**,
@@ -155,15 +169,23 @@ const PREAMBLE: &str = r#"
 $ErrorActionPreference = 'Stop'
 $evidence = '{evidence}'
 
+function Under($directory, $name) { return [System.IO.Path]::Combine($directory, $name) }
+
+function Here { return [System.IO.Directory]::GetCurrentDirectory() }
+
+function Waiting($milliseconds) { [System.Threading.Thread]::Sleep($milliseconds) }
+
 function Note($name, $value) {
-    $to = Join-Path $evidence $name
-    Set-Content -LiteralPath ($to + '.writing') -Value ([string]$value) -NoNewline
-    Move-Item -LiteralPath ($to + '.writing') -Destination $to -Force
+    $to = Under $evidence $name
+    $writing = $to + '.writing'
+    [System.IO.File]::WriteAllText($writing, [string]$value)
+    if ([System.IO.File]::Exists($to)) { [System.IO.File]::Delete($to) }
+    [System.IO.File]::Move($writing, $to)
 }
 
 function Say($said) { [Console]::Out.WriteLine($said) }
 
-function Idle { while ($true) { Start-Sleep -Milliseconds 50 } }
+function Idle { while ($true) { Waiting 50 } }
 
 function Reading($path) {
     try { return 'read: ' + [System.IO.File]::ReadAllText($path) }
@@ -179,7 +201,7 @@ Note 'args' ($args -join "`n")
 $model = $args[1]
 $line = $args[2]
 $named = [regex]::Match($line, '`([^`]+)`').Groups[1].Value
-$prompt = if ($named) { Get-Content -Raw -LiteralPath $named } else { '' }
+$prompt = if ($named) { [System.IO.File]::ReadAllText($named) } else { '' }
 "#;
 
 /// The server's own log, printed under whichever test was reading when it gave
@@ -351,7 +373,9 @@ impl Grilling {
 
             assert!(
                 Instant::now() < deadline,
-                "the session never printed {said:?}. It printed: {capture:?}",
+                "the session never printed {said:?}. It printed: {capture:?}. \
+                 And what it was behind was: {}",
+                self.reach(),
             );
 
             pause(Duration::from_millis(25)).await;
@@ -393,8 +417,10 @@ impl Grilling {
                 panic!(
                     "the session never wrote {name}. It printed: {}. A Timeline \
                      with no session on it at all is one that was refused, and \
-                     the server's log above says which refusal that was",
+                     the server's log above says which refusal that was. And \
+                     what it was behind was: {}",
                     self.said_by_each(&view).await,
+                    self.reach(),
                 );
             }
 
@@ -408,6 +434,48 @@ impl Grilling {
             self.until(|view| view.worktree.as_ref().map(|worktree| worktree.path.clone()))
                 .await,
         )
+    }
+
+    /// What the machine says about the boundary this Conversation's sessions
+    /// run behind, at the moment a test gives up on one.
+    ///
+    /// **Said in the failure rather than worked out afterwards.** The
+    /// `windows-2025` job is the only machine that enforces any of this, so a
+    /// session refused something its description granted is a failure nobody
+    /// can read a second time: what Verkstead wrote down that it granted, and
+    /// what the machine's own listing says is really on the Worktree, are the
+    /// two halves of that reading and neither of them survives the run.
+    ///
+    /// The Worktree by way of the directory that holds them rather than off the
+    /// view, because this is called from a failure: a Conversation with no
+    /// worktree row to read is exactly the shape a session refused at its start
+    /// leaves behind, and a helper that waited for one would hang instead of
+    /// saying so.
+    fn reach(&self) -> String {
+        let record = self
+            .state
+            .path()
+            .join("containers")
+            .join(self.id.to_string());
+
+        let mut said = format!(
+            "\n  written down: {}",
+            std::fs::read_to_string(&record)
+                .unwrap_or_else(|error| format!("{}: {error}", record.display())),
+        );
+
+        let worktrees = self.state.path().join("worktrees");
+
+        match std::fs::read_dir(&worktrees) {
+            Ok(listing) => {
+                for entry in listing.flatten() {
+                    said.push_str(&format!("\n  {}", listed(&entry.path())));
+                }
+            }
+            Err(error) => said.push_str(&format!("\n  {}: {error}", worktrees.display())),
+        }
+
+        said
     }
 
     /// This Conversation's handoff directory on the host, which is where the
@@ -948,7 +1016,7 @@ async fn a_session_runs_the_grilling_profiles_agent_on_the_brief_in_the_worktree
     let fixture = grilling(
         r#"
         Note 'model' $model
-        Note 'where' (Get-Location).Path
+        Note 'where' (Here)
         Note 'prompt' $prompt
         Say 'read the brief'
         "#,
@@ -1153,7 +1221,7 @@ async fn resizing_a_watchers_window_resizes_the_session() {
         r#"
         while ($true) {
             Say ('width=' + [Console]::WindowWidth)
-            Start-Sleep -Milliseconds 300
+            Waiting 300
         }
         "#,
     )
@@ -1227,11 +1295,11 @@ async fn what_a_watcher_types_reaches_the_session() {
 async fn force_stop_ends_a_session_where_it_stands() {
     let fixture = grilling(
         r#"
-        $ticks = Join-Path $evidence 'ticks'
+        $ticks = Under $evidence 'ticks'
         Say 'working'
         while ($true) {
-            Add-Content -LiteralPath $ticks -Value 'tick' -NoNewline
-            Start-Sleep -Milliseconds 50
+            [System.IO.File]::AppendAllText($ticks, 'tick')
+            Waiting 50
         }
         "#,
     )
@@ -1279,10 +1347,10 @@ async fn a_session_runs_in_a_profile_of_the_conversations_own() {
         Note 'temp' $env:TEMP
         Note 'tmp' $env:TMP
 
-        Set-Content -LiteralPath (Join-Path $env:TEMP 'thrown-away.txt') -Value 'gone with it'
+        [System.IO.File]::WriteAllText((Under $env:TEMP 'thrown-away.txt'), 'gone with it')
 
-        Note 'marker' (Get-Content -Raw -LiteralPath (Join-Path $env:USERPROFILE '.claude\marker.txt'))
-        Note 'config' (Get-Content -Raw -LiteralPath (Join-Path $env:USERPROFILE '.claude.json'))
+        Note 'marker' ([System.IO.File]::ReadAllText((Under $env:USERPROFILE '.claude\marker.txt')))
+        Note 'config' ([System.IO.File]::ReadAllText((Under $env:USERPROFILE '.claude.json')))
 
         Say 'read the account'
         Idle
@@ -1378,13 +1446,13 @@ async fn a_session_runs_in_a_profile_of_the_conversations_own() {
 async fn a_session_reaches_what_the_description_names_and_is_refused_what_it_does_not() {
     let fixture = grilling(
         r#"
-        Note 'worktree' (Reading (Join-Path (Get-Location).Path 'README.md'))
-        Note 'git' (Reading (Join-Path '{git}' 'HEAD'))
-        Note 'account' (Reading (Join-Path $env:USERPROFILE '.claude\marker.txt'))
-        Note 'skills' (Reading (Join-Path '{skills}' 'grilling\SKILL.md'))
+        Note 'worktree' (Reading (Under (Here) 'README.md'))
+        Note 'git' (Reading (Under '{git}' 'HEAD'))
+        Note 'account' (Reading (Under $env:USERPROFILE '.claude\marker.txt'))
+        Note 'skills' (Reading (Under '{skills}' 'grilling\SKILL.md'))
 
-        Note 'documents' (Reading (Join-Path '{documents}' 'private.txt'))
-        Note 'their-skills' (Reading (Join-Path '{their-skills}' 'theirs.md'))
+        Note 'documents' (Reading (Under '{documents}' 'private.txt'))
+        Note 'their-skills' (Reading (Under '{their-skills}' 'theirs.md'))
 
         Say 'asked the boundary'
         Idle
@@ -1524,8 +1592,16 @@ async fn a_terminal_runs_powershell_in_the_conversations_worktree() {
     // grid: what a Windows path is spelled like is not one answer — a short
     // name, a long one, and whichever case each end of it chose — so a file
     // that turns up in the Worktree is the claim without the spelling.
+    //
+    // Written with the framework rather than with `Set-Content`, for the reason
+    // every stand-in in this file is — see [`PREAMBLE`]. A Conversation Terminal
+    // is a shell inside the same container a session runs in, so what it can be
+    // typed is what a shell in there has whatever it managed to load.
     watcher
-        .types("Set-Content -LiteralPath 'stood-here.txt' -Value 'here'\r")
+        .types(
+            "[System.IO.File]::WriteAllText([System.IO.Path]::Combine(\
+             [System.IO.Directory]::GetCurrentDirectory(), 'stood-here.txt'), 'here')\r",
+        )
         .await;
 
     until_there(&worktree.join("stood-here.txt")).await;
@@ -1610,8 +1686,8 @@ async fn a_session_gets_the_shared_cargo_home_and_no_compiler_wrapper() {
         Note 'wrapper' $env:RUSTC_WRAPPER
         Note 'cargo-home' $env:CARGO_HOME
 
-        New-Item -ItemType Directory -Force -Path $env:CARGO_HOME | Out-Null
-        Set-Content -LiteralPath (Join-Path $env:CARGO_HOME 'downloaded.crate') -Value 'here'
+        [void][System.IO.Directory]::CreateDirectory($env:CARGO_HOME)
+        [System.IO.File]::WriteAllText((Under $env:CARGO_HOME 'downloaded.crate'), 'here')
         "#,
         Some(cache.path()),
     )
@@ -1645,6 +1721,27 @@ async fn a_session_gets_the_shared_cargo_home_and_no_compiler_wrapper() {
         "here",
         "and the session really wrote it, from inside its container",
     );
+}
+
+/// What a path's access-control list says, as the machine's own tool prints it
+/// — see [`Grilling::reach`], the one caller.
+///
+/// `icacls` rather than a reading of this suite's own, for the reason
+/// `tests/sandbox_windows.rs` asks it that way: what is wanted is the list
+/// Windows really holds, and a reader written here would be this file agreeing
+/// with itself.
+fn listed(path: &Path) -> String {
+    let listed = Command::new("icacls")
+        .arg(path)
+        .stdin(Stdio::null())
+        .output()
+        .expect("icacls is part of Windows");
+
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&listed.stdout),
+        String::from_utf8_lossy(&listed.stderr),
+    )
 }
 
 /// Where a program is on this machine, asked the way this machine answers —
