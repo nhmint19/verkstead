@@ -22,7 +22,7 @@ Roadmap stage: [01: Open the boundary](docs/roadmaps/onboarding/01-open-the-boun
 
 ## Tasks
 
-- [ ] 01: Register and save anywhere — [details](01-register-and-save-anywhere.md)
+- [x] 01: Register and save anywhere — [details](01-register-and-save-anywhere.md)
 - [ ] 02: One browse, opening at HOME — [details](02-one-browse-opening-at-home.md)
 - [ ] 03: The flag, the setting and the Paths section — [details](03-the-flag-and-the-paths-section.md)
 - [ ] 04: `paths` on the NixOS module — [details](04-paths-on-the-nixos-module.md)

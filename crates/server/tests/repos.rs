@@ -3,9 +3,12 @@
 //! taking one off the registry does to the list it was on.
 //!
 //! Every refusal here is asked of the *server*, through the endpoint, rather
-//! than of the boundary type underneath it — which is the point of the Watched
-//! Paths being a security boundary. A browser that skipped the form, or a `curl`
-//! that never saw one, meets the same answers.
+//! than of the checks underneath it: a browser that skipped the form, or a
+//! `curl` that never saw one, meets the same answers.
+//!
+//! Where a repository *is* is not one of the refusals. Anywhere the server can
+//! read is somewhere a Repo can be registered from, whatever the installation
+//! was started with.
 //!
 //! And the one thing there is to say to a Repo that is already registered: how
 //! it resolves a merge conflict, which is an override of the global setting and
@@ -24,9 +27,9 @@ use tower::ServiceExt;
 use verkstead_render::{ConflictResolution, Registered, RepoEntry, RepoRemoved, RepoView};
 use verkstead_server::{WatchedPaths, open_database, router_watching, store};
 
-/// A router watching `watched`, plus the directory holding its database alive.
-async fn app_watching(watched: &Path) -> (tempfile::TempDir, Router) {
-    let (dir, _pool, app) = app_and_pool_watching(watched).await;
+/// A router, plus the Data Directory holding its database alive.
+async fn workbench() -> (tempfile::TempDir, Router) {
+    let (dir, _pool, app) = workbench_and_pool().await;
 
     (dir, app)
 }
@@ -34,22 +37,7 @@ async fn app_watching(watched: &Path) -> (tempfile::TempDir, Router) {
 /// The same, with the pool beside it — for the tests that put Conversations on
 /// a Repo, which is the one thing they need that this namespace has no endpoint
 /// for.
-async fn app_and_pool_watching(watched: &Path) -> (tempfile::TempDir, SqlitePool, Router) {
-    let dir = tempfile::tempdir().unwrap();
-    let pool = open_database(&dir.path().join("verkstead.db"))
-        .await
-        .unwrap();
-    let watched = WatchedPaths::resolve(&[watched.to_owned()]).unwrap();
-
-    let data_dir = dir.path().to_owned();
-
-    (dir, pool.clone(), router_watching(pool, watched, data_dir))
-}
-
-/// A router the installation gave nothing to watch, plus the Data Directory its
-/// `config.yaml` goes in — which is what a standalone install is before anybody
-/// has been to its settings page.
-async fn app_watching_what_the_settings_say() -> (tempfile::TempDir, Router) {
+async fn workbench_and_pool() -> (tempfile::TempDir, SqlitePool, Router) {
     let dir = tempfile::tempdir().unwrap();
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
@@ -57,21 +45,27 @@ async fn app_watching_what_the_settings_say() -> (tempfile::TempDir, Router) {
 
     let data_dir = dir.path().to_owned();
 
-    (dir, router_watching(pool, WatchedPaths::none(), data_dir))
+    (
+        dir,
+        pool.clone(),
+        router_watching(pool, WatchedPaths::none(), data_dir),
+    )
 }
 
-/// Write `config.yaml` in `data_dir` saying `paths` are the Watched Paths.
+/// The same again, over a server the installation gave `given` to watch.
 ///
-/// The file rather than the type that writes it: what a hand-edit and a save
-/// both leave behind is this text, and a test that went through the type would
-/// not be reading the key.
-fn watch_in_the_settings(data_dir: &Path, paths: &[&Path]) {
-    let mut yaml = String::from("watched_paths:\n");
-    for path in paths {
-        yaml.push_str(&format!("  - {}\n", path.display()));
-    }
+/// Only one test wants that: the one that registers a repository nowhere near
+/// it, which is the whole of what opening the boundary means.
+async fn workbench_started_with(given: &Path) -> (tempfile::TempDir, Router) {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+    let watched = WatchedPaths::resolve(&[given.to_owned()]).unwrap();
 
-    std::fs::write(data_dir.join("config.yaml"), yaml).unwrap();
+    let data_dir = dir.path().to_owned();
+
+    (dir, router_watching(pool, watched, data_dir))
 }
 
 /// A git repository at `path`, with one commit on `main` so it has a branch to
@@ -182,10 +176,10 @@ fn read<T: DeserializeOwned>(body: &str) -> T {
 }
 
 #[tokio::test]
-async fn a_repo_inside_a_watched_path_registers_and_appears_on_the_list() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_watching(watched.path()).await;
-    let repo = repository(watched.path().join("verkstead"));
+async fn a_repository_registers_and_appears_on_the_list() {
+    let src = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench().await;
+    let repo = repository(src.path().join("verkstead"));
 
     assert_eq!(register(&app, &repo).await, Registered::Added);
 
@@ -201,80 +195,65 @@ async fn a_repo_inside_a_watched_path_registers_and_appears_on_the_list() {
 
 #[tokio::test]
 async fn nothing_is_registered_to_begin_with() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_watching(watched.path()).await;
+    let (_dir, app) = workbench().await;
 
     assert!(listed(&app).await.is_empty());
 }
 
-/// The boundary itself: a perfectly good repository, refused for being
-/// somewhere Verkstead was never given.
+/// The boundary is gone: a repository nowhere near anything the installation
+/// was started with registers like any other, and what is stored is where it
+/// really is.
 #[tokio::test]
-async fn a_repo_outside_the_watched_paths_is_refused_by_the_server() {
+async fn a_repository_outside_everything_the_server_was_started_with_registers() {
     let root = tempfile::tempdir().unwrap();
-    let watched = root.path().join("watched");
-    std::fs::create_dir(&watched).unwrap();
-    let (_dir, app) = app_watching(&watched).await;
+    let given = root.path().join("given");
+    std::fs::create_dir(&given).unwrap();
+    let (_dir, app) = workbench_started_with(&given).await;
 
     let elsewhere = repository(root.path().join("elsewhere"));
 
+    assert_eq!(register(&app, &elsewhere).await, Registered::Added);
+
+    let repos = listed(&app).await;
+    assert_eq!(repos.len(), 1);
     assert_eq!(
-        register(&app, &elsewhere).await,
-        Registered::OutsideWatchedPaths
+        repos[0].path,
+        elsewhere.canonicalize().unwrap().to_str().unwrap()
     );
-    assert!(listed(&app).await.is_empty());
 }
 
-/// A path that reads as inside a Watched Path and is not: the symlink is
-/// followed before the boundary is consulted.
+/// What is registered is the resolved path rather than the one that was typed:
+/// a symlink is followed first, so the row names the directory a session will
+/// actually stand in.
 ///
-/// Made where a link can be made without asking anybody's permission,
-/// which is both Unixes and not Windows: what the boundary does with one is
-/// the same reasoning everywhere, so what is lost there is the making of the
-/// link rather than any of it.
+/// Made where a link can be made without asking anybody's permission, which is
+/// both Unixes and not Windows. The resolving is the same everywhere — it is
+/// `canonicalize` — so what is lost there is the making of the link rather than
+/// any of the reasoning.
 #[cfg(unix)]
 #[tokio::test]
-async fn a_repo_reached_through_a_symlink_out_of_a_watched_path_is_refused() {
+async fn a_repository_reached_through_a_symlink_is_stored_where_it_really_is() {
     let root = tempfile::tempdir().unwrap();
-    let watched = root.path().join("watched");
-    std::fs::create_dir(&watched).unwrap();
-    let (_dir, app) = app_watching(&watched).await;
+    let (_dir, app) = workbench().await;
 
     let elsewhere = repository(root.path().join("elsewhere"));
-    let inside = watched.join("looks-inside");
-    std::os::unix::fs::symlink(&elsewhere, &inside).unwrap();
+    let link = root.path().join("looks-elsewhere");
+    std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
+
+    assert_eq!(register(&app, &link).await, Registered::Added);
 
     assert_eq!(
-        register(&app, &inside).await,
-        Registered::OutsideWatchedPaths
+        listed(&app).await[0].path,
+        elsewhere.canonicalize().unwrap().to_str().unwrap()
     );
-    assert!(listed(&app).await.is_empty());
-}
-
-/// The other way of reading as inside one: `..` climbs back out.
-#[tokio::test]
-async fn a_repo_reached_by_climbing_out_with_dot_dot_is_refused() {
-    let root = tempfile::tempdir().unwrap();
-    let watched = root.path().join("watched");
-    std::fs::create_dir(&watched).unwrap();
-    let (_dir, app) = app_watching(&watched).await;
-
-    repository(root.path().join("elsewhere"));
-    let climbed = watched.join("..").join("elsewhere");
-
-    assert_eq!(
-        register(&app, &climbed).await,
-        Registered::OutsideWatchedPaths
-    );
-    assert!(listed(&app).await.is_empty());
 }
 
 #[tokio::test]
 async fn a_directory_that_is_not_a_git_repository_is_refused() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_watching(watched.path()).await;
+    let src = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench().await;
 
-    let plain = watched.path().join("notes");
+    let plain = src.path().join("notes");
     std::fs::create_dir(&plain).unwrap();
 
     assert_eq!(register(&app, &plain).await, Registered::NotARepository);
@@ -285,9 +264,9 @@ async fn a_directory_that_is_not_a_git_repository_is_refused() {
 /// worktree somewhere nobody meant.
 #[tokio::test]
 async fn a_subdirectory_of_a_repository_is_not_the_repository() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_watching(watched.path()).await;
-    let repo = repository(watched.path().join("verkstead"));
+    let src = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench().await;
+    let repo = repository(src.path().join("verkstead"));
 
     let inside = repo.join("crates");
     std::fs::create_dir(&inside).unwrap();
@@ -297,20 +276,20 @@ async fn a_subdirectory_of_a_repository_is_not_the_repository() {
 
 #[tokio::test]
 async fn a_path_with_nothing_at_it_is_refused_as_missing() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_watching(watched.path()).await;
+    let src = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench().await;
 
     assert_eq!(
-        register(&app, &watched.path().join("never-made")).await,
+        register(&app, &src.path().join("never-made")).await,
         Registered::Missing
     );
 }
 
 #[tokio::test]
 async fn a_relative_path_is_refused_rather_than_resolved() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_watching(watched.path()).await;
-    repository(watched.path().join("verkstead"));
+    let src = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench().await;
+    repository(src.path().join("verkstead"));
 
     assert_eq!(
         register_text(&app, "verkstead").await,
@@ -320,9 +299,9 @@ async fn a_relative_path_is_refused_rather_than_resolved() {
 
 #[tokio::test]
 async fn a_repo_already_registered_is_refused_however_its_path_is_spelled() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_watching(watched.path()).await;
-    let repo = repository(watched.path().join("verkstead"));
+    let src = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench().await;
+    let repo = repository(src.path().join("verkstead"));
 
     assert_eq!(register(&app, &repo).await, Registered::Added);
 
@@ -336,78 +315,17 @@ async fn a_repo_already_registered_is_refused_however_its_path_is_spelled() {
     assert_eq!(listed(&app).await.len(), 1);
 }
 
-/// The closed state a standalone install comes up in: with no Watched Path said
-/// at the installation and none said in the settings, there is nowhere a Repo
-/// could be registered from, and every path is outside.
+/// The standalone install: no unit, no flags, nothing configured anywhere. It
+/// registers a repository like any other, which is what a bare binary being
+/// usable out of the box means.
 #[tokio::test]
-async fn a_server_watching_nothing_registers_nothing() {
-    let dir = tempfile::tempdir().unwrap();
-    let pool = open_database(&dir.path().join("verkstead.db"))
-        .await
-        .unwrap();
-    let app = router_watching(pool, WatchedPaths::none(), dir.path().to_owned());
-
-    let repo = repository(dir.path().join("verkstead"));
-
-    assert_eq!(register(&app, &repo).await, Registered::OutsideWatchedPaths);
-}
-
-/// The settings side of the boundary, and the whole of what makes a standalone
-/// install possible: the server was given nothing to watch, the human writes a
-/// directory into `config.yaml`, and the next request admits from it — no
-/// restart anywhere.
-#[tokio::test]
-async fn a_watched_path_written_into_the_settings_admits_from_the_next_request() {
-    let (dir, app) = app_watching_what_the_settings_say().await;
+async fn a_server_told_nothing_at_all_registers_all_the_same() {
     let src = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench().await;
     let repo = repository(src.path().join("verkstead"));
-
-    assert_eq!(register(&app, &repo).await, Registered::OutsideWatchedPaths);
-
-    watch_in_the_settings(dir.path(), &[src.path()]);
 
     assert_eq!(register(&app, &repo).await, Registered::Added);
     assert_eq!(listed(&app).await.len(), 1);
-}
-
-/// And nothing in the file is ever fatal: an entry naming a directory that is
-/// not there covers nothing, and the one written beside it goes on covering
-/// what it covers.
-#[tokio::test]
-async fn a_settings_watched_path_that_is_not_there_costs_the_others_nothing() {
-    let (dir, app) = app_watching_what_the_settings_say().await;
-    let src = tempfile::tempdir().unwrap();
-    let repo = repository(src.path().join("verkstead"));
-
-    watch_in_the_settings(dir.path(), &[&src.path().join("never-made"), src.path()]);
-
-    assert_eq!(register(&app, &repo).await, Registered::Added);
-}
-
-/// Taking one out again is free. Admission is asked at registration and never
-/// again, so a Repo already on the list goes on being one — it only stops being
-/// somewhere a *new* Repo can be registered from.
-#[tokio::test]
-async fn taking_a_watched_path_out_of_the_settings_leaves_what_is_registered() {
-    let (dir, app) = app_watching_what_the_settings_say().await;
-    let src = tempfile::tempdir().unwrap();
-    let repo = repository(src.path().join("verkstead"));
-
-    watch_in_the_settings(dir.path(), &[src.path()]);
-    assert_eq!(register(&app, &repo).await, Registered::Added);
-
-    watch_in_the_settings(dir.path(), &[]);
-
-    let repos = listed(&app).await;
-    assert_eq!(repos.len(), 1);
-    assert_eq!(branches(&app, repos[0].id).await, ["main"]);
-
-    // And the boundary is closed behind it: the next one is outside.
-    let another = repository(src.path().join("askance"));
-    assert_eq!(
-        register(&app, &another).await,
-        Registered::OutsideWatchedPaths
-    );
 }
 
 /// What a Conversation branches from: the remote's idea of the default branch
@@ -415,9 +333,9 @@ async fn taking_a_watched_path_out_of_the_settings_leaves_what_is_registered() {
 /// working on the repository means by it.
 #[tokio::test]
 async fn the_default_branch_is_what_the_remote_calls_it() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_watching(watched.path()).await;
-    let repo = repository(watched.path().join("verkstead"));
+    let src = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench().await;
+    let repo = repository(src.path().join("verkstead"));
 
     // A remote of its own, pointing back at itself: enough for `origin/HEAD` to
     // exist and name a branch, without a network anywhere.
@@ -441,9 +359,9 @@ async fn the_default_branch_is_what_the_remote_calls_it() {
 /// inventing one would put work on a branch nobody chose.
 #[tokio::test]
 async fn a_repository_with_no_branch_to_call_its_default_is_refused() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_watching(watched.path()).await;
-    let repo = repository(watched.path().join("verkstead"));
+    let src = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench().await;
+    let repo = repository(src.path().join("verkstead"));
 
     git(&repo, &["checkout", "--quiet", "--detach", "HEAD"]);
 
@@ -458,9 +376,9 @@ async fn a_repository_with_no_branch_to_call_its_default_is_refused() {
 /// a choice that is not one.
 #[tokio::test]
 async fn a_repos_branches_are_the_local_and_remote_tracking_ones() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_watching(watched.path()).await;
-    let repo = repository(watched.path().join("verkstead"));
+    let src = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench().await;
+    let repo = repository(src.path().join("verkstead"));
 
     git(&repo, &["branch", "release"]);
     git(&repo, &["remote", "add", "origin", repo.to_str().unwrap()]);
@@ -494,8 +412,7 @@ async fn a_repos_branches_are_the_local_and_remote_tracking_ones() {
 /// nothing on it, which is a different thing to be told.
 #[tokio::test]
 async fn the_branches_of_a_repo_that_is_not_there_are_refused() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_watching(watched.path()).await;
+    let (_dir, app) = workbench().await;
 
     for asked in ["404", "not-a-number"] {
         let (status, _) = fetch(
@@ -520,9 +437,9 @@ async fn the_branches_of_a_repo_that_is_not_there_are_refused() {
 /// rather than by leaving the field out.
 #[tokio::test]
 async fn a_repo_opened_carries_its_branches_its_work_and_its_roadmaps() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, pool, app) = app_and_pool_watching(watched.path()).await;
-    let repo = repository(watched.path().join("verkstead"));
+    let src = tempfile::tempdir().unwrap();
+    let (_dir, pool, app) = workbench_and_pool().await;
+    let repo = repository(src.path().join("verkstead"));
     git(&repo, &["branch", "release"]);
 
     assert_eq!(register(&app, &repo).await, Registered::Added);
@@ -574,9 +491,9 @@ async fn a_repo_opened_carries_its_branches_its_work_and_its_roadmaps() {
 /// all.
 #[tokio::test]
 async fn a_repos_resolution_is_said_taken_back_and_read_off_the_pane() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_watching(watched.path()).await;
-    let repo = repository(watched.path().join("verkstead"));
+    let src = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench().await;
+    let repo = repository(src.path().join("verkstead"));
 
     assert_eq!(register(&app, &repo).await, Registered::Added);
     let id = listed(&app).await[0].id;
@@ -618,8 +535,7 @@ async fn a_repos_resolution_is_said_taken_back_and_read_off_the_pane() {
 /// while the Repo was taken away.
 #[tokio::test]
 async fn a_repo_that_is_not_there_cannot_be_told_how_to_resolve_a_conflict() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_watching(watched.path()).await;
+    let (_dir, app) = workbench().await;
 
     for asked in ["404", "not-a-number"] {
         let (status, _) = fetch(
@@ -644,8 +560,7 @@ async fn a_repo_that_is_not_there_cannot_be_told_how_to_resolve_a_conflict() {
 /// somebody took it away — rather than as a Repo with nothing on it.
 #[tokio::test]
 async fn a_repo_that_is_not_there_cannot_be_opened() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_watching(watched.path()).await;
+    let (_dir, app) = workbench().await;
 
     for asked in ["404", "not-a-number"] {
         let (status, _) = fetch(
@@ -667,9 +582,9 @@ async fn a_repo_that_is_not_there_cannot_be_opened() {
 /// repo being gone rather than drawing one with a Remove button on it.
 #[tokio::test]
 async fn a_repo_that_was_removed_cannot_be_opened() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_watching(watched.path()).await;
-    let repo = repository(watched.path().join("verkstead"));
+    let src = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench().await;
+    let repo = repository(src.path().join("verkstead"));
 
     assert_eq!(register(&app, &repo).await, Registered::Added);
     let id = listed(&app).await[0].id;
@@ -693,9 +608,9 @@ async fn a_repo_that_was_removed_cannot_be_opened() {
 /// roadmaps there are to adopt, all of which are the same read.
 #[tokio::test]
 async fn a_removed_repo_is_off_the_list() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_watching(watched.path()).await;
-    let repo = repository(watched.path().join("verkstead"));
+    let src = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench().await;
+    let repo = repository(src.path().join("verkstead"));
 
     assert_eq!(register(&app, &repo).await, Registered::Added);
     let id = listed(&app).await[0].id;
@@ -713,9 +628,9 @@ async fn a_removed_repo_is_off_the_list() {
 /// is where it was.
 #[tokio::test]
 async fn a_repo_with_live_work_on_it_is_refused() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, pool, app) = app_and_pool_watching(watched.path()).await;
-    let repo = repository(watched.path().join("verkstead"));
+    let src = tempfile::tempdir().unwrap();
+    let (_dir, pool, app) = workbench_and_pool().await;
+    let repo = repository(src.path().join("verkstead"));
 
     assert_eq!(register(&app, &repo).await, Registered::Added);
     let id = listed(&app).await[0].id;
@@ -741,9 +656,9 @@ async fn a_repo_with_live_work_on_it_is_refused() {
 /// all are the same sentence.
 #[tokio::test]
 async fn there_is_nothing_to_remove_twice() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_watching(watched.path()).await;
-    let repo = repository(watched.path().join("verkstead"));
+    let src = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench().await;
+    let repo = repository(src.path().join("verkstead"));
 
     assert_eq!(register(&app, &repo).await, Registered::Added);
     let id = listed(&app).await[0].id;
@@ -766,9 +681,9 @@ async fn there_is_nothing_to_remove_twice() {
 /// human can undo.
 #[tokio::test]
 async fn registering_a_removed_repo_again_brings_it_back() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_watching(watched.path()).await;
-    let repo = repository(watched.path().join("verkstead"));
+    let src = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench().await;
+    let repo = repository(src.path().join("verkstead"));
 
     assert_eq!(register(&app, &repo).await, Registered::Added);
     let id = listed(&app).await[0].id;

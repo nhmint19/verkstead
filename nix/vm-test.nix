@@ -615,27 +615,16 @@ testers.runNixOSTest {
         ).strip()
 
 
-    with subtest("a repo inside a watched path registers, and one outside cannot"):
-        # Both watched paths, because they are exposed to the sandbox two
-        # different ways: `/srv/repos` is somewhere the hardening leaves in
-        # place, and `/home/watched` is under a directory it replaces with an
-        # empty tmpfs and the module binds back through. A service that cannot
-        # see the second would refuse it exactly as it refuses one outside.
-        for watched in ["/srv/repos/inside", "/home/watched/inside"]:
-            committed(watched)
-            outcome = register(watched)
-            assert outcome == '"Added"', f"{watched} was answered {outcome}"
-
-        # And the boundary itself, from inside the running service rather than
-        # from a unit test. `/srv/elsewhere` is somewhere the service can see
-        # perfectly well and was not given, so what refuses it is the boundary
-        # and not the sandbox — which is the half worth proving here.
-        committed("/srv/elsewhere")
-        outcome = register("/srv/elsewhere")
-        assert outcome == '"OutsideWatchedPaths"', f"/srv/elsewhere was answered {outcome}"
-
-        listed = machine.succeed("curl -sf http://127.0.0.1:8422/api/ui/repos")
-        assert "/srv/elsewhere" not in listed, f"a refused repo is on the list:\n{listed}"
+    with subtest("a repo under a directory the unit binds registers"):
+        # Both bound paths, because they are exposed to the unit two different
+        # ways: `/srv/repos` is somewhere the hardening leaves in place, and
+        # `/home/watched` is under a directory it replaces with an empty tmpfs
+        # and the module binds back through. A service that could not see the
+        # second would answer it *missing*.
+        for bound in ["/srv/repos/inside", "/home/watched/inside"]:
+            committed(bound)
+            outcome = register(bound)
+            assert outcome == '"Added"', f"{bound} was answered {outcome}"
 
     # Somewhere for the agents' Sets to land. Every Set is asked from a
     # Conversation, and the base URL a session is given is what says which — so a

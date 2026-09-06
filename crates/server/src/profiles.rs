@@ -2,14 +2,13 @@
 //! the store, and the check that says whether a saved one can still be run
 //! under.
 //!
-//! The account is judged against the filesystem and against the Watched Paths,
-//! and both are the server's: the boundary is a security boundary and a form
-//! that checked it would be a courtesy, since this endpoint is reachable without
-//! one. The same boundary governs a Profile's account as governs a Repo's path,
-//! because it is one rule about what Verkstead may touch and not one rule per
-//! feature. What an account *is* — Claude's pair, and the single home each
-//! backend after it keeps one under — is the agent type's, and every judgement
-//! here is made per type for that reason.
+//! The account is judged against the filesystem, and that judging is the
+//! server's: a form that checked it would be a courtesy, since this endpoint is
+//! reachable without one. Anywhere the server can read is somewhere an account
+//! can be kept — the human's own login under `~` included, which is the account a
+//! Profile most naturally names. What an account *is* — Claude's pair, and the
+//! single home each backend after it keeps one under — is the agent type's, and
+//! every judgement here is made per type for that reason.
 //!
 //! Nothing here mounts anything. A Profile is a record of an account a session
 //! will later be run under; the bind-mounting arrives with the stage that runs
@@ -24,16 +23,12 @@ use verkstead_render::{
     ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, RoleChoice,
 };
 
+use crate::resolved::{Resolved, resolve};
 use crate::store;
-use crate::watched::{Admission, Boundary, WatchedPaths};
 
 /// Save a new Profile, or say why not.
-pub(crate) async fn create(
-    pool: &SqlitePool,
-    watched: &WatchedPaths,
-    edit: &ProfileEdit,
-) -> Result<ProfileSaved> {
-    let facts = match checked(watched, edit).await? {
+pub(crate) async fn create(pool: &SqlitePool, edit: &ProfileEdit) -> Result<ProfileSaved> {
+    let facts = match checked(edit).await? {
         Ok(facts) => facts,
         Err(refusal) => return Ok(refusal),
     };
@@ -46,13 +41,8 @@ pub(crate) async fn create(
 
 /// Rewrite one, whole. Everything about a Profile is the human's to change:
 /// nothing has been built from it that a change would contradict.
-pub(crate) async fn edit(
-    pool: &SqlitePool,
-    watched: &WatchedPaths,
-    id: i64,
-    edit: &ProfileEdit,
-) -> Result<ProfileSaved> {
-    let facts = match checked(watched, edit).await? {
+pub(crate) async fn edit(pool: &SqlitePool, id: i64, edit: &ProfileEdit) -> Result<ProfileSaved> {
+    let facts = match checked(edit).await? {
         Ok(facts) => facts,
         Err(refusal) => return Ok(refusal),
     };
@@ -78,23 +68,20 @@ pub(crate) async fn remove(pool: &SqlitePool, id: i64) -> Result<ProfileDeleted>
 }
 
 /// Every Profile, each with whether its account is still where it was left.
-pub(crate) async fn listed(pool: &SqlitePool, watched: &WatchedPaths) -> Result<Vec<ProfileEntry>> {
-    entries(watched, store::profiles(pool).await?).await
+pub(crate) async fn listed(pool: &SqlitePool) -> Result<Vec<ProfileEntry>> {
+    entries(store::profiles(pool).await?).await
 }
 
 /// The same reading for one Pairing, for the panes that show a Conversation's
 /// own choices rather than the whole list.
-pub(crate) async fn pairing(
-    watched: &WatchedPaths,
-    pairing: Option<store::Pairing>,
-) -> Result<Option<PairingView>> {
+pub(crate) async fn pairing(pairing: Option<store::Pairing>) -> Result<Option<PairingView>> {
     let Some(pairing) = pairing else {
         return Ok(None);
     };
 
     let model = pairing.model;
 
-    Ok(entries(watched, vec![pairing.profile])
+    Ok(entries(vec![pairing.profile])
         .await?
         .pop()
         .map(|profile| PairingView { profile, model }))
@@ -107,11 +94,11 @@ pub(crate) async fn pairing(
 /// that runs no session stays what it is, and a Profile whose row has gone
 /// reads as nothing picked — which is what it is, since there is no account
 /// left to launch under.
-pub(crate) async fn picked(watched: &WatchedPaths, picked: store::Picked) -> Result<PickedView> {
+pub(crate) async fn picked(picked: store::Picked) -> Result<PickedView> {
     Ok(match picked {
         store::Picked::Nothing => PickedView::Nothing,
         store::Picked::Skipped => PickedView::Skipped,
-        store::Picked::Under(under) => match pairing(watched, Some(under)).await? {
+        store::Picked::Under(under) => match pairing(Some(under)).await? {
             Some(pairing) => PickedView::Under(pairing),
             None => PickedView::Nothing,
         },
@@ -124,24 +111,13 @@ pub(crate) async fn picked(watched: &WatchedPaths, picked: store::Picked) -> Res
 /// Off the runtime, because every one of those looks is a blocking read — and
 /// together rather than one call per Profile, since the whole point of the batch
 /// is that it is one hop off the runtime instead of a list's worth.
-async fn entries(
-    watched: &WatchedPaths,
-    profiles: Vec<store::Profile>,
-) -> Result<Vec<ProfileEntry>> {
-    let watched = watched.clone();
-
+async fn entries(profiles: Vec<store::Profile>) -> Result<Vec<ProfileEntry>> {
     Ok(tokio::task::spawn_blocking(move || {
-        // The boundary read once for the whole list rather than once per look:
-        // each Profile is two paths, and the settings half of the boundary is a
-        // file to open and a `canonicalize` per entry in it. One hop off the
-        // runtime deserves one reading of what the boundary is.
-        let boundary = watched.standing();
-
         profiles
             .into_iter()
             .map(|profile| ProfileEntry {
                 id: profile.id,
-                broken: broken(&boundary, &profile),
+                broken: broken(&profile),
                 name: profile.name,
                 account: account(&profile.account),
                 models: profile.models,
@@ -194,18 +170,15 @@ fn runnable(pairing: Option<&PairingView>) -> bool {
 /// Why this Profile cannot be run under as things stand, or `None` while its
 /// account is where it was left.
 ///
-/// Asked of the boundary and not only of the filesystem: a directory replaced by
-/// a symlink pointing out of the Watched Paths still exists, and mounting it
-/// would be reaching around the boundary with a path that was admitted once.
-///
 /// Each of an account's paths is named by what it is, for the reason the
 /// refusals are: a Profile whose config file has gone and one whose directory
 /// has gone are two different things to go and put right.
 ///
-/// Asked of a boundary already taken rather than of [`WatchedPaths`] itself:
-/// this is called once per Profile in a list, and the settings half of the
-/// boundary is a file to read — see [`WatchedPaths::standing`].
-fn broken(watched: &Boundary, profile: &store::Profile) -> Option<Broken> {
+/// Asked by resolving rather than by asking whether the path exists, so that
+/// what is checked here and what was checked at the save are the one question:
+/// a dangling symlink where the account was is a Profile that cannot be run
+/// under.
+fn broken(profile: &store::Profile) -> Option<Broken> {
     let paths: Vec<(PathBuf, Broken)> = match &profile.account {
         store::Account::Claude {
             claude_dir,
@@ -228,10 +201,8 @@ fn broken(watched: &Boundary, profile: &store::Profile) -> Option<Broken> {
     };
 
     for (path, missing) in paths {
-        match watched.admit(&path) {
-            Admission::Inside(_) => {}
-            Admission::Missing | Admission::NotAbsolute => return Some(missing),
-            Admission::Outside => return Some(Broken::OutsideWatchedPaths),
+        if !matches!(resolve(&path), Resolved::At(_)) {
+            return Some(missing);
         }
     }
 
@@ -243,10 +214,7 @@ fn broken(watched: &Boundary, profile: &store::Profile) -> Option<Broken> {
 /// The filesystem half runs off the runtime for the reason a registration's
 /// does: resolving a path is blocking, and a save is rare enough that the thread
 /// it borrows costs nothing.
-async fn checked(
-    watched: &WatchedPaths,
-    edit: &ProfileEdit,
-) -> Result<Result<store::ProfileFacts, ProfileSaved>> {
+async fn checked(edit: &ProfileEdit) -> Result<Result<store::ProfileFacts, ProfileSaved>> {
     let name = edit.name.trim().to_owned();
 
     // Trimmed and the blanks dropped: the form hands these over a line apiece,
@@ -267,18 +235,15 @@ async fn checked(
         return Ok(Err(ProfileSaved::Modelless));
     }
 
-    let watched = watched.clone();
     let account = edit.account.clone();
 
-    Ok(
-        tokio::task::spawn_blocking(move || inspect(&watched, &account))
-            .await?
-            .map(|account| store::ProfileFacts {
-                name,
-                account,
-                models,
-            }),
-    )
+    Ok(tokio::task::spawn_blocking(move || inspect(&account))
+        .await?
+        .map(|account| store::ProfileFacts {
+            name,
+            account,
+            models,
+        }))
 }
 
 /// The account, resolved — or the reason it is refused.
@@ -290,37 +255,26 @@ async fn checked(
 /// Every path is judged the same way and refused by its own name: pointing the
 /// config field at the directory is an easy mistake, and "that path is wrong"
 /// would not say which one.
-///
-/// Every one of them against one boundary, taken once here: an account can be
-/// more than one path, and every path a Profile names is meant to be judged by
-/// the same answer to what a Watched Path is.
-fn inspect(
-    watched: &WatchedPaths,
-    account: &ProfileAccount,
-) -> Result<store::Account, ProfileSaved> {
-    let boundary = watched.standing();
-
+fn inspect(account: &ProfileAccount) -> Result<store::Account, ProfileSaved> {
     match account {
         ProfileAccount::Claude {
             claude_dir,
             config_file,
         } => {
-            let dir = match boundary.admit(Path::new(claude_dir.trim())) {
-                Admission::Inside(path) => path,
-                Admission::NotAbsolute => return Err(ProfileSaved::DirNotAbsolute),
-                Admission::Missing => return Err(ProfileSaved::DirMissing),
-                Admission::Outside => return Err(ProfileSaved::DirOutsideWatchedPaths),
+            let dir = match resolve(Path::new(claude_dir.trim())) {
+                Resolved::At(path) => path,
+                Resolved::NotAbsolute => return Err(ProfileSaved::DirNotAbsolute),
+                Resolved::Missing => return Err(ProfileSaved::DirMissing),
             };
 
             if !dir.is_dir() {
                 return Err(ProfileSaved::NotADirectory);
             }
 
-            let config = match boundary.admit(Path::new(config_file.trim())) {
-                Admission::Inside(path) => path,
-                Admission::NotAbsolute => return Err(ProfileSaved::ConfigNotAbsolute),
-                Admission::Missing => return Err(ProfileSaved::ConfigMissing),
-                Admission::Outside => return Err(ProfileSaved::ConfigOutsideWatchedPaths),
+            let config = match resolve(Path::new(config_file.trim())) {
+                Resolved::At(path) => path,
+                Resolved::NotAbsolute => return Err(ProfileSaved::ConfigNotAbsolute),
+                Resolved::Missing => return Err(ProfileSaved::ConfigMissing),
             };
 
             if !config.is_file() {
@@ -333,13 +287,9 @@ fn inspect(
             })
         }
 
-        ProfileAccount::Codex { home } => Ok(store::Account::Codex {
-            home: kept(&boundary, home)?,
-        }),
+        ProfileAccount::Codex { home } => Ok(store::Account::Codex { home: kept(home)? }),
 
-        ProfileAccount::Grok { home } => Ok(store::Account::Grok {
-            home: kept(&boundary, home)?,
-        }),
+        ProfileAccount::Grok { home } => Ok(store::Account::Grok { home: kept(home)? }),
 
         // An OpenCode home is the directory the two opencode keeps an account
         // in sit under, so both of those are judged as well as the home itself
@@ -348,10 +298,10 @@ fn inspect(
         // refused in the same words, because for this type they *are* the home
         // the account is kept under.
         ProfileAccount::OpenCode { home } => {
-            let home = kept(&boundary, home)?;
+            let home = kept(home)?;
 
             for path in xdg(&home) {
-                admitted(&boundary, &path)?;
+                directory(&path)?;
             }
 
             Ok(store::Account::OpenCode { home })
@@ -380,23 +330,19 @@ fn xdg(home: &Path) -> impl Iterator<Item = PathBuf> {
 ///
 /// One check for every such type rather than one apiece: what differs between
 /// them is which account the directory is, and that is the arm above, not this.
-///
-/// Against the boundary the arm above took, for the reason it took one: every
-/// path a Profile names is judged by the same answer to what a Watched Path is.
-fn kept(boundary: &Boundary, home: &str) -> Result<PathBuf, ProfileSaved> {
-    admitted(boundary, Path::new(home.trim()))
+fn kept(home: &str) -> Result<PathBuf, ProfileSaved> {
+    directory(Path::new(home.trim()))
 }
 
 /// The same, of a path rather than of something typed into the form.
 ///
 /// What an OpenCode home holds is judged this way: the two directories under it
 /// are derived rather than typed, so there is nothing to trim off either.
-fn admitted(boundary: &Boundary, home: &Path) -> Result<PathBuf, ProfileSaved> {
-    let home = match boundary.admit(home) {
-        Admission::Inside(path) => path,
-        Admission::NotAbsolute => return Err(ProfileSaved::HomeNotAbsolute),
-        Admission::Missing => return Err(ProfileSaved::HomeMissing),
-        Admission::Outside => return Err(ProfileSaved::HomeOutsideWatchedPaths),
+fn directory(home: &Path) -> Result<PathBuf, ProfileSaved> {
+    let home = match resolve(home) {
+        Resolved::At(path) => path,
+        Resolved::NotAbsolute => return Err(ProfileSaved::HomeNotAbsolute),
+        Resolved::Missing => return Err(ProfileSaved::HomeMissing),
     };
 
     if !home.is_dir() {

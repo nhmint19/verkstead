@@ -937,12 +937,12 @@ fn account_inside(account: &store::Account, home: &Path) -> Vec<(PathBuf, PathBu
 ///
 /// **The account is the end that can differ.** The profile is made under the
 /// Data Directory and so is wherever that is; an account is wherever the Agent
-/// Profile points inside a Watched Path, which on a machine with a second drive
-/// may well be that drive. So this asks the account's paths against the
-/// profile's, and what comes back is the first that could not be joined in —
-/// which is a session refused before it starts rather than one started into a
-/// profile with no account in it. See [`Sandbox::for_conversation`], which is
-/// where it is refused and where both paths are said.
+/// Profile points at, which on a machine with a second drive may well be that
+/// drive. So this asks the account's paths against the profile's, and what
+/// comes back is the first that could not be joined in — which is a session
+/// refused before it starts rather than one started into a profile with no
+/// account in it. See [`Sandbox::for_conversation`], which is where it is
+/// refused and where both paths are said.
 ///
 /// Directories are left out, and that is the rule rather than an omission: a
 /// junction is a path rather than a file, it crosses volumes, and it needs no

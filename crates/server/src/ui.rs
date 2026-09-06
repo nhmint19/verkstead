@@ -726,14 +726,14 @@ async fn repo(State(state): State<AppState>, Path(id): Path<String>) -> HttpResp
 
 /// `POST /api/ui/repos` — take on the repository at a path.
 ///
-/// Every refusal is the server's: the Watched Paths are a security boundary, and
-/// a boundary a request could reach around by not going through the form would
-/// not be one. See [`crate::repos`] for what is checked.
+/// Every refusal is the server's: a check the browser made is a courtesy, and
+/// this endpoint is reachable without one. See [`crate::repos`] for what is
+/// checked.
 async fn register_repo(
     State(state): State<AppState>,
     Json(registration): Json<Registration>,
 ) -> HttpResponse {
-    match crate::repos::register(&state.pool, &state.watched, &registration.path).await {
+    match crate::repos::register(&state.pool, &registration.path).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "registering a Repo failed");
@@ -1050,12 +1050,7 @@ pub(crate) async fn conversation_view(
     // The Pairings are read as rows rather than as ids: what the pane says
     // about a Profile, and whether it can still be run under, is the same
     // reading the Profile list gets.
-    let grilling_pairing = match crate::profiles::picked(
-        &state.watched,
-        conversation.grilling_pairing,
-    )
-    .await
-    {
+    let grilling_pairing = match crate::profiles::picked(conversation.grilling_pairing).await {
         Ok(pairing) => pairing,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a grilling Pairing failed");
@@ -1063,11 +1058,8 @@ pub(crate) async fn conversation_view(
         }
     };
 
-    let implementation_pairing = match crate::profiles::pairing(
-        &state.watched,
-        conversation.implementation_pairing,
-    )
-    .await
+    let implementation_pairing = match crate::profiles::pairing(conversation.implementation_pairing)
+        .await
     {
         Ok(pairing) => pairing,
         Err(error) => {
@@ -1076,9 +1068,7 @@ pub(crate) async fn conversation_view(
         }
     };
 
-    let review_pairing = match crate::profiles::picked(&state.watched, conversation.review_pairing)
-        .await
-    {
+    let review_pairing = match crate::profiles::picked(conversation.review_pairing).await {
         Ok(pairing) => pairing,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a review Pairing failed");
@@ -3482,7 +3472,7 @@ async fn choose_review_pairing(
 /// `GET /api/ui/profiles` — the Agent Profiles, by name, each saying whether its
 /// pair is still where it was left.
 async fn profiles(State(state): State<AppState>) -> HttpResponse {
-    match crate::profiles::listed(&state.pool, &state.watched).await {
+    match crate::profiles::listed(&state.pool).await {
         Ok(rows) => Json::<Vec<ProfileEntry>>(rows).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "reading the Agent Profiles failed");
@@ -3494,14 +3484,13 @@ async fn profiles(State(state): State<AppState>) -> HttpResponse {
 /// `POST /api/ui/profiles` — take on an account, named by the pair that is
 /// mounted for it.
 ///
-/// Every refusal is the server's, as a registration's is: the Watched Paths are
-/// a security boundary, and one a request could reach around by not going
-/// through the form would not be one.
+/// Every refusal is the server's, as a registration's is: a check the browser
+/// made is a courtesy, and this endpoint is reachable without one.
 async fn create_profile(
     State(state): State<AppState>,
     Json(edit): Json<ProfileEdit>,
 ) -> HttpResponse {
-    match crate::profiles::create(&state.pool, &state.watched, &edit).await {
+    match crate::profiles::create(&state.pool, &edit).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "saving an Agent Profile failed");
@@ -3520,7 +3509,7 @@ async fn edit_profile(
         return Json(verkstead_render::ProfileSaved::NoSuchProfile).into_response();
     };
 
-    match crate::profiles::edit(&state.pool, &state.watched, id, &edit).await {
+    match crate::profiles::edit(&state.pool, id, &edit).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, profile_id = id, "rewriting an Agent Profile failed");

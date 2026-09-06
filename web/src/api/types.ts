@@ -549,7 +549,7 @@ export type BriefSaved = "Saved" | "NoSuchConversation" | "NotDrafting";
  * was written down. This is what has become of its account since — the pair
  * for a Claude Profile, and the one home for every type that keeps one.
  */
-export type Broken = "DirMissing" | "ConfigMissing" | "HomeMissing" | "OutsideWatchedPaths";
+export type Broken = "DirMissing" | "ConfigMissing" | "HomeMissing";
 
 /**
  * Which kind of field is asking, which is what decides where it may look.
@@ -2085,11 +2085,11 @@ broken: Broken | null, };
 /**
  * What became of saving a Profile.
  *
- * The refusals are the server's and not the form's: the Watched Paths are a
- * security boundary, and every request reaching the endpoint is decided there
+ * The refusals are the server's and not the form's: a check the browser made
+ * is a courtesy, and every request reaching the endpoint is decided there
  * whether or not a form was involved.
  */
-export type ProfileSaved = "Saved" | "NoSuchProfile" | "Nameless" | "Modelless" | "NameTaken" | "DirNotAbsolute" | "DirMissing" | "DirOutsideWatchedPaths" | "NotADirectory" | "ConfigNotAbsolute" | "ConfigMissing" | "ConfigOutsideWatchedPaths" | "NotAFile" | "HomeNotAbsolute" | "HomeMissing" | "HomeOutsideWatchedPaths" | "HomeNotADirectory";
+export type ProfileSaved = "Saved" | "NoSuchProfile" | "Nameless" | "Modelless" | "NameTaken" | "DirNotAbsolute" | "DirMissing" | "NotADirectory" | "ConfigNotAbsolute" | "ConfigMissing" | "NotAFile" | "HomeNotAbsolute" | "HomeMissing" | "HomeNotADirectory";
 
 /**
  * The grilling's closing proposal as the Set it rides draws it: which direction
@@ -2372,7 +2372,7 @@ id: number, html: string, };
  * is a courtesy, and every request reaching this endpoint is decided here
  * whether or not a form was involved.
  */
-export type Registered = "Added" | "NotAbsolute" | "Missing" | "OutsideWatchedPaths" | "NotARepository" | "NoDefaultBranch" | "AlreadyRegistered";
+export type Registered = "Added" | "NotAbsolute" | "Missing" | "NotARepository" | "NoDefaultBranch" | "AlreadyRegistered";
 
 /**
  * A repository the human is asking Verkstead to take on, named by its absolute

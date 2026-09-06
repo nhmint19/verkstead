@@ -282,11 +282,10 @@ fn refused_to_start(args: &[&str]) -> String {
 }
 
 /// A standalone install: no unit, no flags, nothing configured anywhere. It
-/// comes up, because a server that would not start before it was configured
-/// could never be reached to configure — and it admits nothing, because the
-/// alternative to a stated boundary is an assumed one.
+/// comes up, and it registers a repository it was never pointed at — which is
+/// the whole of what a bare binary being usable out of the box means.
 #[test]
-fn serving_without_a_watched_path_starts_and_admits_nothing() {
+fn serving_without_a_watched_path_starts_and_registers_anywhere() {
     let tmp = tempfile::tempdir().unwrap();
     let elsewhere = tempfile::tempdir().unwrap();
     let repo = repo_with_a_commit(elsewhere.path());
@@ -311,8 +310,8 @@ fn serving_without_a_watched_path_starts_and_admits_nothing() {
 
     assert_eq!(
         registered,
-        serde_json::json!("OutsideWatchedPaths"),
-        "a server watching nothing should hold every path outside it"
+        serde_json::json!("Added"),
+        "a server told nothing should register a repository like any other"
     );
 
     let logged = uncoloured(&serving.stop());

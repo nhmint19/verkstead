@@ -102,8 +102,6 @@ export const REFUSAL: Record<Registered, string> = {
   Added: "",
   NotAbsolute: "Give the repo's absolute path, starting with a slash.",
   Missing: "There is nothing at that path.",
-  OutsideWatchedPaths:
-    "That is outside the watched paths, so Verkstead will not touch it.",
   NotARepository:
     "That is not a git repository — name the repository's own directory.",
   NoDefaultBranch:

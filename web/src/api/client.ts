@@ -872,7 +872,7 @@ export function listProfiles(): Promise<ProfileEntry[]> {
 
 /// Take on an account, named by the pair that is mounted for it. Like
 /// registering a Repo, every refusal is a named outcome rather than a status —
-/// a pair outside the watched paths is the boundary doing its job.
+/// a config field pointed at a directory is something to go and correct.
 export function createProfile(profile: ProfileEdit): Promise<ProfileSaved> {
   return post<ProfileSaved>("/api/ui/profiles", profile);
 }

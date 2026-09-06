@@ -3,10 +3,15 @@
 //! and passes straight through.
 //!
 //! Three things have to be true, and each of them is checked here rather than in
-//! the browser: the path is inside a Watched Path once resolved, it is the root
-//! of a git repository, and that repository can say which branch it works from.
-//! A form that checked any of them would be a courtesy — this endpoint is
-//! reachable without one, and the boundary is the server's.
+//! the browser: the path is absolute and something is there, it is the root of a
+//! git repository, and that repository can say which branch it works from. A
+//! form that checked any of them would be a courtesy — this endpoint is
+//! reachable without one.
+//!
+//! Anywhere the server can read is somewhere a Repo can be registered from.
+//! There was a fourth thing once — that the path was inside a Watched Path — and
+//! it is asked nowhere now: what keeps a session to its own Conversation is the
+//! Sandbox, composed from the Repo and the Profile that Conversation names.
 //!
 //! Git is shelled out to rather than linked, as it is in the CLI: the answers
 //! are one-liners, and what git says about a repository on this machine is what
@@ -23,23 +28,18 @@ use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{ConflictResolution, Registered, RepoRemoved, RepoView};
 
+use crate::resolved::{Resolved, resolve};
 use crate::store;
-use crate::watched::{Admission, WatchedPaths};
 
 /// Register the repository at `asked`, or say why not.
 ///
 /// The filesystem half runs off the runtime: resolving a path and asking git
 /// about a repository are both blocking, and a registration is rare enough that
 /// the thread it borrows costs nothing.
-pub(crate) async fn register(
-    pool: &SqlitePool,
-    watched: &WatchedPaths,
-    asked: &str,
-) -> Result<Registered> {
-    let watched = watched.clone();
+pub(crate) async fn register(pool: &SqlitePool, asked: &str) -> Result<Registered> {
     let asked = PathBuf::from(asked);
 
-    let facts = match tokio::task::spawn_blocking(move || inspect(&watched, &asked)).await? {
+    let facts = match tokio::task::spawn_blocking(move || inspect(&asked)).await? {
         Ok(facts) => facts,
         Err(refusal) => return Ok(refusal),
     };
@@ -62,12 +62,11 @@ struct Facts {
 
 /// Everything the filesystem and git have to say about a path someone wants
 /// registered — or the reason it is not going to be.
-fn inspect(watched: &WatchedPaths, asked: &Path) -> Result<Facts, Registered> {
-    let path = match watched.admit(asked) {
-        Admission::Inside(path) => path,
-        Admission::NotAbsolute => return Err(Registered::NotAbsolute),
-        Admission::Missing => return Err(Registered::Missing),
-        Admission::Outside => return Err(Registered::OutsideWatchedPaths),
+fn inspect(asked: &Path) -> Result<Facts, Registered> {
+    let path = match resolve(asked) {
+        Resolved::At(path) => path,
+        Resolved::NotAbsolute => return Err(Registered::NotAbsolute),
+        Resolved::Missing => return Err(Registered::Missing),
     };
 
     if !is_repository_root(&path) {

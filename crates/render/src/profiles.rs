@@ -93,10 +93,6 @@ pub enum Broken {
 
     /// The home the account was kept under is not there any more.
     HomeMissing,
-
-    /// The account now resolves outside every Watched Path — a directory was
-    /// replaced by a symlink, or the boundary itself was reconfigured.
-    OutsideWatchedPaths,
 }
 
 /// One row of the Profile list.
@@ -147,8 +143,8 @@ pub struct ProfileEdit {
 
 /// What became of saving a Profile.
 ///
-/// The refusals are the server's and not the form's: the Watched Paths are a
-/// security boundary, and every request reaching the endpoint is decided there
+/// The refusals are the server's and not the form's: a check the browser made
+/// is a courtesy, and every request reaching the endpoint is decided there
 /// whether or not a form was involved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
@@ -177,11 +173,6 @@ pub enum ProfileSaved {
     /// Nothing is at the claude directory's path.
     DirMissing,
 
-    /// It resolves to somewhere outside every Watched Path. Checked after `..`
-    /// and every symlink have been taken out, so a path that merely reads as
-    /// inside one lands here too.
-    DirOutsideWatchedPaths,
-
     /// Something is there and it is not a directory — `~/.claude` is a directory
     /// bind-mounted over, so a file cannot stand in for it.
     NotADirectory,
@@ -191,9 +182,6 @@ pub enum ProfileSaved {
 
     /// Nothing is at the config file's path.
     ConfigMissing,
-
-    /// The config file resolves to somewhere outside every Watched Path.
-    ConfigOutsideWatchedPaths,
 
     /// Something is there and it is not a file — the pair is a directory and a
     /// file, and this is the file half.
@@ -205,9 +193,6 @@ pub enum ProfileSaved {
 
     /// Nothing is at the home's path.
     HomeMissing,
-
-    /// The home resolves to somewhere outside every Watched Path.
-    HomeOutsideWatchedPaths,
 
     /// Something is there and it is not a directory — a home is a directory
     /// bind-mounted over, so a file cannot stand in for it.

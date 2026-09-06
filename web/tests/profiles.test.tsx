@@ -736,8 +736,6 @@ describe("the pane the plus opens", () => {
   it.each([
     ["DirMissing", /nothing at the claude directory/i],
     ["ConfigMissing", /nothing at the config file/i],
-    ["DirOutsideWatchedPaths", /claude directory is outside the watched paths/i],
-    ["ConfigOutsideWatchedPaths", /config file is outside the watched paths/i],
     ["NotADirectory", /not a directory/i],
     ["NotAFile", /not a file/i],
     ["DirNotAbsolute", /claude directory's absolute path/i],
@@ -837,10 +835,6 @@ describe("a profile whose account has gone", () => {
     ["DirMissing", "Its claude directory is gone."],
     ["ConfigMissing", "Its config file is gone."],
     ["HomeMissing", "The home it kept its account under is gone."],
-    [
-      "OutsideWatchedPaths",
-      "Its account now points outside the watched paths.",
-    ],
   ])("says of %s what is wrong with it", async (broken, said) => {
     const gone: ProfileEntry[] = [
       { ...FABLE, broken: broken as ProfileEntry["broken"] },

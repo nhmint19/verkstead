@@ -2,9 +2,12 @@
 //! the two a Conversation chooses before anything will grill it.
 //!
 //! Asked of the *server*, through the endpoints, because that is where the
-//! decisions are: whether the pair is really there, and whether it is inside the
-//! Watched Paths. A form that checked either would be a courtesy — this endpoint
-//! is reachable without one, and the boundary is the server's.
+//! decisions are: whether the pair is really there, and whether each half is of
+//! the shape its agent type keeps an account in. A form that checked either
+//! would be a courtesy — this endpoint is reachable without one.
+//!
+//! Where an account is kept is not one of the decisions. Anywhere the server can
+//! read is somewhere a Profile can name, the human's own `~/.claude` included.
 //!
 //! Nothing here mounts anything. A Profile is a record of an account a session
 //! will later be run under, and the stage that runs one is the next one.
@@ -24,21 +27,28 @@ use verkstead_render::{
 };
 use verkstead_server::{WatchedPaths, open_database, router_watching, store};
 
-/// A watched directory, the app over it, and the directory holding the database
-/// alive.
+/// A directory to keep accounts and repositories in, the app over it, and the
+/// directory holding the database alive.
+///
+/// The app is told to watch nothing, which is what a bare `verkstead serve` is:
+/// every account below is saved from a directory the installation never heard
+/// of.
 async fn workbench() -> (tempfile::TempDir, tempfile::TempDir, Router) {
-    let watched = tempfile::tempdir().unwrap();
+    let accounts = tempfile::tempdir().unwrap();
     let dir = tempfile::tempdir().unwrap();
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
-    let paths = WatchedPaths::resolve(&[watched.path().to_owned()]).unwrap();
 
     // Beside the database, as it falls out for the real server. Nothing in this
     // file grills, so nothing is ever put in it.
     let data_dir = dir.path().to_owned();
 
-    (watched, dir, router_watching(pool, paths, data_dir))
+    (
+        accounts,
+        dir,
+        router_watching(pool, WatchedPaths::none(), data_dir),
+    )
 }
 
 /// A claude dir and config file pair at `root`, as `work-sandbox` would find
@@ -135,8 +145,8 @@ const MODELS: [&str; 2] = ["claude-opus-5", "claude-fable-5"];
 const MODEL: &str = MODELS[1];
 
 /// Save one that ought to work, and hand back the row it became.
-async fn saved(app: &Router, watched: &Path, name: &str) -> ProfileEntry {
-    let (claude_dir, config_file) = pair(watched, name);
+async fn saved(app: &Router, root: &Path, name: &str) -> ProfileEntry {
+    let (claude_dir, config_file) = pair(root, name);
 
     assert_eq!(
         save(app, &edit(name, &claude_dir, &config_file, &MODELS)).await,
@@ -189,10 +199,9 @@ fn git(dir: &Path, args: &[&str]) {
     assert!(ran.success(), "git {args:?} failed in {}", dir.display());
 }
 
-/// A Conversation to choose Profiles on, in a repository inside the watched
-/// directory.
-async fn conversation(app: &Router, watched: &Path) -> i64 {
-    let repo = repository(watched.join("verkstead"));
+/// A Conversation to choose Profiles on, in a repository under `root`.
+async fn conversation(app: &Router, root: &Path) -> i64 {
+    let repo = repository(root.join("verkstead"));
 
     let registered: Registered =
         post(app, "/api/ui/repos", &serde_json::json!({ "path": repo })).await;
@@ -325,16 +334,16 @@ fn read<T: DeserializeOwned>(body: &str) -> T {
 
 #[tokio::test]
 async fn a_saved_profile_appears_on_the_list_with_everything_it_was_given() {
-    let (watched, _dir, app) = workbench().await;
+    let (accounts, _dir, app) = workbench().await;
 
-    let profile = saved(&app, watched.path(), "work").await;
+    let profile = saved(&app, accounts.path(), "work").await;
 
     assert_eq!(profile.name, "work");
     assert_eq!(profile.models, MODELS);
 
     // The account, in the shape its agent type keeps one — and the resolved
     // paths in it, which are what will be bind-mounted.
-    let resolved = watched.path().canonicalize().unwrap();
+    let resolved = accounts.path().canonicalize().unwrap();
     assert_eq!(
         profile.account,
         ProfileAccount::Claude {
@@ -353,9 +362,9 @@ async fn a_saved_profile_appears_on_the_list_with_everything_it_was_given() {
 
 #[tokio::test]
 async fn a_profile_is_rewritten_whole_and_removed_when_nobody_is_running_under_it() {
-    let (watched, _dir, app) = workbench().await;
-    let profile = saved(&app, watched.path(), "work").await;
-    let (claude_dir, config_file) = pair(watched.path(), "anthropic");
+    let (accounts, _dir, app) = workbench().await;
+    let profile = saved(&app, accounts.path(), "work").await;
+    let (claude_dir, config_file) = pair(accounts.path(), "anthropic");
 
     let rewritten: ProfileSaved = post(
         &app,
@@ -376,10 +385,10 @@ async fn a_profile_is_rewritten_whole_and_removed_when_nobody_is_running_under_i
 
 #[tokio::test]
 async fn profiles_come_back_by_name() {
-    let (watched, _dir, app) = workbench().await;
-    saved(&app, watched.path(), "work").await;
-    saved(&app, watched.path(), "anthropic").await;
-    saved(&app, watched.path(), "personal").await;
+    let (accounts, _dir, app) = workbench().await;
+    saved(&app, accounts.path(), "work").await;
+    saved(&app, accounts.path(), "anthropic").await;
+    saved(&app, accounts.path(), "personal").await;
 
     let names: Vec<String> = listed(&app)
         .await
@@ -395,9 +404,9 @@ async fn profiles_come_back_by_name() {
 /// would not say which one.
 #[tokio::test]
 async fn a_pair_that_is_not_there_is_refused_by_the_half_that_is_missing() {
-    let (watched, _dir, app) = workbench().await;
-    let (claude_dir, config_file) = pair(watched.path(), "work");
-    let nowhere = watched.path().join("never-made");
+    let (accounts, _dir, app) = workbench().await;
+    let (claude_dir, config_file) = pair(accounts.path(), "work");
+    let nowhere = accounts.path().join("never-made");
 
     assert_eq!(
         save(
@@ -423,8 +432,8 @@ async fn a_pair_that_is_not_there_is_refused_by_the_half_that_is_missing() {
 /// mistake this catches.
 #[tokio::test]
 async fn a_file_where_the_directory_goes_and_the_reverse_are_both_refused() {
-    let (watched, _dir, app) = workbench().await;
-    let (claude_dir, config_file) = pair(watched.path(), "work");
+    let (accounts, _dir, app) = workbench().await;
+    let (claude_dir, config_file) = pair(accounts.path(), "work");
 
     assert_eq!(
         save(
@@ -444,70 +453,84 @@ async fn a_file_where_the_directory_goes_and_the_reverse_are_both_refused() {
     );
 }
 
-/// The boundary is the server's, and it is the same boundary a Repo's path is
-/// judged by: one rule about what Verkstead may touch, not one rule per feature.
+/// The account a Profile most naturally names: the human's own login, at
+/// `~/.claude` and `~/.claude.json`, which the server was never told about and
+/// which nothing now refuses.
+///
+/// A home of its own rather than the machine's, because a test that read the
+/// real `$HOME` would pass or fail on whether whoever ran it uses Claude.
 #[tokio::test]
-async fn a_pair_outside_the_watched_paths_is_refused_by_the_server() {
-    let (watched, _dir, app) = workbench().await;
-    let (inside_dir, inside_config) = pair(watched.path(), "work");
+async fn a_pair_under_a_home_the_server_was_never_told_about_saves_and_reads_unbroken() {
+    let (_accounts, _dir, app) = workbench().await;
 
-    let elsewhere = tempfile::tempdir().unwrap();
-    let (outside_dir, outside_config) = pair(elsewhere.path(), "work");
+    let home = tempfile::tempdir().unwrap();
+    let claude_dir = home.path().join(".claude");
+    let config_file = home.path().join(".claude.json");
+    std::fs::create_dir(&claude_dir).unwrap();
+    std::fs::write(&config_file, "{}\n").unwrap();
 
     assert_eq!(
         save(
             &app,
-            &edit("work", &outside_dir, &inside_config, &["claude-opus-5"])
+            &edit("mine", &claude_dir, &config_file, &["claude-opus-5"])
         )
         .await,
-        ProfileSaved::DirOutsideWatchedPaths
-    );
-    assert_eq!(
-        save(
-            &app,
-            &edit("work", &inside_dir, &outside_config, &["claude-opus-5"])
-        )
-        .await,
-        ProfileSaved::ConfigOutsideWatchedPaths
+        ProfileSaved::Saved
     );
 
-    assert!(listed(&app).await.is_empty());
+    let listed = listed(&app).await;
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].broken, None);
+
+    let resolved = home.path().canonicalize().unwrap();
+    assert_eq!(
+        listed[0].account,
+        ProfileAccount::Claude {
+            claude_dir: resolved.join(".claude").to_str().unwrap().to_owned(),
+            config_file: resolved.join(".claude.json").to_str().unwrap().to_owned(),
+        }
+    );
 }
 
-/// A path that merely *reads* as inside a Watched Path is not inside one: the
-/// symlink is followed before the boundary is consulted, exactly as it is for a
-/// Repo.
+/// What is stored is the resolved pair rather than the one that was typed: a
+/// symlink is followed first, so the row names the directory a session will
+/// actually have mounted.
 ///
-/// Made where a link can be made without asking anybody's permission,
-/// which is both Unixes and not Windows: what the boundary does with one is
-/// the same reasoning everywhere, so what is lost there is the making of the
-/// link rather than any of it.
+/// Made where a link can be made without asking anybody's permission, which is
+/// both Unixes and not Windows. The resolving is the same everywhere — it is
+/// `canonicalize` — so what is lost there is the making of the link rather than
+/// any of the reasoning.
 #[cfg(unix)]
 #[tokio::test]
-async fn a_symlink_out_of_the_watched_paths_does_not_get_a_pair_in() {
-    let (watched, _dir, app) = workbench().await;
-    let (_, config_file) = pair(watched.path(), "work");
+async fn a_pair_reached_through_a_symlink_is_stored_where_it_really_is() {
+    let (accounts, _dir, app) = workbench().await;
+    let (_, config_file) = pair(accounts.path(), "work");
 
     let elsewhere = tempfile::tempdir().unwrap();
-    let (outside_dir, _) = pair(elsewhere.path(), "escape");
+    let (real_dir, _) = pair(elsewhere.path(), "real");
 
-    let looks_inside = watched.path().join("looks-inside");
-    std::os::unix::fs::symlink(&outside_dir, &looks_inside).unwrap();
+    let link = accounts.path().join("looks-local");
+    std::os::unix::fs::symlink(&real_dir, &link).unwrap();
 
     assert_eq!(
-        save(
-            &app,
-            &edit("work", &looks_inside, &config_file, &["claude-opus-5"])
-        )
-        .await,
-        ProfileSaved::DirOutsideWatchedPaths
+        save(&app, &edit("work", &link, &config_file, &["claude-opus-5"])).await,
+        ProfileSaved::Saved
+    );
+
+    let ProfileAccount::Claude { claude_dir, .. } = &listed(&app).await[0].account else {
+        panic!("a Claude Profile should come back as a Claude account");
+    };
+
+    assert_eq!(
+        claude_dir,
+        real_dir.canonicalize().unwrap().to_str().unwrap()
     );
 }
 
 #[tokio::test]
 async fn a_relative_path_is_refused_without_being_resolved() {
-    let (watched, _dir, app) = workbench().await;
-    let (claude_dir, config_file) = pair(watched.path(), "work");
+    let (accounts, _dir, app) = workbench().await;
+    let (claude_dir, config_file) = pair(accounts.path(), "work");
 
     assert_eq!(
         save(
@@ -541,8 +564,8 @@ async fn a_relative_path_is_refused_without_being_resolved() {
 /// written. The list is the Profile's own, and no entry of it is preferred.
 #[tokio::test]
 async fn a_profile_lists_every_model_its_account_can_run() {
-    let (watched, _dir, app) = workbench().await;
-    let (claude_dir, config_file) = pair(watched.path(), "work");
+    let (accounts, _dir, app) = workbench().await;
+    let (claude_dir, config_file) = pair(accounts.path(), "work");
 
     assert_eq!(
         save(
@@ -568,8 +591,8 @@ async fn a_profile_lists_every_model_its_account_can_run() {
 /// Neither is a field to leave empty.
 #[tokio::test]
 async fn a_profile_with_no_name_or_no_models_is_refused() {
-    let (watched, _dir, app) = workbench().await;
-    let (claude_dir, config_file) = pair(watched.path(), "work");
+    let (accounts, _dir, app) = workbench().await;
+    let (claude_dir, config_file) = pair(accounts.path(), "work");
 
     assert_eq!(
         save(
@@ -592,10 +615,10 @@ async fn a_profile_with_no_name_or_no_models_is_refused() {
 
 #[tokio::test]
 async fn a_name_another_profile_already_has_is_refused() {
-    let (watched, _dir, app) = workbench().await;
-    saved(&app, watched.path(), "work").await;
+    let (accounts, _dir, app) = workbench().await;
+    saved(&app, accounts.path(), "work").await;
 
-    let (claude_dir, config_file) = pair(watched.path(), "second");
+    let (claude_dir, config_file) = pair(accounts.path(), "second");
     assert_eq!(
         save(
             &app,
@@ -612,17 +635,17 @@ async fn a_name_another_profile_already_has_is_refused() {
 /// not start.
 #[tokio::test]
 async fn a_profile_whose_pair_has_disappeared_reads_as_broken() {
-    let (watched, _dir, app) = workbench().await;
-    let profile = saved(&app, watched.path(), "work").await;
+    let (accounts, _dir, app) = workbench().await;
+    let profile = saved(&app, accounts.path(), "work").await;
     assert_eq!(profile.broken, None);
 
-    std::fs::remove_dir_all(watched.path().join("work/.claude")).unwrap();
+    std::fs::remove_dir_all(accounts.path().join("work/.claude")).unwrap();
     assert_eq!(listed(&app).await[0].broken, Some(Broken::DirMissing));
 
     // Put the directory back and take the file instead: the other half breaks it
     // just the same, and says which half it was.
-    std::fs::create_dir_all(watched.path().join("work/.claude")).unwrap();
-    std::fs::remove_file(watched.path().join("work/.claude.json")).unwrap();
+    std::fs::create_dir_all(accounts.path().join("work/.claude")).unwrap();
+    std::fs::remove_file(accounts.path().join("work/.claude.json")).unwrap();
     assert_eq!(listed(&app).await[0].broken, Some(Broken::ConfigMissing));
 }
 
@@ -634,19 +657,19 @@ async fn a_profile_whose_pair_has_disappeared_reads_as_broken() {
 /// the models and every judgement about the path are the same either way.
 #[tokio::test]
 async fn a_profile_whose_account_is_one_home_saves_and_reads_back_with_it() {
-    let (watched, _dir, app) = workbench().await;
+    let (accounts, _dir, app) = workbench().await;
 
     assert_eq!(
         save(
             &app,
-            &codex_edit("codex", &home(watched.path(), "codex"), &MODELS)
+            &codex_edit("codex", &home(accounts.path(), "codex"), &MODELS)
         )
         .await,
         ProfileSaved::Saved
     );
 
     let profile = &listed(&app).await[0];
-    let resolved = watched.path().canonicalize().unwrap();
+    let resolved = accounts.path().canonicalize().unwrap();
 
     assert_eq!(profile.name, "codex");
     assert_eq!(profile.models, MODELS);
@@ -667,12 +690,12 @@ async fn a_profile_whose_account_is_one_home_saves_and_reads_back_with_it() {
 /// home.
 #[tokio::test]
 async fn a_home_account_saves_and_reads_back_as_its_own_type() {
-    let (watched, _dir, app) = workbench().await;
+    let (accounts, _dir, app) = workbench().await;
 
     assert_eq!(
         save(
             &app,
-            &codex_edit("codex", &home(watched.path(), "codex"), &MODELS)
+            &codex_edit("codex", &home(accounts.path(), "codex"), &MODELS)
         )
         .await,
         ProfileSaved::Saved
@@ -680,7 +703,7 @@ async fn a_home_account_saves_and_reads_back_as_its_own_type() {
     assert_eq!(
         save(
             &app,
-            &grok_edit("grok", &grok_home(watched.path(), "grok"), &MODELS)
+            &grok_edit("grok", &grok_home(accounts.path(), "grok"), &MODELS)
         )
         .await,
         ProfileSaved::Saved
@@ -690,7 +713,7 @@ async fn a_home_account_saves_and_reads_back_as_its_own_type() {
             &app,
             &opencode_edit(
                 "opencode",
-                &opencode_home(watched.path(), "opencode"),
+                &opencode_home(accounts.path(), "opencode"),
                 &MODELS
             )
         )
@@ -699,7 +722,7 @@ async fn a_home_account_saves_and_reads_back_as_its_own_type() {
     );
 
     let listed = listed(&app).await;
-    let resolved = watched.path().canonicalize().unwrap();
+    let resolved = accounts.path().canonicalize().unwrap();
 
     assert_eq!(
         listed
@@ -735,15 +758,15 @@ async fn a_home_account_saves_and_reads_back_as_its_own_type() {
 /// watching.
 #[tokio::test]
 async fn an_opencode_home_without_the_directories_opencode_reads_is_refused() {
-    let (watched, _dir, app) = workbench().await;
-    let bare = made(watched.path().join("bare/opencode"));
+    let (accounts, _dir, app) = workbench().await;
+    let bare = made(accounts.path().join("bare/opencode"));
 
     assert_eq!(
         save(&app, &opencode_edit("bare", &bare, &MODELS)).await,
         ProfileSaved::HomeMissing
     );
 
-    let kept = opencode_home(watched.path(), "opencode");
+    let kept = opencode_home(accounts.path(), "opencode");
     assert_eq!(
         save(&app, &opencode_edit("opencode", &kept, &MODELS)).await,
         ProfileSaved::Saved
@@ -758,18 +781,17 @@ async fn an_opencode_home_without_the_directories_opencode_reads_is_refused() {
 }
 
 /// And its home is judged the way a pair's halves are: named by what it is when
-/// it has gone, and against the boundary rather than only against the
-/// filesystem.
+/// it has gone.
 ///
-/// Made where a link can be made without asking anybody's permission,
-/// which is both Unixes and not Windows: what the boundary does with one is
-/// the same reasoning everywhere, so what is lost there is the making of the
-/// link rather than any of it.
+/// The link half is made where one can be made without asking anybody's
+/// permission, which is both Unixes and not Windows. The resolving is the same
+/// everywhere — it is `canonicalize` — so what is lost there is the making of
+/// the link rather than any of the reasoning.
 #[cfg(unix)]
 #[tokio::test]
-async fn a_home_that_has_gone_or_left_the_watched_paths_reads_as_broken() {
-    let (watched, _dir, app) = workbench().await;
-    let kept = home(watched.path(), "codex");
+async fn a_home_that_has_gone_reads_as_broken() {
+    let (accounts, _dir, app) = workbench().await;
+    let kept = home(accounts.path(), "codex");
 
     assert_eq!(
         save(&app, &codex_edit("codex", &kept, &MODELS)).await,
@@ -780,16 +802,12 @@ async fn a_home_that_has_gone_or_left_the_watched_paths_reads_as_broken() {
     std::fs::remove_dir_all(&kept).unwrap();
     assert_eq!(listed(&app).await[0].broken, Some(Broken::HomeMissing));
 
-    // Back, but as a symlink to somewhere outside: it exists, and mounting it
-    // would be reaching around the boundary with a path admitted once.
+    // Back, but as a link to a directory nobody made: the link is there and what
+    // it names is not, so there is still nothing to mount.
     let elsewhere = tempfile::tempdir().unwrap();
-    let outside = home(elsewhere.path(), "escape");
-    std::os::unix::fs::symlink(&outside, &kept).unwrap();
+    std::os::unix::fs::symlink(elsewhere.path().join("never-made"), &kept).unwrap();
 
-    assert_eq!(
-        listed(&app).await[0].broken,
-        Some(Broken::OutsideWatchedPaths)
-    );
+    assert_eq!(listed(&app).await[0].broken, Some(Broken::HomeMissing));
 }
 
 /// Every way a home is refused a save, each named for the home rather than for
@@ -797,7 +815,7 @@ async fn a_home_that_has_gone_or_left_the_watched_paths_reads_as_broken() {
 /// Codex Profile has no config file to be told about.
 #[tokio::test]
 async fn a_home_is_refused_by_its_own_name() {
-    let (watched, _dir, app) = workbench().await;
+    let (accounts, _dir, app) = workbench().await;
 
     assert_eq!(
         save(
@@ -810,25 +828,15 @@ async fn a_home_is_refused_by_its_own_name() {
     assert_eq!(
         save(
             &app,
-            &codex_edit("codex", &watched.path().join("nowhere"), &MODELS)
+            &codex_edit("codex", &accounts.path().join("nowhere"), &MODELS)
         )
         .await,
         ProfileSaved::HomeMissing
     );
 
-    let elsewhere = tempfile::tempdir().unwrap();
-    assert_eq!(
-        save(
-            &app,
-            &codex_edit("codex", &home(elsewhere.path(), "outside"), &MODELS)
-        )
-        .await,
-        ProfileSaved::HomeOutsideWatchedPaths
-    );
-
     // A file where the home goes: a home is a directory bind-mounted over, so
     // nothing else can stand in for one.
-    let file = watched.path().join("a-file");
+    let file = accounts.path().join("a-file");
     std::fs::write(&file, "not a home\n").unwrap();
     assert_eq!(
         save(&app, &codex_edit("codex", &file, &MODELS)).await,
@@ -836,40 +844,35 @@ async fn a_home_is_refused_by_its_own_name() {
     );
 }
 
-/// Broken is asked of the boundary and not only of the filesystem: a directory
-/// replaced by a symlink out of the Watched Paths still exists, and mounting it
-/// would be reaching around a boundary with a path that was admitted once.
+/// Broken is asked by resolving rather than by asking whether something is
+/// there: a directory replaced by a link to nowhere is a path a session cannot
+/// be launched under, however much of it still reads.
 ///
-/// Made where a link can be made without asking anybody's permission,
-/// which is both Unixes and not Windows: what the boundary does with one is
-/// the same reasoning everywhere, so what is lost there is the making of the
-/// link rather than any of it.
+/// Made where a link can be made without asking anybody's permission, which is
+/// both Unixes and not Windows. The resolving is the same everywhere — it is
+/// `canonicalize` — so what is lost there is the making of the link rather than
+/// any of the reasoning.
 #[cfg(unix)]
 #[tokio::test]
-async fn a_pair_that_now_points_out_of_the_watched_paths_reads_as_broken() {
-    let (watched, _dir, app) = workbench().await;
-    saved(&app, watched.path(), "work").await;
+async fn a_pair_whose_directory_is_now_a_link_to_nowhere_reads_as_broken() {
+    let (accounts, _dir, app) = workbench().await;
+    saved(&app, accounts.path(), "work").await;
 
-    let elsewhere = tempfile::tempdir().unwrap();
-    let (outside_dir, _) = pair(elsewhere.path(), "escape");
+    let claude_dir = accounts.path().join("work/.claude");
+    std::fs::remove_dir_all(&claude_dir).unwrap();
+    std::os::unix::fs::symlink(accounts.path().join("never-made"), &claude_dir).unwrap();
 
-    std::fs::remove_dir_all(watched.path().join("work/.claude")).unwrap();
-    std::os::unix::fs::symlink(&outside_dir, watched.path().join("work/.claude")).unwrap();
-
-    assert_eq!(
-        listed(&app).await[0].broken,
-        Some(Broken::OutsideWatchedPaths)
-    );
+    assert_eq!(listed(&app).await[0].broken, Some(Broken::DirMissing));
 }
 
 /// They are separate choices because they are genuinely separate accounts and
 /// models — grill on fable, implement on opus.
 #[tokio::test]
 async fn a_conversation_chooses_its_two_pairings_independently() {
-    let (watched, _dir, app) = workbench().await;
-    let id = conversation(&app, watched.path()).await;
-    let fable = saved(&app, watched.path(), "fable").await;
-    let opus = saved(&app, watched.path(), "opus").await;
+    let (accounts, _dir, app) = workbench().await;
+    let id = conversation(&app, accounts.path()).await;
+    let fable = saved(&app, accounts.path(), "fable").await;
+    let opus = saved(&app, accounts.path(), "opus").await;
 
     assert_eq!(
         choose_grilling(&app, id, fable.id, MODEL).await,
@@ -908,9 +911,9 @@ async fn a_conversation_chooses_its_two_pairings_independently() {
 /// first.
 #[tokio::test]
 async fn a_pairing_says_back_the_model_it_was_chosen_with() {
-    let (watched, _dir, app) = workbench().await;
-    let id = conversation(&app, watched.path()).await;
-    let work = saved(&app, watched.path(), "work").await;
+    let (accounts, _dir, app) = workbench().await;
+    let id = conversation(&app, accounts.path()).await;
+    let work = saved(&app, accounts.path(), "work").await;
 
     choose_grilling(&app, id, work.id, MODELS[1]).await;
     choose_implementation(&app, id, work.id, MODELS[0]).await;
@@ -933,9 +936,9 @@ async fn a_pairing_says_back_the_model_it_was_chosen_with() {
 /// otherwise launch a session on something the account cannot run.
 #[tokio::test]
 async fn a_model_the_profile_does_not_list_cannot_be_paired_with_it() {
-    let (watched, _dir, app) = workbench().await;
-    let id = conversation(&app, watched.path()).await;
-    let work = saved(&app, watched.path(), "work").await;
+    let (accounts, _dir, app) = workbench().await;
+    let id = conversation(&app, accounts.path()).await;
+    let work = saved(&app, accounts.path(), "work").await;
 
     assert_eq!(
         choose_grilling(&app, id, work.id, "claude-haiku-4-5").await,
@@ -955,11 +958,11 @@ async fn a_model_the_profile_does_not_list_cannot_be_paired_with_it() {
 /// something the next stage will grill.
 #[tokio::test]
 async fn a_conversation_is_not_ready_to_grill_until_every_pairing_is_chosen() {
-    let (watched, _dir, app) = workbench().await;
-    let id = conversation(&app, watched.path()).await;
-    let fable = saved(&app, watched.path(), "fable").await;
-    let opus = saved(&app, watched.path(), "opus").await;
-    let haiku = saved(&app, watched.path(), "haiku").await;
+    let (accounts, _dir, app) = workbench().await;
+    let id = conversation(&app, accounts.path()).await;
+    let fable = saved(&app, accounts.path(), "fable").await;
+    let opus = saved(&app, accounts.path(), "opus").await;
+    let haiku = saved(&app, accounts.path(), "haiku").await;
 
     assert!(
         !opened(&app, id).await.ready_to_grill,
@@ -987,9 +990,9 @@ async fn a_conversation_is_not_ready_to_grill_until_every_pairing_is_chosen() {
 /// again, and the pane reads it as one.
 #[tokio::test]
 async fn a_drafting_conversation_with_an_unpaired_profile_is_not_ready_to_grill() {
-    let (watched, dir, app) = workbench().await;
-    let id = conversation(&app, watched.path()).await;
-    let work = saved(&app, watched.path(), "work").await;
+    let (accounts, dir, app) = workbench().await;
+    let id = conversation(&app, accounts.path()).await;
+    let work = saved(&app, accounts.path(), "work").await;
 
     choose_grilling(&app, id, work.id, MODEL).await;
     choose_implementation(&app, id, work.id, MODEL).await;
@@ -1020,18 +1023,18 @@ async fn a_drafting_conversation_with_an_unpaired_profile_is_not_ready_to_grill(
 /// choosing it is not enough to be ready.
 #[tokio::test]
 async fn a_conversation_holding_a_broken_profile_is_not_ready_to_grill() {
-    let (watched, _dir, app) = workbench().await;
-    let id = conversation(&app, watched.path()).await;
-    let fable = saved(&app, watched.path(), "fable").await;
-    let opus = saved(&app, watched.path(), "opus").await;
-    let haiku = saved(&app, watched.path(), "haiku").await;
+    let (accounts, _dir, app) = workbench().await;
+    let id = conversation(&app, accounts.path()).await;
+    let fable = saved(&app, accounts.path(), "fable").await;
+    let opus = saved(&app, accounts.path(), "opus").await;
+    let haiku = saved(&app, accounts.path(), "haiku").await;
 
     choose_grilling(&app, id, fable.id, MODEL).await;
     choose_implementation(&app, id, opus.id, MODEL).await;
     choose_review(&app, id, haiku.id, MODEL).await;
     assert!(opened(&app, id).await.ready_to_grill);
 
-    std::fs::remove_file(watched.path().join("opus/.claude.json")).unwrap();
+    std::fs::remove_file(accounts.path().join("opus/.claude.json")).unwrap();
 
     let view = opened(&app, id).await;
     assert_eq!(
@@ -1046,9 +1049,9 @@ async fn a_conversation_holding_a_broken_profile_is_not_ready_to_grill() {
 /// not kinds of Profile.
 #[tokio::test]
 async fn one_profile_can_be_every_one_of_a_conversations_choices() {
-    let (watched, _dir, app) = workbench().await;
-    let id = conversation(&app, watched.path()).await;
-    let only = saved(&app, watched.path(), "work").await;
+    let (accounts, _dir, app) = workbench().await;
+    let id = conversation(&app, accounts.path()).await;
+    let only = saved(&app, accounts.path(), "work").await;
 
     choose_grilling(&app, id, only.id, MODEL).await;
     choose_implementation(&app, id, only.id, MODEL).await;
@@ -1079,9 +1082,9 @@ async fn one_profile_can_be_every_one_of_a_conversations_choices() {
 /// again rather than at a run that will fail later for reasons nothing shows.
 #[tokio::test]
 async fn a_profile_a_conversation_has_chosen_is_removed_and_nulled_out_of_it() {
-    let (watched, _dir, app) = workbench().await;
-    let id = conversation(&app, watched.path()).await;
-    let profile = saved(&app, watched.path(), "work").await;
+    let (accounts, _dir, app) = workbench().await;
+    let id = conversation(&app, accounts.path()).await;
+    let profile = saved(&app, accounts.path(), "work").await;
 
     choose_grilling(&app, id, profile.id, MODEL).await;
     choose_implementation(&app, id, profile.id, MODEL).await;
@@ -1105,9 +1108,9 @@ async fn a_profile_a_conversation_has_chosen_is_removed_and_nulled_out_of_it() {
 
 #[tokio::test]
 async fn a_profile_that_is_not_there_says_so_however_it_is_asked_about() {
-    let (watched, _dir, app) = workbench().await;
-    let id = conversation(&app, watched.path()).await;
-    let (claude_dir, config_file) = pair(watched.path(), "work");
+    let (accounts, _dir, app) = workbench().await;
+    let id = conversation(&app, accounts.path()).await;
+    let (claude_dir, config_file) = pair(accounts.path(), "work");
 
     let rewritten: ProfileSaved = post(
         &app,
@@ -1132,8 +1135,8 @@ async fn a_profile_that_is_not_there_says_so_however_it_is_asked_about() {
 
 #[tokio::test]
 async fn choosing_on_a_conversation_that_is_not_there_says_so() {
-    let (watched, _dir, app) = workbench().await;
-    let profile = saved(&app, watched.path(), "work").await;
+    let (accounts, _dir, app) = workbench().await;
+    let profile = saved(&app, accounts.path(), "work").await;
 
     assert_eq!(
         choose_grilling(&app, 404, profile.id, MODEL).await,
@@ -1148,8 +1151,8 @@ async fn choosing_on_a_conversation_that_is_not_there_says_so() {
 /// An id out of a URL the human may have typed, which is not always a number.
 #[tokio::test]
 async fn an_id_that_is_not_a_number_names_no_profile() {
-    let (watched, _dir, app) = workbench().await;
-    let (claude_dir, config_file) = pair(watched.path(), "work");
+    let (accounts, _dir, app) = workbench().await;
+    let (claude_dir, config_file) = pair(accounts.path(), "work");
 
     let rewritten: ProfileSaved = post(
         &app,
@@ -1170,7 +1173,7 @@ async fn an_id_that_is_not_a_number_names_no_profile() {
 
 #[tokio::test]
 async fn nothing_saved_means_an_empty_list() {
-    let (_watched, _dir, app) = workbench().await;
+    let (_accounts, _dir, app) = workbench().await;
 
     assert!(listed(&app).await.is_empty());
 }
@@ -1222,11 +1225,11 @@ async fn another(app: &Router) -> i64 {
 /// with every picker already filled.
 #[tokio::test]
 async fn a_new_conversation_arrives_with_what_its_repo_was_last_grilled_with() {
-    let (watched, dir, app) = workbench().await;
-    let id = conversation(&app, watched.path()).await;
-    let fable = saved(&app, watched.path(), "fable").await;
-    let opus = saved(&app, watched.path(), "opus").await;
-    let haiku = saved(&app, watched.path(), "haiku").await;
+    let (accounts, dir, app) = workbench().await;
+    let id = conversation(&app, accounts.path()).await;
+    let fable = saved(&app, accounts.path(), "fable").await;
+    let opus = saved(&app, accounts.path(), "opus").await;
+    let haiku = saved(&app, accounts.path(), "haiku").await;
 
     choose_grilling(&app, id, fable.id, MODEL).await;
     choose_implementation(&app, id, opus.id, MODEL).await;
@@ -1272,10 +1275,10 @@ async fn a_new_conversation_arrives_with_what_its_repo_was_last_grilled_with() {
 /// they changed it to is what the Repo remembers next.
 #[tokio::test]
 async fn changing_the_prefill_before_grilling_is_what_gets_remembered() {
-    let (watched, dir, app) = workbench().await;
-    let first = conversation(&app, watched.path()).await;
-    let fable = saved(&app, watched.path(), "fable").await;
-    let opus = saved(&app, watched.path(), "opus").await;
+    let (accounts, dir, app) = workbench().await;
+    let first = conversation(&app, accounts.path()).await;
+    let fable = saved(&app, accounts.path(), "fable").await;
+    let opus = saved(&app, accounts.path(), "opus").await;
 
     choose_grilling(&app, first, fable.id, MODEL).await;
     choose_implementation(&app, first, fable.id, MODEL).await;
@@ -1305,16 +1308,16 @@ async fn changing_the_prefill_before_grilling_is_what_gets_remembered() {
 /// start, so the picker arrives unchosen rather than holding one.
 #[tokio::test]
 async fn a_remembered_profile_whose_pair_has_gone_is_not_prefilled() {
-    let (watched, dir, app) = workbench().await;
-    let id = conversation(&app, watched.path()).await;
-    let fable = saved(&app, watched.path(), "fable").await;
-    let opus = saved(&app, watched.path(), "opus").await;
+    let (accounts, dir, app) = workbench().await;
+    let id = conversation(&app, accounts.path()).await;
+    let fable = saved(&app, accounts.path(), "fable").await;
+    let opus = saved(&app, accounts.path(), "opus").await;
 
     choose_grilling(&app, id, fable.id, MODEL).await;
     choose_implementation(&app, id, opus.id, MODEL).await;
     grill(dir.path(), id).await;
 
-    std::fs::remove_file(watched.path().join("opus/.claude.json")).unwrap();
+    std::fs::remove_file(accounts.path().join("opus/.claude.json")).unwrap();
 
     let view = opened(&app, another(&app).await).await;
     assert_eq!(
@@ -1329,16 +1332,16 @@ async fn a_remembered_profile_whose_pair_has_gone_is_not_prefilled() {
 /// the Profile is fine, and that pairing of it is not one any more.
 #[tokio::test]
 async fn a_remembered_model_a_profile_no_longer_lists_is_not_prefilled() {
-    let (watched, dir, app) = workbench().await;
-    let id = conversation(&app, watched.path()).await;
-    let work = saved(&app, watched.path(), "work").await;
+    let (accounts, dir, app) = workbench().await;
+    let id = conversation(&app, accounts.path()).await;
+    let work = saved(&app, accounts.path(), "work").await;
 
     choose_grilling(&app, id, work.id, MODEL).await;
     choose_implementation(&app, id, work.id, MODEL).await;
     grill(dir.path(), id).await;
 
     // Retyped without the model both halves were remembered with.
-    let (claude_dir, config_file) = pair(watched.path(), "work");
+    let (claude_dir, config_file) = pair(accounts.path(), "work");
     let rewritten: ProfileSaved = post(
         &app,
         &format!("/api/ui/profiles/{}", work.id),
@@ -1356,9 +1359,9 @@ async fn a_remembered_model_a_profile_no_longer_lists_is_not_prefilled() {
 /// pick like any other: the next draft on that Repo arrives on it.
 #[tokio::test]
 async fn a_new_conversation_arrives_with_no_review_where_that_is_what_was_grilled() {
-    let (watched, dir, app) = workbench().await;
-    let id = conversation(&app, watched.path()).await;
-    let fable = saved(&app, watched.path(), "fable").await;
+    let (accounts, dir, app) = workbench().await;
+    let id = conversation(&app, accounts.path()).await;
+    let fable = saved(&app, accounts.path(), "fable").await;
 
     choose_grilling(&app, id, fable.id, MODEL).await;
     choose_implementation(&app, id, fable.id, MODEL).await;
@@ -1377,9 +1380,9 @@ async fn a_new_conversation_arrives_with_no_review_where_that_is_what_was_grille
 /// next draft on the same row.
 #[tokio::test]
 async fn a_new_conversation_arrives_with_no_grilling_where_that_is_what_was_started() {
-    let (watched, dir, app) = workbench().await;
-    let id = conversation(&app, watched.path()).await;
-    let fable = saved(&app, watched.path(), "fable").await;
+    let (accounts, dir, app) = workbench().await;
+    let id = conversation(&app, accounts.path()).await;
+    let fable = saved(&app, accounts.path(), "fable").await;
 
     assert_eq!(no_grilling(&app, id).await, ProfileChosen::Chosen);
     choose_implementation(&app, id, fable.id, MODEL).await;
@@ -1405,10 +1408,10 @@ async fn a_new_conversation_arrives_with_no_grilling_where_that_is_what_was_star
 /// next draft after *that* arrives with.
 #[tokio::test]
 async fn a_grilling_pairing_started_after_no_grilling_is_what_gets_prefilled() {
-    let (watched, dir, app) = workbench().await;
-    let fable = saved(&app, watched.path(), "fable").await;
+    let (accounts, dir, app) = workbench().await;
+    let fable = saved(&app, accounts.path(), "fable").await;
 
-    let first = conversation(&app, watched.path()).await;
+    let first = conversation(&app, accounts.path()).await;
     assert_eq!(no_grilling(&app, first).await, ProfileChosen::Chosen);
     choose_implementation(&app, first, fable.id, MODEL).await;
     choose_review(&app, first, fable.id, MODEL).await;
@@ -1445,11 +1448,11 @@ async fn only_repo(app: &Router) -> i64 {
 /// the same three the pane above draws, off the Repo rather than off a record.
 #[tokio::test]
 async fn a_repos_pairings_are_offered_before_anything_is_created() {
-    let (watched, dir, app) = workbench().await;
-    let id = conversation(&app, watched.path()).await;
-    let fable = saved(&app, watched.path(), "fable").await;
-    let opus = saved(&app, watched.path(), "opus").await;
-    let haiku = saved(&app, watched.path(), "haiku").await;
+    let (accounts, dir, app) = workbench().await;
+    let id = conversation(&app, accounts.path()).await;
+    let fable = saved(&app, accounts.path(), "fable").await;
+    let opus = saved(&app, accounts.path(), "opus").await;
+    let haiku = saved(&app, accounts.path(), "haiku").await;
 
     choose_grilling(&app, id, fable.id, MODEL).await;
     choose_implementation(&app, id, opus.id, MODEL).await;
@@ -1491,9 +1494,9 @@ async fn a_repos_pairings_are_offered_before_anything_is_created() {
 /// back as itself: there is no Profile in it to have gone.
 #[tokio::test]
 async fn a_repo_that_last_ran_no_review_offers_that() {
-    let (watched, dir, app) = workbench().await;
-    let id = conversation(&app, watched.path()).await;
-    let fable = saved(&app, watched.path(), "fable").await;
+    let (accounts, dir, app) = workbench().await;
+    let id = conversation(&app, accounts.path()).await;
+    let fable = saved(&app, accounts.path(), "fable").await;
 
     choose_grilling(&app, id, fable.id, MODEL).await;
     choose_implementation(&app, id, fable.id, MODEL).await;
@@ -1512,16 +1515,16 @@ async fn a_repo_that_last_ran_no_review_offers_that() {
 /// silently skipped.
 #[tokio::test]
 async fn a_memory_that_no_longer_applies_is_offered_as_nothing() {
-    let (watched, dir, app) = workbench().await;
-    let id = conversation(&app, watched.path()).await;
-    let fable = saved(&app, watched.path(), "fable").await;
-    let opus = saved(&app, watched.path(), "opus").await;
+    let (accounts, dir, app) = workbench().await;
+    let id = conversation(&app, accounts.path()).await;
+    let fable = saved(&app, accounts.path(), "fable").await;
+    let opus = saved(&app, accounts.path(), "opus").await;
 
     choose_grilling(&app, id, fable.id, MODEL).await;
     choose_implementation(&app, id, opus.id, MODEL).await;
     grill(dir.path(), id).await;
 
-    std::fs::remove_file(watched.path().join("opus/.claude.json")).unwrap();
+    std::fs::remove_file(accounts.path().join("opus/.claude.json")).unwrap();
 
     let offered = prefill(&app, only_repo(&app).await).await;
     assert_eq!(
@@ -1536,16 +1539,16 @@ async fn a_memory_that_no_longer_applies_is_offered_as_nothing() {
 /// the Profile is fine, and that pairing of it is not one any more.
 #[tokio::test]
 async fn a_model_a_profile_no_longer_lists_is_offered_as_nothing() {
-    let (watched, dir, app) = workbench().await;
-    let id = conversation(&app, watched.path()).await;
-    let work = saved(&app, watched.path(), "work").await;
+    let (accounts, dir, app) = workbench().await;
+    let id = conversation(&app, accounts.path()).await;
+    let work = saved(&app, accounts.path(), "work").await;
 
     choose_grilling(&app, id, work.id, MODEL).await;
     choose_implementation(&app, id, work.id, MODEL).await;
     grill(dir.path(), id).await;
 
     // Retyped without the model both halves were remembered with.
-    let (claude_dir, config_file) = pair(watched.path(), "work");
+    let (claude_dir, config_file) = pair(accounts.path(), "work");
     let rewritten: ProfileSaved = post(
         &app,
         &format!("/api/ui/profiles/{}", work.id),
@@ -1563,8 +1566,8 @@ async fn a_model_a_profile_no_longer_lists_is_offered_as_nothing() {
 /// empty pickers rather than a refusal: it is where every Repo starts.
 #[tokio::test]
 async fn a_repo_with_no_memory_offers_nothing_at_all() {
-    let (watched, _dir, app) = workbench().await;
-    conversation(&app, watched.path()).await;
+    let (accounts, _dir, app) = workbench().await;
+    conversation(&app, accounts.path()).await;
 
     let offered = prefill(&app, only_repo(&app).await).await;
     assert_eq!(offered.grilling, PickedView::Nothing);
@@ -1577,7 +1580,7 @@ async fn a_repo_with_no_memory_offers_nothing_at_all() {
 /// failure to report.
 #[tokio::test]
 async fn the_pairings_of_a_repo_that_is_not_there_are_refused() {
-    let (_watched, _dir, app) = workbench().await;
+    let (_accounts, _dir, app) = workbench().await;
 
     for asked in ["404", "nonsense"] {
         let (status, _) = fetch(

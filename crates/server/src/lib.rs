@@ -116,6 +116,9 @@ mod reply;
 mod repos;
 /// Speaking to a session that has gone idle without asking anything.
 mod rescues;
+/// A path as the filesystem has it, which is the one a Repo and an Agent
+/// Profile are recorded under.
+mod resolved;
 /// Getting a finished Conversation's merge conflict resolved, at the human's
 /// press.
 mod resolving;
@@ -511,8 +514,8 @@ pub fn router(pool: SqlitePool) -> Router {
     )
 }
 
-/// The same, permitted inside `watched` — the directories a Repo may be
-/// registered from — and keeping what it makes in `data_dir`.
+/// The same, watching `watched` — which is what the path browser opens on — and
+/// keeping what it makes in `data_dir`.
 ///
 /// It runs no sessions: starting a grilling makes the branch and the worktree
 /// and records that it did, and there is nothing here to launch inside them.

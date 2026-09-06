@@ -212,9 +212,9 @@ pub(crate) async fn pairing_prefill(state: &AppState, repo_id: i64) -> Result<Re
     let remembered = store::remembered_pairings(&state.pool, repo_id).await?;
 
     Ok(RepoPairingsView {
-        grilling: prefilled(&state.watched, remembered.grilling).await?,
-        implementation: usable(&state.watched, remembered.implementation).await?,
-        review: prefilled(&state.watched, remembered.review).await?,
+        grilling: prefilled(remembered.grilling).await?,
+        implementation: usable(remembered.implementation).await?,
+        review: prefilled(remembered.review).await?,
     })
 }
 
@@ -223,15 +223,12 @@ pub(crate) async fn pairing_prefill(state: &AppState, repo_id: i64) -> Result<Re
 ///
 /// The row is not judged — there is no Profile to have gone — so it comes back
 /// as itself, and everything else goes through [`usable`].
-async fn prefilled(
-    watched: &crate::watched::WatchedPaths,
-    remembered: store::Picked,
-) -> Result<PickedView> {
+async fn prefilled(remembered: store::Picked) -> Result<PickedView> {
     if remembered.skipped() {
         return Ok(PickedView::Skipped);
     }
 
-    Ok(match usable(watched, remembered).await? {
+    Ok(match usable(remembered).await? {
         Some(pairing) => PickedView::Under(pairing),
         None => PickedView::Nothing,
     })
@@ -242,9 +239,9 @@ async fn prefilled(
 ///
 /// Read as a row rather than trusted as a pair of ids, which is the reading
 /// [`start_grilling`] gives the Pairings it is about to launch under: whether
-/// the Profile's pair is still where it was left is a question for the Watched
-/// Paths, and whether it still lists the model is a question for the Profile's
-/// own list.
+/// the Profile's pair is still where it was left is a question for the
+/// filesystem, and whether it still lists the model is a question for the
+/// Profile's own list.
 ///
 /// A remembered role that was picked away is `None` here too — it is nothing to
 /// prefill a *Pairing* with, and its caller applies it on its own account.
@@ -252,10 +249,7 @@ async fn prefilled(
 /// What comes back is the Pairing whole, both halves settled: it is what one
 /// caller writes onto a new Conversation and what the other hands to a page, and
 /// neither of them should have to put the two together again.
-async fn usable(
-    watched: &crate::watched::WatchedPaths,
-    remembered: store::Picked,
-) -> Result<Option<PairingView>> {
+async fn usable(remembered: store::Picked) -> Result<Option<PairingView>> {
     let Some(model) = remembered
         .pairing()
         .and_then(|pairing| pairing.model.clone())
@@ -263,8 +257,7 @@ async fn usable(
         return Ok(None);
     };
 
-    let Some(pairing) = crate::profiles::pairing(watched, remembered.pairing().cloned()).await?
-    else {
+    let Some(pairing) = crate::profiles::pairing(remembered.pairing().cloned()).await? else {
         return Ok(None);
     };
 
@@ -1038,12 +1031,11 @@ pub(crate) async fn rename_companion_branch(
 /// that then refused holds nothing worth keeping.
 ///
 /// The whole state rather than the four pieces of it this needs: what starting a
-/// grilling reaches is most of what the server holds — the store, the boundary,
-/// the data directory, the sessions and whoever is watching them — and a
-/// parameter list of that length says less than the one name does.
+/// grilling reaches is most of what the server holds — the store, the data
+/// directory, the sessions and whoever is watching them — and a parameter list
+/// of that length says less than the one name does.
 pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<GrillingStarted> {
     let pool = &state.pool;
-    let watched = &state.watched;
 
     let Some(conversation) = store::load_conversation(pool, id).await? else {
         return Ok(GrillingStarted::NoSuchConversation);
@@ -1056,10 +1048,10 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // Read as rows rather than judged off the ids, which is the same reading the
     // pane gets — a Profile whose pair has gone is not one to launch a session
     // under, and the id alone cannot say so.
-    let grilling = crate::profiles::picked(watched, conversation.grilling_pairing.clone()).await?;
+    let grilling = crate::profiles::picked(conversation.grilling_pairing.clone()).await?;
     let implementation =
-        crate::profiles::pairing(watched, conversation.implementation_pairing.clone()).await?;
-    let review = crate::profiles::picked(watched, conversation.review_pairing.clone()).await?;
+        crate::profiles::pairing(conversation.implementation_pairing.clone()).await?;
+    let review = crate::profiles::picked(conversation.review_pairing.clone()).await?;
 
     if let Some(refusal) = unready(&grilling, implementation.as_ref(), &review) {
         return Ok(refusal.grilling());
@@ -1597,7 +1589,6 @@ fn recorded(planned: &[Checkout]) -> Vec<store::CompanionWorktree> {
 /// carried on by the path that was already there.
 pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     let pool = &state.pool;
-    let watched = &state.watched;
 
     let Some(conversation) = store::load_conversation(pool, id).await? else {
         return Ok(Adopted::NoSuchConversation);
@@ -1629,10 +1620,10 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // All of them, rather than only the one the work runs under: a stage
     // inherits every one from its predecessor, so what this one is adopted with
     // is what every stage after it starts with.
-    let grilling = crate::profiles::picked(watched, conversation.grilling_pairing.clone()).await?;
+    let grilling = crate::profiles::picked(conversation.grilling_pairing.clone()).await?;
     let implementation =
-        crate::profiles::pairing(watched, conversation.implementation_pairing.clone()).await?;
-    let review = crate::profiles::picked(watched, conversation.review_pairing.clone()).await?;
+        crate::profiles::pairing(conversation.implementation_pairing.clone()).await?;
+    let review = crate::profiles::picked(conversation.review_pairing.clone()).await?;
 
     if let Some(refusal) = unready(&grilling, implementation.as_ref(), &review) {
         return Ok(refusal.adopting());

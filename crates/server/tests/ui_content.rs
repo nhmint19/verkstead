@@ -1682,8 +1682,8 @@ async fn the_viewers_own_tests_are_fed_from_here() {
 
     // The Repo list: two registrations, put in through the store rather than
     // through the endpoint, because what is being written here is the shape of a
-    // row — and going in the front way would mean building a git repository
-    // inside a Watched Path, which is `repos.rs`'s subject and not this one's.
+    // row — and going in the front way would mean building a git repository on
+    // disk, which is `repos.rs`'s subject and not this one's.
     let (_dir, pool, app) = empty_app().await;
     for (path, name, branch) in [
         ("/srv/repos/verkstead", "verkstead", "main"),
@@ -1854,8 +1854,8 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // The workbench: the sidebar, and one Conversation opened — a Brief written,
     // a branch named, and the base commit overridden, which is the whole of what
     // a drafting Conversation carries. Put in through the store for the reason
-    // the Repos are: going in the front way means a git repository inside a
-    // Watched Path, which is `conversations.rs`'s subject and not this one's.
+    // the Repos are: going in the front way means a git repository on disk,
+    // which is `conversations.rs`'s subject and not this one's.
     let (_dir, pool, app) = empty_app().await;
     let mut repos = Vec::new();
     for (path, name, branch) in [

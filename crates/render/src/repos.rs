@@ -4,8 +4,8 @@
 //! Every way registering can be refused is a named outcome rather than a status
 //! code, as answering and locking are — because each of them is a different
 //! sentence to put in front of the human, and none of them is something to
-//! retry. A path outside the Watched Paths is the boundary doing its job, not an
-//! error.
+//! retry. A directory that is not a repository is something to go and put right,
+//! not an error.
 
 use serde::{Deserialize, Serialize};
 
@@ -58,13 +58,8 @@ pub enum Registered {
     /// Nothing is at that path.
     Missing,
 
-    /// It resolves to somewhere outside every Watched Path. The boundary is
-    /// checked after `..` and every symlink have been taken out, so a path that
-    /// merely reads as inside one lands here too.
-    OutsideWatchedPaths,
-
-    /// It is a directory inside a Watched Path, but not the root of a git
-    /// repository.
+    /// It is a directory, but not the root of a git repository. Asked of the
+    /// resolved path, so a symlink pointing at one is one.
     NotARepository,
 
     /// A git repository with no branch to call its default — a detached HEAD,

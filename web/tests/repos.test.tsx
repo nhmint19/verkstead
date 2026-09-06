@@ -744,7 +744,6 @@ describe("the pane the plus opens", () => {
   /// Every way the server can turn a path away, each said in its own words: a
   /// refusal the human cannot tell from another is a refusal they cannot act on.
   it.each([
-    ["OutsideWatchedPaths", /outside the watched paths/i],
     ["NotARepository", /not a git repository/i],
     ["AlreadyRegistered", /registered already/i],
     ["Missing", /nothing at that path/i],
@@ -770,17 +769,17 @@ describe("the pane the plus opens", () => {
   );
 
   it("drops the refusal as soon as the path is being changed", async () => {
-    theRepos(json("OutsideWatchedPaths"));
+    theRepos(json("NotARepository"));
     mountPane();
 
-    register("/elsewhere/verkstead");
-    await waitFor(() => screen.getByText(/outside the watched paths/i));
+    register("/elsewhere/notes");
+    await waitFor(() => screen.getByText(/not a git repository/i));
 
     fireEvent.input(screen.getByLabelText(/absolute path/i), {
       target: { value: "/srv/repos/verkstead" },
     });
 
-    expect(screen.queryByText(/outside the watched paths/i)).toBeNull();
+    expect(screen.queryByText(/not a git repository/i)).toBeNull();
   });
 
   /// A server that could not answer at all, which is the one thing here that is

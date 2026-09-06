@@ -134,19 +134,13 @@ export const PROFILE_REFUSAL: Record<ProfileSaved, string> = {
   DirNotAbsolute:
     "Give the claude directory's absolute path, starting with a slash.",
   DirMissing: "There is nothing at the claude directory's path.",
-  DirOutsideWatchedPaths:
-    "That claude directory is outside the watched paths, so Verkstead will not touch it.",
   NotADirectory: "That is not a directory — `~/.claude` is mounted from one.",
   ConfigNotAbsolute:
     "Give the config file's absolute path, starting with a slash.",
   ConfigMissing: "There is nothing at the config file's path.",
-  ConfigOutsideWatchedPaths:
-    "That config file is outside the watched paths, so Verkstead will not touch it.",
   NotAFile: "That is not a file — `~/.claude.json` is mounted from one.",
   HomeNotAbsolute: "Give the home's absolute path, starting with a slash.",
   HomeMissing: "There is nothing at the home's path.",
-  HomeOutsideWatchedPaths:
-    "That home is outside the watched paths, so Verkstead will not touch it.",
   HomeNotADirectory:
     "That is not a directory — an account's home is mounted from one.",
 };
@@ -166,7 +160,6 @@ export const BROKEN: Record<Broken, string> = {
   DirMissing: "Its claude directory is gone.",
   ConfigMissing: "Its config file is gone.",
   HomeMissing: "The home it kept its account under is gone.",
-  OutsideWatchedPaths: "Its account now points outside the watched paths.",
 };
 
 /// One path an account of some agent type is: the key it is held under, what the
