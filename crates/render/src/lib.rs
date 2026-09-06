@@ -32,7 +32,7 @@ mod update;
 mod view;
 
 pub use answering::{Locked, Submitted};
-pub use browsing::{BrowseScope, DirectoryEntry, DirectoryListing, EntryKind};
+pub use browsing::{DirectoryEntry, DirectoryListing, EntryKind};
 pub use conversations::{
     AbandonedRepo, AbandonedRoadmap, Adopted, AdoptedStage, AdoptionView, AgentOutputEvent,
     AgentSession, Attached, AttachmentOrigin, AttachmentRemoved, AttachmentView, BacklogPane,

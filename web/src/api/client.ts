@@ -16,7 +16,6 @@ import type {
   BaseRecorded,
   BranchRenamed,
   BriefSaved,
-  BrowseScope,
   Capture,
   CommitPane,
   CompanionAdded,
@@ -187,17 +186,15 @@ export function loadRepoPairings(repoId: number): Promise<RepoPairingsView> {
 /// somebody drills into, so a browse costs one reading of one directory however
 /// much is under it.
 ///
-/// No path at all is the field standing empty, which the two scopes answer
-/// differently — the Watched Paths themselves, or `/`. Every refusal is in the
-/// body rather than in the status, the way registering a Repo refuses: a path
-/// that is relative, missing, not a directory, outside the Watched Paths or
-/// unreadable is a line the dropdown draws where its rows would be, and most of
-/// those are the ordinary state of a field halfway through being typed into.
-export function listDirectory(
-  scope: BrowseScope,
-  path: string | null,
-): Promise<DirectoryListing> {
-  const asking = new URLSearchParams({ scope });
+/// No path at all is the field standing empty, which the server answers with its
+/// own home — a starting point rather than a ceiling, the way back out of it
+/// being a listing like any other. Every refusal is in the body rather than in
+/// the status, the way registering a Repo refuses: a path that is relative,
+/// missing, not a directory or unreadable is a line the dropdown draws where its
+/// rows would be, and most of those are the ordinary state of a field halfway
+/// through being typed into.
+export function listDirectory(path: string | null): Promise<DirectoryListing> {
+  const asking = new URLSearchParams();
 
   if (path !== null) {
     asking.set("path", path);
@@ -209,9 +206,9 @@ export function listDirectory(
 /// Ask Verkstead to take on the repository at an absolute path.
 ///
 /// Like answering a Set, the outcome is the answer's body rather than its
-/// status: a path outside the Watched Paths is the boundary doing its job and
-/// not an error, and every refusal is a different sentence to put in front of
-/// the human.
+/// status: a path that names no repository is the server reading the path
+/// rather than failing to, and every refusal is a different sentence to put in
+/// front of the human.
 export function registerRepo(path: string): Promise<Registered> {
   return post<Registered>("/api/ui/repos", { path });
 }

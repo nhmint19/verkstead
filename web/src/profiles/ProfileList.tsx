@@ -6,8 +6,8 @@
 //! typed into with a dropdown under it that browses the filesystem a directory
 //! at a time. What the form is for has not moved: it names an account, and what
 //! the server does about the paths is still the only thing that decides whether
-//! it is taken. The browse is bounded the way these fields are, in the watched
-//! scope, so it offers nothing the save would turn away.
+//! it is taken. The browse reaches anywhere the server can read, an account
+//! being allowed to sit anywhere — the human's own login under `~` above all.
 //!
 //! Two things about these fields are their own, and both come off what they are
 //! for. They point at dotfiles — a `.claude` beside a `.claude.json` — so they
@@ -788,13 +788,12 @@ export function ProfilePane(props: {
                   <label for={`profile-${field.key}`}>{field.label}</label>
                   {/* Browsed or typed, which the form cannot tell apart and has
                       no reason to: what Save sends is whatever the box holds,
-                      and the server's answer about it is unchanged. Inside the
-                      Watched Paths, because that is where an account may be —
+                      and the server's answer about it is unchanged. Anywhere
+                      the server can read, because an account may be anywhere —
                       and showing the dotfiles these fields exist to point at,
                       with the files as well where the field names one. */}
                   <PathField
                     id={`profile-${field.key}`}
-                    scope="watched"
                     dotfiles
                     files={field.file}
                     placeholder={field.placeholder}

@@ -296,7 +296,6 @@ export function Adding(props: {
       <div class={styles.field}>
         <PathField
           id={props.id}
-          scope="anywhere"
           placeholder={props.placeholder}
           value={typed()}
           write={(path) => setTyped(path)}

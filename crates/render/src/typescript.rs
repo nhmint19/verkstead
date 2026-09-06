@@ -18,8 +18,8 @@ use ts_rs::TS;
 
 use crate::{
     AbandonedRepo, Adopted, Attached, AttachmentRemoved, BacklogPane, BaseBranchChoice,
-    BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefSaved, BrowseScope, Capture,
-    CommitPane, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionModeChoice,
+    BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefSaved, Capture, CommitPane,
+    CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionModeChoice,
     CompanionModeChosen, CompanionRemoved, ConflictResolutionEdit, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
     ConversationUnarchived, ConversationView, DirectoryListing, GrillingStarted, Locked,
@@ -277,10 +277,9 @@ fn the_viewers_types_are_written_from_these() {
     SettingsEdit::export_all(&config).unwrap();
     SettingsSaved::export_all(&config).unwrap();
 
-    // And what a path field browses with: one directory of the filesystem, and
-    // the scope the field asks in — which is what says whether the boundary is
-    // consulted. The listing writes the entries and their kinds with it.
-    BrowseScope::export_all(&config).unwrap();
+    // And what a path field browses with: one directory of the filesystem,
+    // asked for by path and nothing else. The listing writes the entries and
+    // their kinds with it.
     DirectoryListing::export_all(&config).unwrap();
 
     // Whether there is a newer Verkstead than the one serving the page.

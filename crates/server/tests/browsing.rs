@@ -1,15 +1,15 @@
 //! Browsing the filesystem over the viewer's namespace: what one directory
-//! hands back, and what each of the two scopes will and will not look at.
+//! hands back, and where a field standing empty opens.
 //!
 //! Asked of the *server*, through the endpoint, for the reason registering a
-//! Repo is asked that way in `tests/repos.rs`: the Watched Paths are a security
-//! boundary, and the scope that is bounded by them has to refuse a path a
-//! browser never went near a dropdown to ask about.
+//! Repo is asked that way in `tests/repos.rs`: what a path field may reach is
+//! the endpoint's own answer, and a browse arriving with a path nobody typed
+//! into a dropdown gets the same one.
 //!
 //! Every refusal here is a 200 with a named outcome. A field is typed into a
-//! character at a time, so a path that is relative, missing or outside the
-//! boundary is the ordinary state of one halfway through a word — something the
-//! dropdown draws a line about, rather than an error to report.
+//! character at a time, so a path that is relative or missing is the ordinary
+//! state of one halfway through a word — something the dropdown draws a line
+//! about, rather than an error to report.
 
 use std::path::Path;
 
@@ -20,46 +20,27 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{DirectoryEntry, DirectoryListing, EntryKind};
-use verkstead_server::{WatchedPaths, open_database, router_watching};
+use verkstead_server::{open_database, router};
 
-/// A router watching `watched`, plus the directory holding its database and its
-/// `config.yaml` alive.
-async fn app_watching(watched: &[&Path]) -> (tempfile::TempDir, Router) {
+/// A router, plus the directory holding its database alive.
+///
+/// Nothing is configured on it: a browse consults no boundary and no setting,
+/// so the plainest router there is answers everything asked here.
+async fn app() -> (tempfile::TempDir, Router) {
     let dir = tempfile::tempdir().unwrap();
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
 
-    let watched = WatchedPaths::resolve(
-        &watched
-            .iter()
-            .map(|path| (*path).to_owned())
-            .collect::<Vec<_>>(),
-    )
-    .unwrap();
-
-    let data_dir = dir.path().to_owned();
-
-    (dir, router_watching(pool, watched, data_dir))
+    (dir, router(pool))
 }
 
-/// Write `config.yaml` in `data_dir` saying `paths` are the Watched Paths — the
-/// half of the boundary the human says on the settings page, which the endpoint
-/// reads at every ask.
-fn watch_in_the_settings(data_dir: &Path, paths: &[&Path]) {
-    let mut yaml = String::from("watched_paths:\n");
-    for path in paths {
-        yaml.push_str(&format!("  - {}\n", path.display()));
-    }
-
-    std::fs::write(data_dir.join("config.yaml"), yaml).unwrap();
-}
-
-/// What the dropdown would be filled from: one directory, asked in one scope.
-async fn browse(app: &Router, scope: &str, path: Option<&Path>) -> DirectoryListing {
+/// What the dropdown would be filled from: one directory, or the one a field
+/// standing empty opens on.
+async fn browse(app: &Router, path: Option<&Path>) -> DirectoryListing {
     let query = match path {
-        Some(path) => format!("?scope={scope}&path={}", encoded(path)),
-        None => format!("?scope={scope}"),
+        Some(path) => format!("?path={}", encoded(path)),
+        None => String::new(),
     };
 
     get(app, &format!("/api/ui/directories{query}")).await
@@ -111,15 +92,15 @@ async fn get<T: DeserializeOwned>(app: &Router, path: &str) -> T {
 }
 
 #[tokio::test]
-async fn a_directory_inside_a_watched_root_lists_with_directories_first() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_watching(&[watched.path()]).await;
+async fn a_directory_lists_with_directories_first() {
+    let (_dir, app) = app().await;
+    let looking = tempfile::tempdir().unwrap();
 
-    std::fs::create_dir(watched.path().join("src")).unwrap();
-    std::fs::create_dir(watched.path().join("assets")).unwrap();
-    std::fs::write(watched.path().join("README.md"), "# a directory\n").unwrap();
+    std::fs::create_dir(looking.path().join("src")).unwrap();
+    std::fs::create_dir(looking.path().join("assets")).unwrap();
+    std::fs::write(looking.path().join("README.md"), "# a directory\n").unwrap();
 
-    let listing = browse(&app, "watched", Some(watched.path())).await;
+    let listing = browse(&app, Some(looking.path())).await;
 
     assert_eq!(
         rows(listing)
@@ -134,60 +115,48 @@ async fn a_directory_inside_a_watched_root_lists_with_directories_first() {
     );
 }
 
-/// Where a browse bounded by the Watched Paths begins: the roots themselves,
-/// which are a listing with no directory above them.
+/// Where a browse begins when the field is empty: the server's own home, listed
+/// like any other directory rather than as a boundary with no way out of it.
+///
+/// Asked on the platform whose home this suite can be sure of — the runner sets
+/// `HOME`, and what a Windows machine reads instead is `platform`'s own subject.
+#[cfg(unix)]
 #[tokio::test]
-async fn the_watched_scope_with_no_path_answers_the_roots() {
-    let installed = tempfile::tempdir().unwrap();
-    let said = tempfile::tempdir().unwrap();
-    let (dir, app) = app_watching(&[installed.path()]).await;
+async fn an_empty_field_opens_on_the_servers_home() {
+    let (_dir, app) = app().await;
 
-    // Both halves of the boundary, because both of them are directories a Repo
-    // may be registered from — and the settings' half is read at the ask rather
-    // than when the server came up.
-    watch_in_the_settings(dir.path(), &[said.path()]);
+    let home = std::path::PathBuf::from(std::env::var("HOME").expect("the runner has a HOME"))
+        .canonicalize()
+        .expect("and it is there");
 
-    let listing = browse(&app, "watched", None).await;
-
-    let DirectoryListing::Listed { path, entries } = listing else {
-        panic!("the roots are a listing");
+    let DirectoryListing::Listed { path, .. } = browse(&app, None).await else {
+        panic!("a home that is there lists");
     };
 
-    assert_eq!(path, None, "the roots have no one directory above them");
-
-    let mut offered: Vec<String> = entries.into_iter().map(|row| row.path).collect();
-    offered.sort();
-
-    let mut expected = vec![
-        installed.path().canonicalize().unwrap(),
-        said.path().canonicalize().unwrap(),
-    ]
-    .into_iter()
-    .map(|path| path.to_str().unwrap().to_owned())
-    .collect::<Vec<_>>();
-    expected.sort();
-
-    assert_eq!(offered, expected);
+    assert_eq!(path.as_deref(), home.to_str());
 }
 
-/// The boundary doing its job, and the other scope being what it is for: one
-/// path, two answers.
+/// And nothing is out of reach from there: the directory above the home lists
+/// too, which is what says the opening is a starting point rather than a
+/// ceiling.
+#[cfg(unix)]
 #[tokio::test]
-async fn a_path_outside_every_watched_root_is_refused_and_lists_anywhere() {
-    let watched = tempfile::tempdir().unwrap();
-    let elsewhere = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_watching(&[watched.path()]).await;
+async fn the_directory_above_the_home_lists_as_well() {
+    let (_dir, app) = app().await;
 
-    std::fs::create_dir(elsewhere.path().join("src")).unwrap();
+    let home = std::path::PathBuf::from(std::env::var("HOME").expect("the runner has a HOME"))
+        .canonicalize()
+        .expect("and it is there");
+    let above = home.parent().expect("a home is under something");
 
-    assert_eq!(
-        browse(&app, "watched", Some(elsewhere.path())).await,
-        DirectoryListing::OutsideWatchedPaths
-    );
+    let DirectoryListing::Listed { path, entries } = browse(&app, Some(above)).await else {
+        panic!("the directory above a home lists");
+    };
 
-    assert_eq!(
-        names(browse(&app, "anywhere", Some(elsewhere.path())).await),
-        ["src"]
+    assert_eq!(path.as_deref(), above.to_str());
+    assert!(
+        entries.iter().any(|row| Path::new(&row.path) == home),
+        "the home is one of the rows above it"
     );
 }
 
@@ -195,14 +164,14 @@ async fn a_path_outside_every_watched_root_is_refused_and_lists_anywhere() {
 /// what it is.
 #[tokio::test]
 async fn a_directory_holding_a_git_comes_back_as_a_repository() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_watching(&[watched.path()]).await;
+    let (_dir, app) = app().await;
+    let looking = tempfile::tempdir().unwrap();
 
-    repository(&watched.path().join("verkstead"));
-    std::fs::create_dir(watched.path().join("notes")).unwrap();
+    repository(&looking.path().join("verkstead"));
+    std::fs::create_dir(looking.path().join("notes")).unwrap();
 
     assert_eq!(
-        rows(browse(&app, "watched", Some(watched.path())).await)
+        rows(browse(&app, Some(looking.path())).await)
             .into_iter()
             .map(|row| (row.name, row.kind))
             .collect::<Vec<_>>(),
@@ -218,14 +187,14 @@ async fn a_directory_holding_a_git_comes_back_as_a_repository() {
 /// could not serve the fields that exist to point at one.
 #[tokio::test]
 async fn dotfiles_are_listed() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_watching(&[watched.path()]).await;
+    let (_dir, app) = app().await;
+    let looking = tempfile::tempdir().unwrap();
 
-    std::fs::create_dir(watched.path().join(".claude")).unwrap();
-    std::fs::write(watched.path().join(".claude.json"), "{}\n").unwrap();
+    std::fs::create_dir(looking.path().join(".claude")).unwrap();
+    std::fs::write(looking.path().join(".claude.json"), "{}\n").unwrap();
 
     assert_eq!(
-        names(browse(&app, "watched", Some(watched.path())).await),
+        names(browse(&app, Some(looking.path())).await),
         [".claude", ".claude.json"]
     );
 }
@@ -235,116 +204,83 @@ async fn dotfiles_are_listed() {
 /// halfway through a word gets.
 #[tokio::test]
 async fn a_directory_that_went_between_two_asks_answers_a_refusal_rather_than_a_failure() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_watching(&[watched.path()]).await;
+    let (_dir, app) = app().await;
+    let looking = tempfile::tempdir().unwrap();
 
-    let going = watched.path().join("going");
+    let going = looking.path().join("going");
     std::fs::create_dir(&going).unwrap();
 
-    assert_eq!(
-        names(browse(&app, "watched", Some(&going)).await),
-        [] as [&str; 0]
-    );
+    assert_eq!(names(browse(&app, Some(&going)).await), [] as [&str; 0]);
 
     std::fs::remove_dir(&going).unwrap();
 
-    assert_eq!(
-        browse(&app, "watched", Some(&going)).await,
-        DirectoryListing::Missing
-    );
+    assert_eq!(browse(&app, Some(&going)).await, DirectoryListing::Missing);
 }
 
 /// A path naming a file is a browse that has gone as deep as it goes.
 #[tokio::test]
 async fn a_file_is_not_a_directory() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_watching(&[watched.path()]).await;
+    let (_dir, app) = app().await;
+    let looking = tempfile::tempdir().unwrap();
 
-    let file = watched.path().join("notes.md");
+    let file = looking.path().join("notes.md");
     std::fs::write(&file, "# notes\n").unwrap();
 
     assert_eq!(
-        browse(&app, "watched", Some(&file)).await,
+        browse(&app, Some(&file)).await,
         DirectoryListing::NotADirectory
     );
 }
 
-/// Nothing here resolves a relative path, in either scope: the directory the
-/// server happens to be running in is not something a path should mean.
+/// Nothing here resolves a relative path: the directory the server happens to be
+/// running in is not something a path should mean.
 #[tokio::test]
-async fn a_relative_path_is_refused_in_either_scope() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_watching(&[watched.path()]).await;
-
-    for scope in ["watched", "anywhere"] {
-        assert_eq!(
-            browse(&app, scope, Some(Path::new("src"))).await,
-            DirectoryListing::NotAbsolute
-        );
-    }
-}
-
-/// The anywhere scope with nothing typed is `/`, which is where a browse
-/// bounded by nothing begins — on a machine that has a `/`, which is both
-/// Unixes and not Windows. What the endpoint does with the answer is the same
-/// either way, so where that scope begins on a machine with drives instead is
-/// settled in `browsing`'s own unit tests rather than a second time here.
-#[cfg(unix)]
-#[tokio::test]
-async fn the_anywhere_scope_with_no_path_reads_the_filesystem_root() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_watching(&[watched.path()]).await;
-
-    let DirectoryListing::Listed { path, entries } = browse(&app, "anywhere", None).await else {
-        panic!("the root lists");
-    };
-
-    assert_eq!(path.as_deref(), Some("/"));
-    assert!(!entries.is_empty(), "there is something in /");
-}
-
-/// A cleared input sends the key with nothing after it, and that names the same
-/// nothing as not sending it at all.
-#[tokio::test]
-async fn an_empty_path_is_no_path() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_watching(&[watched.path()]).await;
-
-    let listing: DirectoryListing = get(&app, "/api/ui/directories?scope=watched&path=").await;
+async fn a_relative_path_is_refused() {
+    let (_dir, app) = app().await;
 
     assert_eq!(
-        rows(listing)
-            .into_iter()
-            .map(|row| row.path)
-            .collect::<Vec<_>>(),
-        [watched.path().canonicalize().unwrap().to_str().unwrap()]
+        browse(&app, Some(Path::new("src"))).await,
+        DirectoryListing::NotAbsolute
     );
 }
 
-/// A path that merely reads as inside a Watched Path is not inside it: the
-/// boundary is consulted on the resolved path, here as everywhere else.
-///
-/// Made where a link can be made without asking anybody's permission, which is
-/// both Unixes and not Windows. What the endpoint does with the answer is the
-/// same everywhere — it hands the boundary a path and draws what comes back —
-/// so what is lost there is the making of the link rather than any of the
-/// refusal being tested, which `watched`'s own case says the same way.
+/// A cleared input sends the key with nothing after it, and that names the same
+/// nothing as not sending it at all — which is the home either way.
 #[cfg(unix)]
 #[tokio::test]
-async fn a_symlink_out_of_a_watched_root_is_refused() {
+async fn an_empty_path_is_no_path() {
+    let (_dir, app) = app().await;
+
+    let cleared: DirectoryListing = get(&app, "/api/ui/directories?path=").await;
+
+    assert_eq!(cleared, browse(&app, None).await);
+}
+
+/// A symlink is followed rather than read off, here as everywhere else: what a
+/// browse lists is where the path really goes.
+///
+/// Made where a link can be made without asking anybody's permission, which is
+/// both Unixes and not Windows.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_symlink_lists_what_it_points_at() {
     let root = tempfile::tempdir().unwrap();
-    let watched = root.path().join("watched");
     let elsewhere = root.path().join("elsewhere");
-    std::fs::create_dir(&watched).unwrap();
     std::fs::create_dir(&elsewhere).unwrap();
+    std::fs::create_dir(elsewhere.join("src")).unwrap();
 
-    let (_dir, app) = app_watching(&[&watched]).await;
+    let (_dir, app) = app().await;
 
-    let escape = watched.join("escape");
-    std::os::unix::fs::symlink(&elsewhere, &escape).unwrap();
+    let link = root.path().join("link");
+    std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
 
+    let DirectoryListing::Listed { path, entries } = browse(&app, Some(&link)).await else {
+        panic!("a link to a directory lists that directory");
+    };
+
+    assert_eq!(path.as_deref(), elsewhere.canonicalize().unwrap().to_str());
     assert_eq!(
-        browse(&app, "watched", Some(&escape)).await,
-        DirectoryListing::OutsideWatchedPaths
+        entries.into_iter().map(|row| row.name).collect::<Vec<_>>(),
+        ["src"]
     );
 }

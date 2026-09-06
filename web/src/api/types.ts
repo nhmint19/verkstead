@@ -552,17 +552,6 @@ export type BriefSaved = "Saved" | "NoSuchConversation" | "NotDrafting";
 export type Broken = "DirMissing" | "ConfigMissing" | "HomeMissing";
 
 /**
- * Which kind of field is asking, which is what decides where it may look.
- *
- * Sent in the query rather than being a route of its own: it is one reading,
- * asked two ways round, and the answer has the same shape either way.
- *
- * Spelled in lower case, unlike everything else the viewer sends: this one
- * travels in a URL beside the path, where a capital would read as a mistake.
- */
-export type BrowseScope = "watched" | "anywhere";
-
-/**
  * The build cache as the human has just set it.
  *
  * The size is a string because it is sccache's own word for one, and an empty
@@ -1614,9 +1603,9 @@ export type DirectoryEntry = {
 /**
  * What it is called in the directory holding it — the row's own word.
  *
- * The Watched Paths' roots have no directory holding them, so what comes
- * back for one of those is the last segment of it. A field drawing that
- * listing has the whole path beside it and may say more.
+ * A drive has no directory holding it, so what comes back for one of those
+ * is the last segment of it. A field drawing that listing has the whole
+ * path beside it and may say more.
  */
 name: string, 
 /**
@@ -1637,11 +1626,11 @@ export type DirectoryListing = { "Listed": {
  * The directory this lists, resolved — `..` taken out and every
  * symlink followed, which is what the entries below hang off.
  *
- * `null` for the [`BrowseScope::Watched`] roots, which are a listing
- * with no one directory above them: the boundary is a set of
- * directories rather than a place.
+ * `null` for a listing with no one directory above it, which is what a
+ * Windows machine's drives are: there is a root per drive and nothing
+ * holding them.
  */
-path: string | null, entries: Array<DirectoryEntry>, } } | "NotAbsolute" | "Missing" | "NotADirectory" | "OutsideWatchedPaths" | { "Unreadable": { why: string, } };
+path: string | null, entries: Array<DirectoryEntry>, } } | "NotAbsolute" | "Missing" | "NotADirectory" | { "Unreadable": { why: string, } };
 
 /**
  * What one entry is, which decides what the field drawing it does with the row.

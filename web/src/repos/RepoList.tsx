@@ -6,11 +6,10 @@
 //! is the box it always was with a dropdown under it that browses the filesystem
 //! a directory at a time. What the form is for has not moved: it names a path,
 //! and what the server does about that path is still the only thing that decides
-//! whether it is taken. The browse is bounded the way this form is, in the
-//! watched scope, so it offers nothing the boundary would turn away; and it
-//! marks a repository where it finds one and stops there, that being the one
-//! thing this field is looking for and the one place in the workbench a `.git`
-//! means anything.
+//! whether it is taken. The browse reaches anywhere the server can read, this
+//! form being bounded by nothing else either; and it marks a repository where it
+//! finds one and stops there, that being the one thing this field is looking for
+//! and the one place in the workbench a `.git` means anything.
 //!
 //! Every refusal is shown as a refusal, in words, beside the field the path was
 //! typed into: the human has just done something and is owed a reason it did not
@@ -625,7 +624,6 @@ export function RepoPane(props: {
         <label for="repo-path">Absolute path of a git repository</label>
         <PathField
           id="repo-path"
-          scope="watched"
           repositories
           placeholder="/home/you/src/verkstead"
           value={path()}

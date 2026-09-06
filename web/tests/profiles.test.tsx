@@ -15,10 +15,10 @@
 //! `cargo test` renders the real endpoint and writes the file, so what these
 //! assertions read is what the server actually said.
 //!
-//! Whether a pair is really there, and whether it is inside the watched paths,
-//! are the server's to decide — the tests over in `crates/server` are what say
-//! so. This side's job is to send what was typed and say in words what came
-//! back.
+//! Whether a pair is really there, and whether it is an account of the shape its
+//! harness keeps, are the server's to decide — the tests over in `crates/server`
+//! are what say so. This side's job is to send what was typed and say in words
+//! what came back.
 //!
 //! And that the browse writes the same boxes the typing does. The fields are the
 //! shared one — how the dropdown itself behaves is `browsing.test.tsx`'s, where
@@ -1103,7 +1103,7 @@ describe("browsing for the account's paths", () => {
   const DIRECTORY = "Claude directory, mounted at ~/.claude";
   const CONFIG = "Config file, mounted at ~/.claude.json";
 
-  /// A watched root, and an account kept under it: a `.claude` beside a
+  /// The server's home, and an account kept under it: a `.claude` beside a
   /// `.claude.json`, which is what these fields exist to point at.
   ///
   /// Written here rather than taken from the fixtures the server's own tests
@@ -1111,9 +1111,9 @@ describe("browsing for the account's paths", () => {
   /// form does about a dotfile and about a file, and neither of those fixtures
   /// holds an account. The shape is the endpoint's own — directories first and
   /// then by name, dotfiles among them.
-  const ROOTS: DirectoryListing = {
+  const SERVERS_HOME: DirectoryListing = {
     Listed: {
-      path: null,
+      path: "/home/ada",
       entries: [
         { name: "accounts", path: "/home/ada/accounts", kind: "Directory" },
       ],
@@ -1162,17 +1162,17 @@ describe("browsing for the account's paths", () => {
   /// The list behind the pane, the levels this browse goes through, and whatever
   /// the save itself is answered by.
   ///
-  /// Every level in the watched scope, which is the one these fields are bounded
-  /// by: the server refuses an account outside the Watched Paths, so a dropdown
-  /// offering one would be offering a wasted press.
+  /// The empty field asks for no path, and what the server answers that with is
+  /// its own home — which is where an account most often is, and where these
+  /// fields begin.
   function theBrowse(...answers: Array<() => Promise<Response>>) {
     return serving(
       whenever("/api/ui/profiles", json(SAVED)),
-      whenever(listingAt(null, "watched"), json(ROOTS)),
-      whenever(listingAt("/home/ada/accounts", "watched"), json(ACCOUNTS)),
-      whenever(listingAt("/home/ada/accounts/work", "watched"), json(WORK)),
+      whenever(listingAt(null), json(SERVERS_HOME)),
+      whenever(listingAt("/home/ada/accounts"), json(ACCOUNTS)),
+      whenever(listingAt("/home/ada/accounts/work"), json(WORK)),
       whenever(
-        listingAt("/home/ada/accounts/work/.claude", "watched"),
+        listingAt("/home/ada/accounts/work/.claude"),
         json(CLAUDE),
       ),
       ...answers,
@@ -1191,7 +1191,7 @@ describe("browsing for the account's paths", () => {
   }
 
   /// Browse one of the fields down to the account, which is the two levels under
-  /// the watched root.
+  /// the home the empty field opens on.
   async function browsedToTheAccount(label: string): Promise<void> {
     browse(label);
 
@@ -1208,8 +1208,8 @@ describe("browsing for the account's paths", () => {
     await browsedToTheAccount(DIRECTORY);
 
     // The directories of the account, hidden ones included — and only the
-    // directories, this field naming one. The way back out is a row here and
-    // was not one at the root: above that is outside the boundary.
+    // directories, this field naming one. The way back out is a row here as it
+    // is at every level: nothing about this browse has a ceiling.
     await waitFor(() =>
       expect(browsed(DIRECTORY)).toEqual([
         "Up to /home/ada/accounts",
@@ -1246,7 +1246,7 @@ describe("browsing for the account's paths", () => {
     expect(
       askedFor(
         fetching,
-        listingAt("/home/ada/accounts/work/.claude.json", "watched"),
+        listingAt("/home/ada/accounts/work/.claude.json"),
       ),
     ).toBe(0);
   });
@@ -1286,7 +1286,7 @@ describe("browsing for the account's paths", () => {
   });
 
   /// And the home the types after the first keep everything under browses the
-  /// same way: one field, the dotfiles shown, and the same scope.
+  /// same way: one field, and the dotfiles shown.
   it("browses the home of a type that keeps one", async () => {
     theBrowse();
     mountPane("new");

@@ -36,9 +36,7 @@ use verkstead_schema::{
     Answer, Liveness, Question, QuestionOption, QuestionSet, RepoDiff, Response, SetCreated,
     Subquestion,
 };
-use verkstead_server::{
-    Gh, WatchedPaths, open_database, router, router_asking_github, router_watching, store,
-};
+use verkstead_server::{Gh, open_database, router, router_asking_github, store};
 
 /// The Conversation every Set in this file is asked from.
 ///
@@ -3025,9 +3023,12 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // A real directory, made fresh on every run, because a listing is read off
     // the filesystem and nothing else — there is no store behind this endpoint
     // at all. It is made under a temporary directory and put back to
-    // `/home/ada/src` afterwards, which is the Watched Path the settings
-    // fixtures above name: the two fixtures are then the same Verkstead, seen
-    // from its settings page and from a dropdown on it.
+    // `/home/ada/src` afterwards, so that the fixture reads as the home the
+    // settings fixtures above belong to rather than as a path off this machine.
+    //
+    // Only the one, and none for the field standing empty: what that opens on
+    // is the server's own home, which is a different directory on every machine
+    // that runs this and nothing a fixture could be pinned to.
     let made = tempfile::tempdir().unwrap();
     let root = made.path().join("src");
     std::fs::create_dir_all(root.join("assets")).unwrap();
@@ -3035,49 +3036,33 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     std::fs::create_dir_all(root.join(".config")).unwrap();
     std::fs::write(root.join("README.md"), "# a directory\n").unwrap();
 
-    let (_dir, app) = browsing_app(&root).await;
+    let (_dir, app) = browsing_app().await;
 
     write(
         "directories.json",
         &pin_under(
             &get(
                 &app,
-                &format!("/api/ui/directories?scope=watched&path={}", root.display()),
+                &format!("/api/ui/directories?path={}", root.display()),
             )
             .await,
             made.path(),
             "/home/ada",
         ),
     );
-
-    // And where a browse bounded by the Watched Paths begins: the roots
-    // themselves, which is the one listing with no directory above it.
-    write(
-        "directories-roots.json",
-        &pin_under(
-            &get(&app, "/api/ui/directories?scope=watched").await,
-            made.path(),
-            "/home/ada",
-        ),
-    );
 }
 
-/// A router watching one directory, and the directory holding its database
-/// alive.
+/// A router, and the directory holding its database alive.
 ///
-/// What a browse in the watched scope is written over: everything else here
-/// stands up a router watching nothing, which is the closed state — and a
-/// dropdown bounded by the Watched Paths has nothing to answer where there are
-/// none.
-async fn browsing_app(watched: &Path) -> (tempfile::TempDir, Router) {
+/// Nothing is configured on it: a browse consults no boundary and no setting, so
+/// the plainest router there is answers the one ask written over it.
+async fn browsing_app() -> (tempfile::TempDir, Router) {
     let dir = tempfile::tempdir().unwrap();
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
-    let data_dir = dir.path().to_owned();
-    let watched = WatchedPaths::resolve(&[watched.to_owned()]).unwrap();
 
-    (dir, router_watching(pool, watched, data_dir))
+    (dir, router(pool))
 }
 
 /// Put a payload's temporary directory back to a stated one, wherever it

@@ -30,18 +30,18 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
     Adopted, Attached, AttachmentRemoved, Author, BaseBranchChoice, BranchRename, BriefEdit,
-    BrowseScope, BuildCacheView, CheckRollup, CleanupStepView, CleanupView, CommentedOn,
-    CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
-    CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView, CompileCaching,
-    ConflictResolutionEdit, ConversationArchived, ConversationClosed, ConversationEntry,
-    ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Cursor,
-    GrillingStarted, IgnoreRule, IgnoredCommentsEdit, Lifecycle, Locked, Merging, MissedOut,
-    NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry,
-    PushKey, Registration, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice,
-    RuleField, RuleRefused, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
-    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowingArchived, Standing,
-    SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TerminalOpened,
-    TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    BuildCacheView, CheckRollup, CleanupStepView, CleanupView, CommentedOn, CompanionAdded,
+    CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode, CompanionModeChoice,
+    CompanionModeChosen, CompanionRemoved, CompanionView, CompileCaching, ConflictResolutionEdit,
+    ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
+    ConversationStopped, ConversationUnarchived, ConversationView, Cursor, GrillingStarted,
+    IgnoreRule, IgnoredCommentsEdit, Lifecycle, Locked, Merging, MissedOut, NewAdoption,
+    NewCompanion, NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
+    Registration, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField,
+    RuleRefused, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
+    SharePublished, SharedCommit, SharedConversation, ShowingArchived, Standing, SteerOpened,
+    SteerSubmission, Submitted, Subscribed, Subscription, TerminalOpened, TimelineEvent, TokenEdit,
+    TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -382,8 +382,8 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // One directory of the filesystem, for a path field's browse dropdown.
         // Not a route under anything it belongs to: it serves every field that
         // takes a path — the settings' own, the Repos' form, an Agent Profile's
-        // account — and what bounds it is the scope asked for rather than
-        // whatever page is asking.
+        // account — and it answers each of them the same way, whatever page is
+        // asking.
         .route("/api/ui/directories", get(directories))
         .route("/api/ui/update", get(update))
 }
@@ -4116,24 +4116,19 @@ fn last_four(token: &str) -> String {
     characters[from..].iter().collect()
 }
 
-/// Which directory a path field is asking about, and in what scope.
+/// Which directory a path field is asking about, which is the whole of what
+/// one asks.
 ///
 /// The path is optional because a field standing empty is where a browse
 /// begins, and an empty one is read as no path at all: `?path=` is what a
 /// cleared input sends, and it names the same nothing.
-///
-/// The scope is not optional. A field is one kind or the other and knows which
-/// it is, so an ask that says nothing about it is a caller with a bug rather
-/// than a browse to answer — and answering it in either scope would be answering
-/// a different question from the one asked.
 #[derive(Debug, serde::Deserialize)]
 struct Browsing {
-    scope: BrowseScope,
     path: Option<String>,
 }
 
-/// `GET /api/ui/directories?scope=<scope>&path=<path>` — what one directory
-/// holds, for the dropdown a path field browses with.
+/// `GET /api/ui/directories?path=<path>` — what one directory holds, for the
+/// dropdown a path field browses with.
 ///
 /// One directory per request and no walking: the field asks again for every
 /// level somebody drills into, so a browse costs one `read_dir` at a time
@@ -4141,27 +4136,22 @@ struct Browsing {
 ///
 /// Every refusal is a named outcome in the body rather than a status, the way
 /// registering a Repo refuses: a path that is relative, missing, not a
-/// directory, outside the Watched Paths or unreadable is a line the dropdown
-/// draws where its rows would be. Most of them are the ordinary state of a field
-/// halfway through being typed into.
+/// directory or unreadable is a line the dropdown draws where its rows would be.
+/// Most of them are the ordinary state of a field halfway through being typed
+/// into.
 ///
-/// What decides where the ask may look is [`BrowseScope`] — see
-/// [`crate::browsing`], where the boundary is consulted for one of the two.
-async fn directories(
-    State(state): State<AppState>,
-    Query(browsing): Query<Browsing>,
-) -> HttpResponse {
-    let watched = state.watched.clone();
+/// Nothing bounds where the ask may look but what the server can read, and an
+/// ask with no path at all opens on the server's own home — see
+/// [`crate::browsing`].
+async fn directories(Query(browsing): Query<Browsing>) -> HttpResponse {
     let path = browsing
         .path
         .filter(|path| !path.is_empty())
         .map(std::path::PathBuf::from);
 
-    // Off the runtime: reading the boundary is a file and a `canonicalize` per
-    // entry in it, and opening a directory is a read of its own.
-    match tokio::task::spawn_blocking(move || crate::browsing::list(&watched, browsing.scope, path))
-        .await
-    {
+    // Off the runtime: opening a directory is a read, and so is asking each of
+    // its entries what it is.
+    match tokio::task::spawn_blocking(move || crate::browsing::list(path)).await {
         Ok(listing) => Json(listing).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "listing a directory failed");

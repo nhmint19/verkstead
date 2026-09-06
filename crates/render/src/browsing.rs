@@ -6,13 +6,11 @@
 //! into — so what crosses the wire is a listing of what somebody is looking at
 //! rather than a tree nobody will read the whole of.
 //!
-//! Two scopes, because there are two kinds of field. Some values the server
-//! refuses outside the Watched Paths — a Repo is registered from inside one, an
-//! Agent Profile's account is read from inside one — and a dropdown that
-//! offered anything else would be offering what the save is going to turn down.
-//! The rest are values the boundary says nothing about, and those browse
-//! anywhere the server can read. Which of the two a field is, is the field's own
-//! word: see [`BrowseScope`].
+//! One scope, because there is one kind of field. Every field browses anywhere
+//! the server can read, and what is asked for is a path and nothing else: a
+//! browse that could not reach the directory it is about to be pointed at would
+//! be a browse nobody could use. What that discloses is a listing of names to
+//! the one human the tailnet is the perimeter for.
 //!
 //! Every refusal is a named outcome rather than a status code, as registering a
 //! Repo refuses — because each of them is something the dropdown draws in words
@@ -25,29 +23,6 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
-
-/// Which kind of field is asking, which is what decides where it may look.
-///
-/// Sent in the query rather than being a route of its own: it is one reading,
-/// asked two ways round, and the answer has the same shape either way.
-///
-/// Spelled in lower case, unlike everything else the viewer sends: this one
-/// travels in a URL beside the path, where a capital would read as a mistake.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub enum BrowseScope {
-    /// For a field whose value the server refuses outside the Watched Paths.
-    /// Asked for no path it answers the roots themselves, and asked for one it
-    /// answers only where that path resolves to somewhere inside a root — the
-    /// same decision the save is going to make, made early enough to be a
-    /// dropdown.
-    Watched,
-
-    /// And for a field the boundary says nothing about, which browses from `/`
-    /// down. Anything the server can read lists.
-    Anywhere,
-}
 
 /// What one directory holds, or the reason it does not answer.
 ///
@@ -66,9 +41,9 @@ pub enum DirectoryListing {
         /// The directory this lists, resolved — `..` taken out and every
         /// symlink followed, which is what the entries below hang off.
         ///
-        /// `null` for the [`BrowseScope::Watched`] roots, which are a listing
-        /// with no one directory above them: the boundary is a set of
-        /// directories rather than a place.
+        /// `null` for a listing with no one directory above it, which is what a
+        /// Windows machine's drives are: there is a root per drive and nothing
+        /// holding them.
         path: Option<String>,
 
         entries: Vec<DirectoryEntry>,
@@ -85,11 +60,6 @@ pub enum DirectoryListing {
     /// Something is, and it is not a directory. A file names no listing, and a
     /// field pointed at one is a field whose browse has gone as deep as it goes.
     NotADirectory,
-
-    /// It resolves to somewhere no Watched Path covers, asked in the scope that
-    /// is bounded by them. The boundary is consulted on the resolved path, so a
-    /// path that merely reads as inside one lands here too.
-    OutsideWatchedPaths,
 
     /// It is a directory the server cannot read, and this is why. Permissions,
     /// or a directory that went between one request and the next — the
@@ -108,9 +78,9 @@ pub enum DirectoryListing {
 pub struct DirectoryEntry {
     /// What it is called in the directory holding it — the row's own word.
     ///
-    /// The Watched Paths' roots have no directory holding them, so what comes
-    /// back for one of those is the last segment of it. A field drawing that
-    /// listing has the whole path beside it and may say more.
+    /// A drive has no directory holding it, so what comes back for one of those
+    /// is the last segment of it. A field drawing that listing has the whole
+    /// path beside it and may say more.
     pub name: String,
 
     /// And where it is: absolute, and under the resolved directory it was read

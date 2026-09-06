@@ -46,14 +46,12 @@
 //! having nothing in common with a pairing and its harness mark. The combobox
 //! roles go with them, being said on the markup that carries them.
 //!
-//! Which scope an ask is made in is the caller's, because it is a fact about the
-//! field rather than about the dropdown: a value the server would refuse outside
-//! the Watched Paths browses inside them, and a value it says nothing about
-//! browses anywhere. A browse bounded by them stops at those roots on the way
-//! back out as well: above one is outside the boundary, and a row leading
-//! somewhere the server would refuse is a row nobody should be offered.
+//! Every field browses the same way: anywhere the server can read, with no
+//! ceiling on the way back out. A field standing empty opens on the server's own
+//! home, which is the endpoint's answer to an ask with no path — a starting
+//! point rather than a boundary, so the row above it goes there like any other.
 //!
-//! So is what the field is looking *for*. One of them is looking for a
+//! What the field is looking *for* is the caller's. One of them is looking for a
 //! repository — the Repos' form, which is the only place a `.git` means
 //! anything — and there a repository draws marked and is where the browse
 //! stops. Every other field says nothing about one and treats it as the
@@ -83,11 +81,7 @@ import {
 } from "solid-js";
 
 import { listDirectory } from "./api/client";
-import type {
-  BrowseScope,
-  DirectoryEntry,
-  DirectoryListing,
-} from "./api/types";
+import type { DirectoryEntry, DirectoryListing } from "./api/types";
 import { useReading } from "./freshness";
 import { Empty, ErrorLine } from "./notices";
 import styles from "./PathField.module.css";
@@ -134,7 +128,7 @@ function listed(
 /// Every one of these is a state a field is ordinarily in halfway through being
 /// typed into rather than something that went wrong, so they are drawn as
 /// quietly as an empty list is. The unreadable one is the server's own sentence,
-/// being the only one of the five saying something a human could not work out
+/// being the only one of the four saying something a human could not work out
 /// from what they typed.
 function refusal(listing: DirectoryListing): string | null {
   if (typeof listing !== "string") {
@@ -148,8 +142,6 @@ function refusal(listing: DirectoryListing): string | null {
       return "There is nothing at that path.";
     case "NotADirectory":
       return "That is not a directory.";
-    case "OutsideWatchedPaths":
-      return "That path is outside the watched paths.";
   }
 }
 
@@ -165,8 +157,6 @@ function above(path: string): string | null {
 export function PathField(props: {
   /// The field's own id, for the `<label for=…>` the caller writes.
   id: string;
-  /// Where this field's value may be, which is what says where it may browse.
-  scope: BrowseScope;
   /// Whether a repository is what this field is looking for.
   ///
   /// The one git-aware behaviour there is here, and it is the Repos' form's: a
@@ -245,8 +235,8 @@ export function PathField(props: {
 
   /// Which directory the rows come out of: the one a tap drilled into, or the
   /// one the text names — everything up to its last separator, with `null` for
-  /// text with no separator in it at all, which is the empty field and whatever
-  /// the two scopes make of one.
+  /// text with no separator in it at all, which is the empty field and the
+  /// server's own home.
   const inside = (): string | null => {
     const at = drilling();
     if (at !== null) return at;
@@ -271,39 +261,11 @@ export function PathField(props: {
   /// separator sends a request. Merged by path, a re-read being the same
   /// directory read again.
   const listing = useReading(() => ({
-    queryKey: ["directories", props.scope, inside()],
-    queryFn: () => listDirectory(props.scope, inside()),
+    queryKey: ["directories", inside()],
+    queryFn: () => listDirectory(inside()),
     enabled: open(),
     freshness: { reconcile: "path" },
   }));
-
-  /// The roots a browse bounded by the Watched Paths begins at, read only where
-  /// it is bounded by them.
-  ///
-  /// What the way back out stops at: above a root is outside the boundary, and
-  /// the server would refuse it. The same read the empty field makes and under
-  /// the same key, so a browse that started at the roots has already paid for
-  /// this one.
-  const boundary = useReading(() => ({
-    queryKey: ["directories", "watched", null],
-    queryFn: () => listDirectory("watched", null),
-    enabled: open() && props.scope === "watched",
-    freshness: { reconcile: "path" },
-  }));
-
-  /// Whether a directory is as far out as this field's browse goes.
-  ///
-  /// Only the bounded scope has a ceiling: the other one's is `/`, which has
-  /// nothing above it to offer anyway. Roots not yet read count as one — a way
-  /// out missing for the moment the read takes is better than one offered and
-  /// then refused.
-  const ceiling = (path: string): boolean => {
-    if (props.scope !== "watched") return false;
-
-    const roots = listed(boundary.data);
-
-    return roots === null || roots.entries.some((root) => root.path === path);
-  };
 
   /// The entries as this field shows them: what a value of this field could be,
   /// out of everything the endpoint listed.
@@ -341,7 +303,7 @@ export function PathField(props: {
   const rows = (): Row[] => {
     const answer = listed(listing.data);
     const at = answer?.path ?? null;
-    const up = at === null || ceiling(at) ? null : above(at);
+    const up = at === null ? null : above(at);
 
     return [
       ...(up === null

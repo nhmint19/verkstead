@@ -57,7 +57,6 @@ import repos from "./fixtures/repos.json" with { type: "json" };
 import opened from "./fixtures/repo.json" with { type: "json" };
 import settings from "./fixtures/settings.json" with { type: "json" };
 import listing from "./fixtures/directories.json" with { type: "json" };
-import roots from "./fixtures/directories-roots.json" with { type: "json" };
 
 const REPOS = repos as RepoEntry[];
 const FIRST = REPOS[0]!;
@@ -810,11 +809,21 @@ describe("the pane the plus opens", () => {
 });
 
 describe("browsing for one", () => {
-  /// The Watched Paths as the browse bounded by them begins, and what is under
-  /// the one root they hold — both fixtures the server's own tests wrote, so
-  /// what this form is filled in from is what the endpoint really answers with.
-  const ROOTS = roots as DirectoryListing;
+  /// What is under the directory this browse goes through — the fixture the
+  /// server's own tests wrote, so what this form is filled in from is what the
+  /// endpoint really answers with.
   const SRC = listing as DirectoryListing;
+
+  /// And the home the empty field opens on, which is where the server answers
+  /// an ask with no path. Written here rather than pinned to a fixture: it is
+  /// a different directory on every machine, and what matters to this form is
+  /// that the browse starts somewhere and walks.
+  const HOME: DirectoryListing = {
+    Listed: {
+      path: "/home/ada",
+      entries: [{ name: "src", path: "/home/ada/src", kind: "Directory" }],
+    },
+  };
 
   /// The label the field is found by, which is the one the form has always had.
   const FIELD = "Absolute path of a git repository";
@@ -824,28 +833,27 @@ describe("browsing for one", () => {
   function theBrowse(...answers: Array<() => Promise<Response>>) {
     return serving(
       whenever("/api/ui/repos", json(REPOS)),
-      whenever(listingAt(null, "watched"), json(ROOTS)),
-      whenever(listingAt("/home/ada/src", "watched"), json(SRC)),
+      whenever(listingAt(null), json(HOME)),
+      whenever(listingAt("/home/ada/src"), json(SRC)),
       ...answers,
     );
   }
 
-  /// Browse the empty field down to the repository under the watched root,
-  /// which is the whole of what this form asks of a browse.
+  /// Browse the empty field down to the repository under the home, which is the
+  /// whole of what this form asks of a browse.
   async function browsedToTheRepo(): Promise<void> {
     browse(FIELD);
 
-    await waitFor(() => expect(offered(FIELD)).toEqual(["src"]));
+    await waitFor(() => expect(offered(FIELD)).toContain("src"));
     tap(FIELD, "src");
 
     await waitFor(() => expect(offered(FIELD)).toContain("verkstead"));
     tap(FIELD, "verkstead");
   }
 
-  /// Bounded, because a Repo may only be registered from inside a Watched Path:
-  /// a dropdown offering what the press would turn away would be offering a
-  /// wasted press.
-  it("opens on the watched roots and fills the field from them", async () => {
+  /// Unbounded, because a Repo may be registered from anywhere the server can
+  /// read: what the browse opens on is a starting point rather than a fence.
+  it("opens on the server's home and fills the field from there", async () => {
     theBrowse();
     mountPane();
 
@@ -861,18 +869,19 @@ describe("browsing for one", () => {
     mountPane();
 
     browse(FIELD);
-    await waitFor(() => expect(offered(FIELD)).toEqual(["src"]));
+    await waitFor(() => expect(offered(FIELD)).toContain("src"));
     tap(FIELD, "src");
 
     await waitFor(() =>
-      expect(offered(FIELD)).toEqual(["assets", "verkstead"]),
+      expect(offered(FIELD)).toEqual(["Up to /home/ada", "assets", "verkstead"]),
     );
     expect(marked(FIELD)).toEqual(["verkstead"]);
 
     tap(FIELD, "verkstead");
 
-    // Where it was, rather than inside what it took: the browse has arrived.
-    expect(offered(FIELD)).toEqual(["verkstead"]);
+    // Where it was, filtered to what it took, rather than inside it: the browse
+    // has arrived.
+    expect(offered(FIELD)).toEqual(["Up to /home/ada", "verkstead"]);
   });
 
   /// The point of the whole component: registering a browsed path is
