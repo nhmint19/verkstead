@@ -1177,11 +1177,13 @@ async fn closing_a_conversation_takes_its_profile_and_every_entry_written_for_it
     // see: cutting the inheritance kept what the directory was inheriting as
     // its own, and a close that put the inheritance back and left those copies
     // would grow this list by a few entries every time a Conversation ended.
+    // The one thing it does not ask of the list is [`reach`]'s.
     assert_eq!(
-        listed(&refused),
-        as_it_was,
-        "the one directory a description refuses should read exactly as it did \
-         before the container was made, and what it said all along is: {}",
+        reach(&listed(&refused)),
+        reach(&as_it_was),
+        "the one directory a description refuses should leave the human \
+         reaching it exactly as they did before the container was made, and \
+         what it said all along is: {}",
         fixture.trail(&before, &standing, &written_down),
     );
 
@@ -1265,10 +1267,11 @@ async fn a_container_a_crash_left_behind_is_swept_at_the_next_startup() {
     // from — see the close's own test, where the reason this is asserted
     // separately is.
     assert_eq!(
-        listed(&refused),
-        as_it_was,
-        "the sweep should leave the account's own skills reading as they did \
-         before the container was made, and what they said all along is: {}",
+        reach(&listed(&refused)),
+        reach(&as_it_was),
+        "the sweep should leave the human reaching the account's own skills as \
+         they did before the container was made, and what they said all along \
+         is: {}",
         fixture.trail(&before, &standing, &written_down),
     );
 
@@ -1310,6 +1313,33 @@ fn listed(path: &Path) -> String {
         String::from_utf8_lossy(&listed.stdout),
         String::from_utf8_lossy(&listed.stderr),
     )
+}
+
+/// The same list read for who reaches the directory, with where each entry came
+/// from left out of it.
+///
+/// **Because that last part is not a refusal's to give back**, and asking for it
+/// is what made the two lifetime tests above unpassable on the one machine that
+/// answers them. The `windows-2025` runner's temporary directory — which is
+/// where this suite's stand-in for the human's account lives — is a tree of the
+/// older age: a directory under it holds copies of the entries its parent hands
+/// down, not marked as taken from above at all. That marking is what Windows
+/// puts right the first time anything writes an access-control list in the tree,
+/// and it will not be put back: writing the copies again with the inheritance on
+/// leaves the directory holding both them and the entries that come down, and
+/// writing them with the inheritance off leaves a directory of the human's own
+/// cut off from whatever they change above it. The entries themselves come back
+/// exactly — every trustee the human had, at exactly the reach they had — and
+/// only the word for where each one came from is the machine's to say.
+///
+/// So what is compared is the reach and not the bookkeeping. Everything a
+/// refusal owes the directory is still in it: a deny left standing is an entry
+/// that is still there, a copy left behind is an entry more than there were, and
+/// a directory whose own entries were taken off for the ones above it is a list
+/// of somebody else's trustees. `(I)` is the only thing dropped, and `icacls`
+/// writes it nowhere but in front of an entry it is saying that about.
+fn reach(listed: &str) -> String {
+    listed.replace("(I)", "")
 }
 
 /// And whether that list names one container's identity, by either of the two
