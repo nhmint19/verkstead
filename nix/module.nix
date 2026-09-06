@@ -117,6 +117,10 @@ in
         creates and hands over. Pointing this at a human's own home works too, as
         long as the `verkstead` user can read it; it is bound in read-only, so it
         has to exist.
+
+        Read-only is the whole of what naming one here buys, so an agent account
+        kept under it that a session has to write — `~/.claude`, say — is named
+        in `paths` as well. See that option.
       '';
     };
 
@@ -146,35 +150,42 @@ in
       '';
     };
 
-    watchedPaths = lib.mkOption {
+    paths = lib.mkOption {
       type = lib.types.listOf lib.types.path;
-      example = lib.literalExpression ''[ "/home/you/src" ]'';
+      default = [ ];
+      example = lib.literalExpression ''[ "/home/you/src" "/home/you/.claude" ]'';
       description = ''
-        The directories Verkstead is permitted to operate inside, as
-        `--watched-path`.
+        The directories bound read-write into the service's namespace: the
+        repositories it is to work in and the agent accounts it is to run under,
+        alike.
 
-        A security boundary rather than a convenience: nothing outside these
-        directories is ever touched, and a Repo is registered only from within
-        one. There is no default and no scan — guessing at what a machine's
-        owner meant to expose is not a guess worth making.
+        This says nothing to Verkstead. `ProtectHome = "tmpfs"` and
+        `ProtectSystem = "strict"` hide everything the unit is not told to bind,
+        so the server sees this list and the state directory and nothing else of
+        the machine — but what it sees is a namespace rather than a boundary,
+        and the server is never told the list exists. Inside it, every path
+        Verkstead is given is treated alike.
 
-        Each is resolved at startup, so it has to exist; symlinks and `..` are
-        taken out of every path checked against them, and a path that merely
-        reads as inside one is refused.
+        Which is why there is no minimum and nothing to assert: a build naming
+        none of them is a legal build, and what it comes up as is a workbench
+        with nowhere yet to point at. There is no default and no scan either —
+        guessing at what a machine's owner meant to expose is not a guess worth
+        making.
 
-        Each is bound into the service's sandbox, and nothing beside it is: the
-        hardening otherwise leaves nothing but the state directory reachable,
-        so a watched path under `/home` would be one the service cannot see at
-        all. What the sandbox exposes is therefore exactly this list.
+        A path this does not name is not there as far as the service is
+        concerned, and a Repo or an account under one is answered *missing*,
+        exactly as a path that genuinely is not there would be.
 
-        Which is why this list may not be empty, and why the assertion below
-        refuses a build with none. The server itself no longer requires any —
-        the workbench settings say Watched Paths too, and the boundary is the
-        union of the two, so a bare binary is pointed at its first directory
-        from its own settings page. Under this module that route stops at the
-        namespace: a directory typed into the settings page is saved and
-        reported as one the server cannot see, and stays functionless until it
-        is named here.
+        Bind mounts rather than `ReadWritePaths`, because a directory under
+        `/home` is one `ProtectHome` has already replaced with an empty tmpfs: a
+        path merely permitted under one is a path that is not there to permit.
+
+        The `home` option below is bound in too, and read-only — so an agent
+        account kept under it that a session has to *write*, which is every
+        Claude account, is named here as well. That is the one composition worth
+        saying outright: naming it as the home does not make it writable, and
+        the account is the thing a session writes its own logs and settings
+        into.
       '';
     };
 
@@ -213,8 +224,8 @@ in
         page is saved, reported on the page as one the server cannot see, and
         does nothing until it is named here as well.
 
-        Each is bound into the service's own sandbox, for the reason the watched
-        paths are: the hardening leaves nothing but the state directory
+        Each is bound into the service's own sandbox, for the reason the
+        `paths` above are: the hardening leaves nothing but the state directory
         reachable, and a directory the service cannot see is not one it can hand
         to a session.
       '';
@@ -237,24 +248,10 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    # Kept even though the server itself starts with none: what it would come up
-    # with is a boundary around nothing, and the way out of that on a bare binary
-    # — typing a path into the settings page — cannot work here, because this
-    # unit's namespace holds only what is named above. So a build with none is
-    # refused at build time rather than left to be discovered as a settings entry
-    # that saves and does nothing.
-    assertions = [
-      {
-        assertion = cfg.watchedPaths != [ ];
-        message = ''
-          services.verkstead.watchedPaths must name at least one directory.
-          Verkstead operates only inside the directories it is given, so with
-          none of them it has nothing it may touch. The settings page can add
-          more, but only inside this unit's namespace: what is not named here is
-          not somewhere the hardened service can see.
-        '';
-      }
-    ];
+    # No assertion on `paths`. It bounded nothing but this unit's own namespace
+    # even when it was a boundary, and now that Verkstead is never told about it
+    # a build naming none of them is a workbench with nowhere yet to point at
+    # rather than one that cannot work.
 
     # The binary lands on `PATH`, for a human at a terminal: `verkstead serve
     # --help` is how they find out what this unit is passing it, and `verkstead
@@ -320,13 +317,10 @@ in
             "--build-cache-dir"
             cacheDir
           ]
-          # One flag per directory rather than the `:`-separated form the
-          # environment variable takes: a path with a colon in it would split
-          # in two, and this is the list that says what may be touched.
-          ++ lib.concatMap (path: [
-            "--watched-path"
-            "${path}"
-          ]) cfg.watchedPaths
+          # `paths` is not passed to anything: it is the unit's namespace and
+          # the server is never told it exists. One flag per bind rather than
+          # the `:`-separated form the environment variable takes, because a
+          # path with a colon in it would split in two.
           ++ lib.concatMap (bind: [
             "--sandbox-bind"
             bind
@@ -477,29 +471,33 @@ in
         # nothing else, which is the whole of what the server writes: the Data
         # Directory is that directory, so there is nothing else to permit.
 
-        # The Watched Paths, and nothing else of the filesystem they sit in.
+        # The `paths`, read-write, and nothing else of the filesystem they sit
+        # in. Repositories and agent accounts alike: a session writes its own
+        # logs and settings into the account it runs under, so read-only would
+        # be the wrong half of the pair for either of them.
         #
-        # Bind mounts rather than `ReadWritePaths`, because a Watched Path is
+        # Bind mounts rather than `ReadWritePaths`, because one of these is
         # usually somewhere under `/home` and `ProtectHome` replaces that with
         # an empty tmpfs: a path merely permitted under one is a path that is
-        # not there to permit. Bound in, it exists inside the namespace and
-        # nothing beside it does — which is the sandbox saying exactly what the
-        # server says, rather than something wider that the server then narrows.
+        # not there to permit.
         #
         # Not prefixed with `-`, so a directory that has gone missing fails the
-        # unit. The server refuses to start on one too; both of them saying so
-        # beats a service that comes up watching nothing.
+        # unit rather than leaving a namespace quietly narrower than what the
+        # unit was told to expose.
         #
         # The Sandbox Configuration's binds come in the same way and for the
         # same reason: what the service cannot see it cannot hand to a session.
         #
         # This list is therefore the ceiling on what the settings page can add.
-        # A Watched Path or a bind typed there is saved into `config.yaml` and
-        # read at every use, but it resolves inside this namespace like anything
-        # else — so one naming a directory not here is reported on the page as
-        # unseen and does nothing until it is named here as well. That is the
-        # deliberate shape of it: a phone may widen what the server does with
-        # what the unit already exposes, and only the unit widens the exposure.
+        # A bind typed there is saved into `config.yaml` and read at every use,
+        # but it resolves inside this namespace like anything else — so one
+        # naming a directory not here is reported on the page as unseen and does
+        # nothing until it is named here as well. A Repo or an account is the
+        # same story with a different word for it: what this list does not name
+        # is answered *missing*, because inside the namespace it genuinely is.
+        # That is the deliberate shape of it: a phone may widen what the server
+        # does with what the unit already exposes, and only the unit widens the
+        # exposure.
         #
         # The build cache is first, and it is here by the same rule rather than
         # because something is currently hiding it: `CacheDirectory` above
@@ -510,7 +508,7 @@ in
         BindPaths = [
           cacheDir
         ]
-        ++ map (path: "${path}") cfg.watchedPaths
+        ++ map (path: "${path}") cfg.paths
         ++ map bindPath cfg.sandboxBinds;
 
         # A home the human named somewhere of their own, bound in for the reason

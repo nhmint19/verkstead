@@ -235,20 +235,24 @@ testers.runNixOSTest {
       # the binary would download here perfectly well.
       services.verkstead.package = package;
 
-      # The module refuses to build without a Watched Path, and the service
-      # refuses to start with one that is not there. Two of them, so that the
-      # sandbox is exercised where it has real work to do: one under `/home`,
-      # which the hardening replaces with an empty tmpfs and the module then binds
-      # back through, and one outside it. The unit coming up at all is what says
-      # both arrived.
-      services.verkstead.watchedPaths = [
+      # The directories the unit is told to bind, and so the whole of what the
+      # service can see of this machine. The service refuses to start on one that
+      # is not there. Two of them, so that the namespace is exercised where it
+      # has real work to do: one under `/home`, which the hardening replaces with
+      # an empty tmpfs and the module then binds back through, and one outside
+      # it. The unit coming up at all is what says both arrived.
+      #
+      # `/home/unbound` below is deliberately not among them: it is what the
+      # other half of this proves, a repository the unit was never told about.
+      services.verkstead.paths = [
         "/srv/repos"
-        "/home/watched"
+        "/home/bound"
       ];
 
       systemd.tmpfiles.rules = [
         "d /srv/repos 0755 root root -"
-        "d /home/watched 0755 root root -"
+        "d /home/bound 0755 root root -"
+        "d /home/unbound 0755 root root -"
         # The Agent Profile's pair, owned by the service because a session
         # writes its own session logs and settings into it. The repository a
         # Conversation is grilled about is deliberately not here: `committed`
@@ -618,13 +622,38 @@ testers.runNixOSTest {
     with subtest("a repo under a directory the unit binds registers"):
         # Both bound paths, because they are exposed to the unit two different
         # ways: `/srv/repos` is somewhere the hardening leaves in place, and
-        # `/home/watched` is under a directory it replaces with an empty tmpfs
+        # `/home/bound` is under a directory it replaces with an empty tmpfs
         # and the module binds back through. A service that could not see the
         # second would answer it *missing*.
-        for bound in ["/srv/repos/inside", "/home/watched/inside"]:
+        for bound in ["/srv/repos/inside", "/home/bound/inside"]:
             committed(bound)
             outcome = register(bound)
             assert outcome == '"Added"', f"{bound} was answered {outcome}"
+
+    with subtest("a repo the unit was not told to bind is answered missing"):
+        # The other half of `paths`: nothing admits or refuses on Verkstead's
+        # behalf any more, so what a repository outside the unit's namespace
+        # meets is the namespace itself. Inside it the directory is not there,
+        # and *missing* is what the server says about a path that is not there
+        # — the same answer a typo would get, which is the whole point.
+        #
+        # Under `/home` and not under `/srv`, and that matters: `ProtectHome =
+        # "tmpfs"` replaces `/home` wholesale and the module binds back only
+        # what it was told to, whereas `ProtectSystem = "strict"` leaves `/srv`
+        # visible read-only — so a repository made under `/srv` outside `paths`
+        # would register perfectly well and prove nothing.
+        committed("/home/unbound/outside")
+
+        outcome = register("/home/unbound/outside")
+        assert outcome == '"Missing"', f"/home/unbound/outside was answered {outcome}"
+
+        # And it is genuinely the namespace rather than the repository: the same
+        # directory is a real repository seen from outside the unit. As the user
+        # that owns it, because git refuses to read a repository it finds under
+        # somebody else — which is the very thing `committed` hands it over for.
+        machine.succeed(
+            "runuser -u verkstead -- git -C /home/unbound/outside rev-parse --git-dir"
+        )
 
     # Somewhere for the agents' Sets to land. Every Set is asked from a
     # Conversation, and the base URL a session is given is what says which — so a
@@ -715,8 +744,8 @@ testers.runNixOSTest {
         # done once and expected to hold, so a service that forgot them on a
         # restart would be one nobody could rely on.
         listed = machine.succeed("curl -sf http://127.0.0.1:8422/api/ui/repos")
-        for watched in ["/srv/repos/inside", "/home/watched/inside"]:
-            assert watched in listed, f"{watched} was forgotten:\n{listed}"
+        for bound in ["/srv/repos/inside", "/home/bound/inside"]:
+            assert bound in listed, f"{bound} was forgotten:\n{listed}"
 
         # The agent did not fail when the server went away; it reconnects its
         # wait, so answering now still reaches it.
