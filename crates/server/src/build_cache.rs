@@ -361,7 +361,10 @@ impl BuildCache {
             *running = None;
         }
 
-        match compile_server(dir, sccache, data_dir, settings.size()).spawn() {
+        let started = compile_server(dir, sccache, data_dir, settings.size())
+            .and_then(|mut compiling| compiling.spawn());
+
+        match started {
             Ok(server) => {
                 // A keeper beside it, where the sandbox it was started in has
                 // nothing to say about outliving anybody — see
@@ -512,7 +515,12 @@ pub fn builds_rust(repo: &Path) -> bool {
 /// cannot, so it is no part of a description either of them answers — and what
 /// it was worth was telling this sandbox apart from a session's in a process
 /// listing.
-fn compile_server(dir: &Path, sccache: &Path, data_dir: &Path, size: &str) -> Command {
+fn compile_server(
+    dir: &Path,
+    sccache: &Path,
+    data_dir: &Path,
+    size: &str,
+) -> std::io::Result<Command> {
     let worktrees = crate::worktrees::directory(data_dir);
     let home = compiling_home(data_dir);
 
@@ -580,7 +588,14 @@ fn compile_server(dir: &Path, sccache: &Path, data_dir: &Path, size: &str) -> Co
     // this joins in is the sccache it is running, read-only. A compile server
     // outlives every session anyway, so there is no ending here to hang one on.
     let (rendering, _) = sandbox::rendered(Platform::HERE, &surface);
-    let mut compiling = Command::from(&rendering);
+
+    // Which is where this can refuse: a rendering naming an AppContainer is one
+    // the standard library cannot start — see
+    // [`crate::sandbox::off_a_console`], which is what starts such a thing. The
+    // compile server names none on any platform this runs on, and an error
+    // here is carried the way every other failure to start one is: said in the
+    // log, with each session starting a server of its own.
+    let mut compiling = Command::try_from(&rendering)?;
 
     // In a process group of its own where the platform needs one, which is what
     // a keeper ends when the server has gone — see
@@ -596,7 +611,7 @@ fn compile_server(dir: &Path, sccache: &Path, data_dir: &Path, size: &str) -> Co
         .stdout(Stdio::null())
         .stderr(Stdio::inherit());
 
-    compiling
+    Ok(compiling)
 }
 
 /// Where `program` is on the server's own `PATH`, or `None` where it is on none

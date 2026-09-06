@@ -79,7 +79,13 @@ pub fn named(data_dir: &Path) -> String {
 }
 
 /// What the pipe is called, with neither spelling's prefix on it.
-fn bare(data_dir: &Path) -> String {
+///
+/// Reachable from the rest of the crate for one other thing this machine has to
+/// name after a Data Directory: the AppContainer a Conversation's sessions run
+/// inside — see [`crate::sandbox::container::Container::for_conversation`].
+/// Two Verksteads on one machine keep their containers apart the way they keep
+/// their pipes apart, and this is that fingerprint said once rather than twice.
+pub(crate) fn bare(data_dir: &Path) -> String {
     // Through the resolved path rather than the one that was typed: `.` and the
     // absolute name of the same directory are one Data Directory, and two
     // servers pointed at it by those two spellings have to collide. Windows

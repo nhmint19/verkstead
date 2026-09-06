@@ -17,7 +17,7 @@ Roadmap stage: [03: The AppContainer](docs/roadmaps/windows-sessions/03-appconta
 
 ## Tasks
 
-- [ ] 01: A container runs a process — [details](01-a-container-runs-a-process.md)
+- [x] 01: A container runs a process — [details](01-a-container-runs-a-process.md)
 - [ ] 02: The rendering — [details](02-the-rendering.md)
 - [ ] 03: The pipe for the container — [details](03-the-pipe-for-the-container.md)
 - [ ] 04: The AppContainer suite — [details](04-the-appcontainer-suite.md)

@@ -24,6 +24,17 @@
 //! `CreateProcessW` with the console in a `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE`
 //! and the command line quoted by the rules `CommandLineToArgvW` reads one back
 //! with. What comes back is a [`Child`] of Verkstead's own rather than tokio's.
+//! The list itself, the quoting and the environment block are
+//! [`crate::sandbox::starting`]'s: they are what a rendering comes to on this
+//! platform wherever it is started, and this is one of the two places that
+//! starts one.
+//!
+//! **And the container beside the console.** A Windows session runs inside an
+//! AppContainer, which is a second attribute on the same list — the identity
+//! its token carries rather than a wrapper around it (ADR-0014). So a rendering
+//! that names one is started with the list widened by one, and a container that
+//! will not resolve is a session refused rather than a session started outside
+//! its boundary.
 //!
 //! **The Job is what `--die-with-parent` is on Linux.** Every child here is
 //! created suspended, put in a Job Object that kills everything in it when the
@@ -40,10 +51,8 @@
 //! the far end here is the console, and a task started beside every child
 //! closes it once that child has gone.
 
-use std::collections::BTreeMap;
 use std::ffi::{OsStr, c_void};
 use std::io;
-use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::RawHandle;
 use std::os::windows::process::ExitStatusExt;
 use std::process::ExitStatus;
@@ -55,8 +64,9 @@ use std::time::Duration;
 use tokio::net::windows::named_pipe::NamedPipeServer;
 use tokio::sync::watch;
 use windows_sys::Win32::Foundation::{
-    CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE, WAIT_FAILED,
+    GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE, WAIT_FAILED,
 };
+use windows_sys::Win32::Security::SECURITY_CAPABILITIES;
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, OPEN_EXISTING,
     PIPE_ACCESS_DUPLEX,
@@ -68,16 +78,16 @@ use windows_sys::Win32::System::Pipes::{
     CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_WAIT,
 };
 use windows_sys::Win32::System::Threading::{
-    CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, DeleteProcThreadAttributeList,
-    EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, INFINITE, InitializeProcThreadAttributeList,
-    LPPROC_THREAD_ATTRIBUTE_LIST, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, PROCESS_INFORMATION,
-    ResumeThread, STARTF_USESTDHANDLES, STARTUPINFOEXW, TerminateProcess,
-    UpdateProcThreadAttribute, WaitForSingleObject,
+    CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, EXTENDED_STARTUPINFO_PRESENT,
+    GetExitCodeProcess, INFINITE, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
+    PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, PROCESS_INFORMATION, ResumeThread,
+    STARTF_USESTDHANDLES, STARTUPINFOEXW, TerminateProcess, WaitForSingleObject,
 };
 
 use super::{COLUMNS, ROWS};
 use crate::sandbox::Rendering;
 use crate::sandbox::outliving::job::Job;
+use crate::sandbox::starting::{Attributes, Capabilities, Handle, command_line, environment, wide};
 
 /// How much of each direction the console host may get ahead by, in bytes.
 ///
@@ -196,7 +206,35 @@ impl Terminal {
             ));
         };
 
-        let mut attributes = Attributes::carrying(console)?;
+        // The container the description named, resolved before anything is
+        // started: a session that asked for a boundary and could not be given
+        // one is a session refused rather than a session started outside it
+        // (ADR-0014, Q18). Held for as long as the list is, because what goes
+        // on a list is a pointer to it.
+        let capabilities = match rendering.container() {
+            Some(container) => Some(Capabilities::of(container)?),
+            None => None,
+        };
+
+        // One list of one or of two: the console every session comes up on, and
+        // the identity a Windows session runs under where there is one. A list
+        // is one block of memory sized for what it will hold, which is why the
+        // second attribute widens this rather than adding a list beside it.
+        let mut attributes = Attributes::of(1 + usize::from(capabilities.is_some()))?;
+
+        attributes.carrying(
+            PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE as usize,
+            console as *const c_void,
+            size_of::<HPCON>(),
+        )?;
+
+        if let Some(capabilities) = &capabilities {
+            attributes.carrying(
+                PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES as usize,
+                capabilities.attribute(),
+                size_of::<SECURITY_CAPABILITIES>(),
+            )?;
+        }
 
         let mut startup: STARTUPINFOEXW = unsafe { std::mem::zeroed() };
         startup.StartupInfo.cb = u32::try_from(size_of::<STARTUPINFOEXW>()).unwrap_or(u32::MAX);
@@ -555,97 +593,6 @@ impl Drop for Console {
     }
 }
 
-/// One handle of the process's own, closed when it is let go of.
-///
-/// A handle is a pointer as far as the bindings are concerned and therefore
-/// neither `Send` nor `Sync` by itself, and it is both in fact: it is a number
-/// the kernel looks up in a table this whole process shares, and nothing about
-/// which thread holds it means anything.
-struct Handle(HANDLE);
-
-unsafe impl Send for Handle {}
-unsafe impl Sync for Handle {}
-
-impl Drop for Handle {
-    fn drop(&mut self) {
-        if !self.0.is_null() && self.0 != INVALID_HANDLE_VALUE {
-            unsafe { CloseHandle(self.0) };
-        }
-    }
-}
-
-/// The attribute list a process is started with, holding the one attribute
-/// there is to say: the console it comes up on.
-///
-/// A list is a block of memory Windows lays out itself, so this is a buffer of
-/// pointer-sized words — the alignment a list wants — with the list written
-/// into it, and it is deleted when it is dropped.
-struct Attributes(Vec<usize>);
-
-impl Attributes {
-    /// A list of one, carrying `console`.
-    fn carrying(console: HPCON) -> io::Result<Attributes> {
-        let mut wanted = 0usize;
-
-        // The first call always fails: what it is for is the size, which is
-        // what it writes on its way out.
-        unsafe { InitializeProcThreadAttributeList(ptr::null_mut(), 1, 0, &mut wanted) };
-
-        if wanted == 0 {
-            return Err(io::Error::last_os_error());
-        }
-
-        // The buffer before the list rather than after it: an
-        // [`Attributes`] deletes the list as it is dropped, and there is no list
-        // to delete until the call below has written one.
-        let mut buffer = vec![0usize; wanted.div_ceil(size_of::<usize>())];
-
-        let made = unsafe {
-            InitializeProcThreadAttributeList(
-                buffer.as_mut_ptr().cast::<c_void>(),
-                1,
-                0,
-                &mut wanted,
-            )
-        };
-
-        if made == 0 {
-            return Err(io::Error::last_os_error());
-        }
-
-        let mut attributes = Attributes(buffer);
-
-        let carried = unsafe {
-            UpdateProcThreadAttribute(
-                attributes.list(),
-                0,
-                PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE as usize,
-                console as *const c_void,
-                size_of::<HPCON>(),
-                ptr::null_mut(),
-                ptr::null(),
-            )
-        };
-
-        if carried == 0 {
-            return Err(io::Error::last_os_error());
-        }
-
-        Ok(attributes)
-    }
-
-    /// The list itself, as everything that takes one wants it.
-    fn list(&mut self) -> LPPROC_THREAD_ATTRIBUTE_LIST {
-        self.0.as_mut_ptr().cast::<c_void>()
-    }
-}
-
-impl Drop for Attributes {
-    fn drop(&mut self) {
-        unsafe { DeleteProcThreadAttributeList(self.list()) };
-    }
-}
-
 /// One direction of a terminal: the end Verkstead holds, watched by the
 /// runtime, and the end the console gets.
 ///
@@ -714,121 +661,4 @@ fn pipe() -> io::Result<(NamedPipeServer, Handle)> {
     let held = unsafe { NamedPipeServer::from_raw_handle(watched as RawHandle) }?;
 
     Ok((held, inside))
-}
-
-/// `rendering` as the command line `CreateProcessW` takes, program first.
-///
-/// Windows has no argument vector to hand over: a process is given one string
-/// and takes it apart again, so this is the taking-apart run backwards — see
-/// [`quoted`].
-fn command_line(rendering: &Rendering) -> Vec<u16> {
-    let mut line = Vec::new();
-
-    quoted(rendering.program(), &mut line);
-
-    for argument in rendering.argv() {
-        line.push(u16::from(b' '));
-        quoted(argument, &mut line);
-    }
-
-    line.push(0);
-
-    line
-}
-
-/// One word of a command line, written so that `CommandLineToArgvW` reads back
-/// the word that went in.
-///
-/// Which is the rule everything on Windows that takes a command line apart
-/// follows: a run of backslashes means itself unless a quote comes next, and
-/// then it means half of itself and the quote is the word's rather than the
-/// quoting's. So a run before a quote is doubled and the quote escaped, and a
-/// run at the end of a quoted word is doubled because the closing quote comes
-/// next.
-fn quoted(word: &OsStr, line: &mut Vec<u16>) {
-    const SPACE: u16 = b' ' as u16;
-    const TAB: u16 = b'\t' as u16;
-    const QUOTE: u16 = b'"' as u16;
-    const BACKSLASH: u16 = b'\\' as u16;
-
-    let word: Vec<u16> = word.encode_wide().collect();
-
-    // A word with nothing in it to misread is written as it is — which is most
-    // of them, and is what makes a command line readable in a log.
-    if !word.is_empty() && !word.iter().any(|unit| matches!(*unit, SPACE | TAB | QUOTE)) {
-        line.extend_from_slice(&word);
-
-        return;
-    }
-
-    line.push(QUOTE);
-
-    let mut backslashes = 0usize;
-
-    for unit in word {
-        match unit {
-            BACKSLASH => backslashes += 1,
-            QUOTE => {
-                line.extend(std::iter::repeat_n(BACKSLASH, backslashes + 1));
-                backslashes = 0;
-            }
-            _ => backslashes = 0,
-        }
-
-        line.push(unit);
-    }
-
-    line.extend(std::iter::repeat_n(BACKSLASH, backslashes));
-    line.push(QUOTE);
-}
-
-/// And `rendering`'s environment as the block `CreateProcessW` takes: every
-/// name and value in one run of text, sorted, and the whole ended by a second
-/// nothing.
-///
-/// Sorted and case-folded because that is what Windows asks of a block, and
-/// because an environment where `Path` and `PATH` are two variables is one no
-/// program on this platform expects: the last of a name is the one that stands,
-/// which is what setting a variable twice means everywhere else in this
-/// codebase.
-fn environment(rendering: &Rendering) -> Vec<u16> {
-    let mut named: BTreeMap<Vec<u16>, (Vec<u16>, Vec<u16>)> = BTreeMap::new();
-
-    for (key, value) in rendering.env() {
-        let name: Vec<u16> = key.encode_wide().collect();
-        let folded = name
-            .iter()
-            .map(|unit| match u8::try_from(*unit) {
-                Ok(byte) => u16::from(byte.to_ascii_uppercase()),
-                Err(_) => *unit,
-            })
-            .collect();
-
-        named.insert(folded, (name, value.encode_wide().collect()));
-    }
-
-    let mut block = Vec::new();
-
-    for (name, value) in named.into_values() {
-        block.extend_from_slice(&name);
-        block.push(u16::from(b'='));
-        block.extend_from_slice(&value);
-        block.push(0);
-    }
-
-    // An environment with nothing in it is still a block, and a block is a run
-    // of strings ended by an empty one.
-    if block.is_empty() {
-        block.push(0);
-    }
-
-    block.push(0);
-
-    block
-}
-
-/// A string as every one of these calls wants one: what it says, and then
-/// nothing.
-fn wide(text: &OsStr) -> Vec<u16> {
-    text.encode_wide().chain(std::iter::once(0)).collect()
 }

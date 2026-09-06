@@ -648,7 +648,8 @@ mod tests {
     /// Run what `surface` describes and hand back what it printed.
     #[cfg(windows)]
     fn ran(surface: &Surface) -> String {
-        let output = std::process::Command::from(&command(surface).0)
+        let output = std::process::Command::try_from(&command(surface).0)
+            .expect("a rendering with no container")
             .output()
             .expect("the rendering to be startable");
 

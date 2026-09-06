@@ -384,7 +384,8 @@ fn a_session_asks_through_the_pipe_and_the_response_comes_back() {
     let fixture = grilling();
     let (rendering, _closing) = fixture.sandbox().command(&["verkstead", "ask"]);
 
-    let mut asking = Command::from(&rendering)
+    let mut asking = Command::try_from(&rendering)
+        .expect("a rendering with no container")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

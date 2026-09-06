@@ -105,6 +105,26 @@ mod surface;
 // arms are built and called wherever the tests are.
 pub(crate) mod outliving;
 
+// And the two halves of the boundary the third rendering is getting: the
+// identity a Windows session runs under, and what a process started with that
+// identity takes to start at all. Both are Win32 and neither has anything to
+// say on a machine with no such call, so they are compiled where they are the
+// answer and nowhere else — the way [`bwrap`] and [`seatbelt`] are.
+//
+// Public, both of them, for the reason this module is: what a session may reach
+// is the product's own promise, and what proves a boundary is a process really
+// started behind one — see `crates/server/tests/container_windows.rs`.
+#[cfg(windows)]
+pub mod container;
+#[cfg(windows)]
+pub mod starting;
+
+// And the one thing in it every caller reaches for: a rendering started with
+// nothing watching it, which is what everything that reads what a process
+// printed rather than drawing it uses.
+#[cfg(windows)]
+pub use starting::off_a_console;
+
 use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};

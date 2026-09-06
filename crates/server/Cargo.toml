@@ -143,10 +143,10 @@ rustix = { version = "1", features = ["fs", "process", "pty", "termios"] }
 # — and the token its identity is read out of; `Win32_Security_Authorization` is
 # how both are written and read back, which is SDDL, the spelling of a
 # descriptor a person can read. `Win32_Security_Isolation` is the AppContainer
-# profile itself — created, derived a SID from and deleted — which so far only
-# the probe under `examples/` asks for: see `examples/appcontainer-probe.rs`,
-# which is what settles what this platform will and will not allow one before
-# the boundary around a session is written.
+# profile itself — created and deleted — which is the identity a Windows session
+# runs under: see `src/sandbox/container.rs`, and
+# `examples/appcontainer-probe.rs`, which is what settled what this platform
+# would allow one before the boundary around a session was written.
 windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_Security",

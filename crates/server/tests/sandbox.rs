@@ -816,7 +816,8 @@ file() {
 fn probe(sandbox: &Sandbox, script: &str) -> BTreeMap<String, String> {
     let whole = format!("{PROBE}\n{script}\n");
 
-    let output = Command::from(&sandbox.command(&[SH, "-c", &whole]).0)
+    let output = Command::try_from(&sandbox.command(&[SH, "-c", &whole]).0)
+        .expect("a rendering with no container")
         .stdin(Stdio::null())
         .output()
         .expect("bwrap should be on the PATH: the dev shell declares bubblewrap");
@@ -841,7 +842,8 @@ fn probe(sandbox: &Sandbox, script: &str) -> BTreeMap<String, String> {
 /// being asked here is what the *first* thing started inside gets, and a shell
 /// between it and the rendering is a shell that says something of its own.
 fn environment(sandbox: &Sandbox) -> BTreeMap<String, String> {
-    let output = Command::from(&sandbox.command(&[on_the_host("env")]).0)
+    let output = Command::try_from(&sandbox.command(&[on_the_host("env")]).0)
+        .expect("a rendering with no container")
         .stdin(Stdio::null())
         .output()
         .expect("the rendering to be startable");
