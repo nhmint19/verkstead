@@ -67,7 +67,7 @@ async fn health_route_answers_ok() {
 
 #[test]
 fn config_defaults_to_localhost() {
-    let config = Config::parse_from(["verkstead serve", "--watched-path", "/srv/repos"]);
+    let config = Config::parse_from(["verkstead serve"]);
 
     assert_eq!(config.listen.ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
 
@@ -86,8 +86,6 @@ fn config_is_overridable_by_flag() {
         "0.0.0.0:9999",
         "--data-dir",
         "/srv/verkstead",
-        "--watched-path",
-        "/srv/repos",
     ]);
 
     assert_eq!(config.listen.to_string(), "0.0.0.0:9999");
@@ -114,19 +112,17 @@ fn config_is_overridable_by_flag() {
     );
 }
 
-/// Configuration with no default and no requirement either: what Verkstead may
-/// touch is the machine owner's to say, and a guess at it would be a guess at a
-/// security boundary — but a standalone install says it on the settings page
-/// rather than in flags, so a server given none of them here parses and comes
-/// up watching nothing.
+/// A bare `verkstead serve` is the whole of what a standalone install is
+/// started with: nothing says where Verkstead may work, because nothing bounds
+/// it any more, and a sandbox is given nothing beyond what it always had.
 #[test]
-fn config_parses_without_a_watched_path_and_watches_nothing() {
+fn config_parses_with_nothing_said_at_all() {
     let config = Config::parse_from(["verkstead serve"]);
 
-    assert!(config.watched_paths.is_empty());
+    assert!(config.sandbox_binds.is_empty());
 }
 
-/// Several of them, as `PATH` is written — which is how they arrive from a
+/// Several binds, as `PATH` is written — which is how they arrive from a
 /// service unit, where there is one string and not a repeatable flag.
 ///
 /// The one string is built rather than written out, because how `PATH` is
@@ -135,24 +131,24 @@ fn config_parses_without_a_watched_path_and_watches_nothing() {
 /// literal `:` here would be asserting that Windows cuts a drive letter off
 /// the path it belongs to.
 #[test]
-fn watched_paths_are_a_list_however_they_are_given() {
+fn sandbox_binds_are_a_list_however_they_are_given() {
     let repeated = Config::parse_from([
         "verkstead serve",
-        "--watched-path",
-        "/srv/repos",
-        "--watched-path",
-        "/srv/scratch",
+        "--sandbox-bind",
+        "/var/cache/node",
+        "--sandbox-bind",
+        "/var/cache/cargo",
     ]);
-    let one_string = std::env::join_paths(["/srv/repos", "/srv/scratch"])
+    let one_string = std::env::join_paths(["/var/cache/node", "/var/cache/cargo"])
         .unwrap()
         .into_string()
         .unwrap();
-    let separated = Config::parse_from(["verkstead serve", "--watched-path", &one_string]);
+    let separated = Config::parse_from(["verkstead serve", "--sandbox-bind", &one_string]);
 
-    assert_eq!(repeated.watched_paths, separated.watched_paths);
+    assert_eq!(repeated.sandbox_binds, separated.sandbox_binds);
     assert_eq!(
-        repeated.watched_paths,
-        [PathBuf::from("/srv/repos"), PathBuf::from("/srv/scratch")]
+        repeated.sandbox_binds,
+        ["/var/cache/node".to_owned(), "/var/cache/cargo".to_owned()]
     );
 }
 

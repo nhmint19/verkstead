@@ -25,7 +25,7 @@ use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{ConflictResolution, Registered, RepoEntry, RepoRemoved, RepoView};
-use verkstead_server::{WatchedPaths, open_database, router_watching, store};
+use verkstead_server::{open_database, router_keeping, store};
 
 /// A router, plus the Data Directory holding its database alive.
 async fn workbench() -> (tempfile::TempDir, Router) {
@@ -45,27 +45,7 @@ async fn workbench_and_pool() -> (tempfile::TempDir, SqlitePool, Router) {
 
     let data_dir = dir.path().to_owned();
 
-    (
-        dir,
-        pool.clone(),
-        router_watching(pool, WatchedPaths::none(), data_dir),
-    )
-}
-
-/// The same again, over a server the installation gave `given` to watch.
-///
-/// Only one test wants that: the one that registers a repository nowhere near
-/// it, which is the whole of what opening the boundary means.
-async fn workbench_started_with(given: &Path) -> (tempfile::TempDir, Router) {
-    let dir = tempfile::tempdir().unwrap();
-    let pool = open_database(&dir.path().join("verkstead.db"))
-        .await
-        .unwrap();
-    let watched = WatchedPaths::resolve(&[given.to_owned()]).unwrap();
-
-    let data_dir = dir.path().to_owned();
-
-    (dir, router_watching(pool, watched, data_dir))
+    (dir, pool.clone(), router_keeping(pool, data_dir))
 }
 
 /// A git repository at `path`, with one commit on `main` so it has a branch to
@@ -200,15 +180,13 @@ async fn nothing_is_registered_to_begin_with() {
     assert!(listed(&app).await.is_empty());
 }
 
-/// The boundary is gone: a repository nowhere near anything the installation
-/// was started with registers like any other, and what is stored is where it
-/// really is.
+/// The boundary is gone: a repository nowhere near anything the server was
+/// started with — its own Data Directory included — registers like any other,
+/// and what is stored is where it really is.
 #[tokio::test]
 async fn a_repository_outside_everything_the_server_was_started_with_registers() {
     let root = tempfile::tempdir().unwrap();
-    let given = root.path().join("given");
-    std::fs::create_dir(&given).unwrap();
-    let (_dir, app) = workbench_started_with(&given).await;
+    let (_dir, app) = workbench().await;
 
     let elsewhere = repository(root.path().join("elsewhere"));
 

@@ -69,7 +69,7 @@ pub use settings::{
     Author, BindEntry, BuildCacheEdit, BuildCacheView, CleanupEdit, CleanupStepEdit,
     CleanupStepView, CleanupView, CompileCaching, ConflictResolution, IgnoreRule,
     IgnoredCommentsEdit, PathResolution, PathSource, PathsView, RuleField, RuleRefused,
-    SettingsEdit, SettingsSaved, SettingsView, TokenEdit, TokenSaved, Verified, WatchedPathEntry,
+    SettingsEdit, SettingsSaved, SettingsView, TokenEdit, TokenSaved, Verified,
 };
 pub use sharing::{
     CommentedOn, MissedOut, SHARE_MARKER, ShareCommented, SharePublished, SharedCommit,

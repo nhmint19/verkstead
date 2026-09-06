@@ -1932,19 +1932,15 @@ export type PathSource = "Installation" | "Settings";
 
 /**
  * Every path Verkstead has been told about, from both sources at once: the
- * directories it may operate inside, and the extra directories a sandbox is
- * given beyond the surface every one of them has.
+ * extra directories a sandbox is given beyond the surface every one of them
+ * has.
  *
- * Two lists rather than one, because they are two different permissions — a
- * Watched Path says where the human may point Verkstead, and a bind says what
- * a session may write in — and the page draws them apart for that reason.
- *
- * The installation's own entries come first in each list, and the settings'
- * follow in the order they were written down. That is the order the two were
- * decided in: a flag is said once when the machine is set up, and the file is
- * where somebody has been adding to it since.
+ * The installation's own entries come first, and the settings' follow in the
+ * order they were written down. That is the order the two were decided in: a
+ * flag is said once when the machine is set up, and the file is where somebody
+ * has been adding to it since.
  */
-export type PathsView = { watched: Array<WatchedPathEntry>, 
+export type PathsView = { 
 /**
  * Every configured bind, the ones every sandbox gets and the ones one Repo
  * does together — see [`BindEntry::repo`], which is what says which of the
@@ -2871,23 +2867,19 @@ conflict_resolution: ConflictResolution,
  */
 share_on_done: boolean, 
 /**
- * The Watched Paths the settings own, as values again: what is sent is
- * what `config.yaml` holds afterwards, so a row taken off the page is a
- * row taken out of the file.
- *
- * The installation's own are not here and cannot be sent. They are the
- * unit's word rather than this page's, and a save leaves them exactly
- * where they are — see [`PathSource`].
- */
-watched_paths: Array<string>, 
-/**
- * And the Sandbox Configuration binds the settings own, in the grammar
- * `--sandbox-bind` uses: `/abs/path` for a bind every sandbox gets, and
- * `name=/abs/path` for one the Repo registered under that name gets.
+ * The Sandbox Configuration binds the settings own, as values again: what
+ * is sent is what `config.yaml` holds afterwards, so a row taken off the
+ * page is a row taken out of the file. In the grammar `--sandbox-bind`
+ * uses: `/abs/path` for a bind every sandbox gets, and `name=/abs/path`
+ * for one the Repo registered under that name gets.
  *
  * Strings rather than a shape of their own, because a string is what the
  * file holds — and one grammar for both of the places a bind is said is
  * one thing to learn rather than two.
+ *
+ * The installation's own are not here and cannot be sent. They are the
+ * unit's word rather than this page's, and a save leaves them exactly
+ * where they are — see [`PathSource`].
  */
 sandbox_binds: Array<string>, 
 /**
@@ -2977,8 +2969,7 @@ conflict_resolution: ConflictResolution,
  */
 share_on_done: boolean, 
 /**
- * And the Watched Paths and the Sandbox Configuration binds, from both of
- * the places either of them is said.
+ * And the Sandbox Configuration binds, from both of the places they are said.
  */
 paths: PathsView, 
 /**
@@ -3865,18 +3856,6 @@ export type Violation = {
  * the Set as a whole.
  */
 label?: string | null, message: string, };
-
-/**
- * One Watched Path, whichever of the two places said it.
- */
-export type WatchedPathEntry = { 
-/**
- * The directory: resolved, for the installation's own, which were resolved
- * when the server started; and exactly as it was written, for one out of
- * the settings — that is what a save sends back, so it has to come back as
- * it went in.
- */
-path: string, source: PathSource, resolution: PathResolution, };
 
 /**
  * And what a watcher says back up it.

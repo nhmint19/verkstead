@@ -72,7 +72,7 @@ answers:
 struct Grilling {
     /// Kept alive for as long as the fixture is: the directories go when these
     /// drop, and a worktree that vanished mid-ask would fail obscurely.
-    watched: tempfile::TempDir,
+    work: tempfile::TempDir,
     state: tempfile::TempDir,
     home: tempfile::TempDir,
 
@@ -136,7 +136,7 @@ impl Grilling {
     /// A Profile whose whole account is one home, saved into the same store the
     /// fixture's own was — the second agent type, which asks by store-and-nudge.
     fn codex_profile(&self) -> store::Profile {
-        let home = self.watched.path().join("codex-account/.codex");
+        let home = self.work.path().join("codex-account/.codex");
         std::fs::create_dir_all(&home).unwrap();
 
         self.runtime.block_on(async {
@@ -238,11 +238,11 @@ impl Grilling {
 
 /// Stand one up.
 fn grilling() -> Grilling {
-    let watched = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
 
-    let repo = repo_with_a_commit(watched.path());
+    let repo = repo_with_a_commit(work.path());
     let database = state.path().join("verkstead.db");
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -253,8 +253,8 @@ fn grilling() -> Grilling {
 
     // The account a session runs under: a Profile is the pair of files, and both
     // are bound into the sandbox, so both have to be there.
-    let claude_dir = watched.path().join("account/.claude");
-    let config_file = watched.path().join("account/.claude.json");
+    let claude_dir = work.path().join("account/.claude");
+    let config_file = work.path().join("account/.claude.json");
     std::fs::create_dir_all(&claude_dir).unwrap();
     std::fs::write(&config_file, "{}\n").unwrap();
 
@@ -328,7 +328,7 @@ fn grilling() -> Grilling {
     });
 
     Grilling {
-        watched,
+        work,
         state,
         home,
         conversation,

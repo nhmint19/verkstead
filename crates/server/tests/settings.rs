@@ -38,7 +38,7 @@ use verkstead_render::{
     SettingsSaved, SettingsView, Verified,
 };
 use verkstead_server::sandbox::SandboxConfig;
-use verkstead_server::{Gh, WatchedPaths, open_database, router_asking_github, router_installed};
+use verkstead_server::{Gh, open_database, router_asking_github, router_installed};
 
 /// A `gh` that answers `gh api user` with the token it was run with, as the
 /// account's login.
@@ -122,7 +122,6 @@ async fn save_author(app: &Router, name: &str, email: &str) -> SettingsSaved {
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
-            "watched_paths": [],
             "sandbox_binds": [],
             "ignored_comments": "Keep",
         }),
@@ -142,7 +141,6 @@ async fn save_token(app: &Router, token: &str) -> SettingsSaved {
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
-            "watched_paths": [],
             "sandbox_binds": [],
             "ignored_comments": "Keep",
         }),
@@ -160,7 +158,6 @@ async fn clear_token(app: &Router) -> SettingsSaved {
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
-            "watched_paths": [],
             "sandbox_binds": [],
             "ignored_comments": "Keep",
         }),
@@ -198,7 +195,6 @@ async fn save_cleanup(app: &Router, trim: (bool, &str), delete: (bool, &str)) ->
             },
             "conflict_resolution": "Merge",
             "share_on_done": false,
-            "watched_paths": [],
             "sandbox_binds": [],
             "ignored_comments": "Keep",
         }),
@@ -315,7 +311,6 @@ async fn the_token_appears_in_no_answer_this_endpoint_gives() {
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
-            "watched_paths": [],
             "sandbox_binds": [],
             "ignored_comments": "Keep",
         }),
@@ -520,17 +515,17 @@ async fn a_hand_edit_to_either_file_is_what_the_next_read_says() {
     assert_eq!(settings.git_author.email, "hand@tobico.net");
 }
 
-/// The paths are values now, so a save carrying them as they stand is what
+/// The binds are values now, so a save carrying them as they stand is what
 /// leaves them alone — which is what the page does with every field the form in
 /// front of the human is not about.
 #[tokio::test]
-async fn a_save_carrying_the_paths_as_they_stand_leaves_them() {
+async fn a_save_carrying_the_binds_as_they_stand_leaves_them() {
     let (dir, app) = app().await;
 
     hand_edit(
         dir.path(),
         "config.yaml",
-        "sandbox_binds:\n  - /var/cache/verkstead-node\nwatched_paths:\n  - /home/ada/src\n",
+        "sandbox_binds:\n  - /var/cache/verkstead-node\n",
     );
 
     save(
@@ -542,7 +537,6 @@ async fn a_save_carrying_the_paths_as_they_stand_leaves_them() {
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
-            "watched_paths": ["/home/ada/src"],
             "sandbox_binds": ["/var/cache/verkstead-node"],
             "ignored_comments": "Keep",
         }),
@@ -552,8 +546,8 @@ async fn a_save_carrying_the_paths_as_they_stand_leaves_them() {
     let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
 
     assert!(
-        written.contains("/var/cache/verkstead-node") && written.contains("/home/ada/src"),
-        "the save should have carried both lists through, got:\n{written}"
+        written.contains("/var/cache/verkstead-node"),
+        "the save should have carried the list through, got:\n{written}"
     );
 }
 
@@ -617,7 +611,6 @@ async fn the_build_cache_switch_and_size_go_in_and_come_back() {
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
-            "watched_paths": [],
             "sandbox_binds": [],
             "ignored_comments": "Keep",
         }),
@@ -759,7 +752,6 @@ async fn a_save_carrying_the_cleanup_as_it_stands_leaves_it() {
             },
             "conflict_resolution": "Merge",
             "share_on_done": false,
-            "watched_paths": [],
             "sandbox_binds": [],
             "ignored_comments": "Keep",
         }),
@@ -802,7 +794,6 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Rebase",
             "share_on_done": false,
-            "watched_paths": [],
             "sandbox_binds": [],
             "ignored_comments": "Keep",
         }),
@@ -838,7 +829,6 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
-            "watched_paths": [],
             "sandbox_binds": [],
             "ignored_comments": "Keep",
         }),
@@ -880,7 +870,6 @@ async fn sharing_on_done_goes_in_and_comes_back() {
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": true,
-            "watched_paths": [],
             "sandbox_binds": [],
             "ignored_comments": "Keep",
         }),
@@ -921,7 +910,6 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": true,
-            "watched_paths": [],
             "sandbox_binds": [],
             "ignored_comments": "Keep",
         }),
@@ -939,7 +927,6 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": true,
-            "watched_paths": [],
             "sandbox_binds": [],
             "ignored_comments": "Keep",
         }),
@@ -983,7 +970,6 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
-            "watched_paths": [],
             "sandbox_binds": [],
             "ignored_comments": "Keep",
         }),
@@ -999,7 +985,6 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
-            "watched_paths": [],
             "sandbox_binds": [],
             "ignored_comments": "Keep",
         }),
@@ -1010,24 +995,21 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
     assert!(!saved.settings.rust_build_cache.size_configured);
 }
 
-/// The Paths half of the page: every Watched Path and every Sandbox
-/// Configuration bind, from both of the places either of them is said.
+/// The Paths half of the page: every Sandbox Configuration bind, from both of
+/// the places one is said.
 ///
 /// A server the installation configured as well as a file, because the whole of
 /// what this reports is which of the two said an entry and whether the server
 /// can see it — and a router that was only ever told things through the page
 /// could not be asked the first of those.
-async fn app_installed(watched: &[&Path], binds: &[String]) -> (tempfile::TempDir, Router) {
+async fn app_installed(binds: &[String]) -> (tempfile::TempDir, Router) {
     let dir = tempfile::tempdir().unwrap();
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
 
-    let paths: Vec<_> = watched.iter().map(|path| path.to_path_buf()).collect();
-
     let app = router_installed(
         pool,
-        WatchedPaths::resolve(&paths).unwrap(),
         SandboxConfig::resolve(binds).unwrap(),
         dir.path().to_owned(),
         Gh::running(vec![
@@ -1041,9 +1023,9 @@ async fn app_installed(watched: &[&Path], binds: &[String]) -> (tempfile::TempDi
     (dir, app)
 }
 
-/// Save the two lists and leave the rest of both files alone, which is what the
+/// Save the binds and leave the rest of both files alone, which is what the
 /// Paths pane's own press sends.
-async fn save_paths(app: &Router, watched: &[&str], binds: &[&str]) -> SettingsSaved {
+async fn save_paths(app: &Router, binds: &[&str]) -> SettingsSaved {
     save(
         app,
         &serde_json::json!({
@@ -1053,7 +1035,6 @@ async fn save_paths(app: &Router, watched: &[&str], binds: &[&str]) -> SettingsS
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
-            "watched_paths": watched,
             "sandbox_binds": binds,
             "ignored_comments": "Keep",
         }),
@@ -1084,7 +1065,6 @@ async fn a_verkstead_configured_by_nobody_has_no_paths_at_all() {
 
     let paths = settings(&app).await.paths;
 
-    assert!(paths.watched.is_empty(), "{:?}", paths.watched);
     assert!(paths.binds.is_empty(), "{:?}", paths.binds);
 }
 
@@ -1093,31 +1073,16 @@ async fn a_verkstead_configured_by_nobody_has_no_paths_at_all() {
 #[tokio::test]
 async fn the_installations_own_paths_come_back_as_the_installations() {
     let root = tempfile::tempdir().unwrap();
-    let watched = made(root.path(), "src");
     let cache = made(root.path(), "node-cache");
     let own = made(root.path(), "askance-cargo");
 
-    let (_dir, app) = app_installed(
-        &[&watched],
-        &[
-            cache.display().to_string(),
-            format!("askance={}", own.display()),
-        ],
-    )
+    let (_dir, app) = app_installed(&[
+        cache.display().to_string(),
+        format!("askance={}", own.display()),
+    ])
     .await;
 
     let paths = settings(&app).await.paths;
-
-    let [watched_path] = &paths.watched[..] else {
-        panic!("one watched path, not {:?}", paths.watched);
-    };
-
-    assert_eq!(
-        watched_path.path,
-        watched.canonicalize().unwrap().display().to_string()
-    );
-    assert_eq!(watched_path.source, PathSource::Installation);
-    assert_eq!(watched_path.resolution, PathResolution::Resolves);
 
     let [global, per_repo] = &paths.binds[..] else {
         panic!("two binds, not {:?}", paths.binds);
@@ -1142,42 +1107,19 @@ async fn the_installations_own_paths_come_back_as_the_installations() {
 #[tokio::test]
 async fn the_two_sources_come_back_as_one_list_saying_which_is_which() {
     let root = tempfile::tempdir().unwrap();
-    let installed = made(root.path(), "src");
     let bound = made(root.path(), "node-cache");
-    let added = made(root.path(), "elsewhere");
     let cargo = made(root.path(), "cargo");
 
-    let (_dir, app) = app_installed(&[&installed], &[bound.display().to_string()]).await;
+    let (_dir, app) = app_installed(&[bound.display().to_string()]).await;
 
     let saved = save_paths(
         &app,
-        &[&added.display().to_string()],
         &[
             &cargo.display().to_string(),
             &format!("verkstead={}", cargo.display()),
         ],
     )
     .await;
-
-    let sources: Vec<_> = saved
-        .settings
-        .paths
-        .watched
-        .iter()
-        .map(|entry| (entry.path.clone(), entry.source.clone()))
-        .collect();
-
-    assert_eq!(
-        sources,
-        vec![
-            (
-                installed.canonicalize().unwrap().display().to_string(),
-                PathSource::Installation
-            ),
-            (added.display().to_string(), PathSource::Settings),
-        ],
-        "the installation's own first, then what the page saved"
-    );
 
     let binds: Vec<_> = saved
         .settings
@@ -1197,7 +1139,8 @@ async fn the_two_sources_come_back_as_one_list_saying_which_is_which() {
                 Some("verkstead".to_owned()),
                 PathSource::Settings
             ),
-        ]
+        ],
+        "the installation's own first, then what the page saved"
     );
 
     // And the read that follows says the same, because the save's answer is a
@@ -1211,47 +1154,16 @@ async fn the_two_sources_come_back_as_one_list_saying_which_is_which() {
 async fn a_path_the_server_cannot_see_is_saved_anyway_and_said_so() {
     let root = tempfile::tempdir().unwrap();
     let never_made = root.path().join("never-made");
-    let file = root.path().join("notes.md");
-    std::fs::write(&file, "not a directory\n").unwrap();
 
     let (dir, app) = app().await;
 
-    let saved = save_paths(
-        &app,
-        &[
-            &never_made.display().to_string(),
-            &file.display().to_string(),
-            "src",
-        ],
-        &[&never_made.display().to_string()],
-    )
-    .await;
+    let saved = save_paths(&app, &[&never_made.display().to_string()]).await;
 
     // In the file, whatever the server makes of any of it — this is the half a
     // nix install depends on, where a path the hardened unit cannot see is saved
     // now and works when the installer widens the namespace.
     let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
     assert!(written.contains("never-made"), "{written}");
-
-    let [missing, not_a_directory, relative] = &saved.settings.paths.watched[..] else {
-        panic!(
-            "three watched paths, not {:?}",
-            saved.settings.paths.watched
-        );
-    };
-
-    assert!(
-        why(&missing.resolution).contains("cannot see it"),
-        "{missing:?}"
-    );
-    assert!(
-        why(&not_a_directory.resolution).contains("not a directory"),
-        "{not_a_directory:?}"
-    );
-    assert!(
-        why(&relative.resolution).contains("relative"),
-        "{relative:?}"
-    );
 
     let [bind] = &saved.settings.paths.binds[..] else {
         panic!("one bind, not {:?}", saved.settings.paths.binds);
@@ -1269,7 +1181,7 @@ async fn a_path_the_server_cannot_see_is_saved_anyway_and_said_so() {
 async fn a_bind_that_will_not_read_is_still_a_row() {
     let (_dir, app) = app().await;
 
-    let saved = save_paths(&app, &[], &["node-cache"]).await;
+    let saved = save_paths(&app, &["node-cache"]).await;
 
     let [bind] = &saved.settings.paths.binds[..] else {
         panic!("one bind, not {:?}", saved.settings.paths.binds);
@@ -1288,45 +1200,28 @@ async fn a_bind_that_will_not_read_is_still_a_row() {
 /// what the installation said: those are the unit's word, and this page has no
 /// way to reach them.
 #[tokio::test]
-async fn a_save_replaces_the_settings_paths_and_leaves_the_installations() {
+async fn a_save_replaces_the_settings_binds_and_leaves_the_installations() {
     let root = tempfile::tempdir().unwrap();
-    let installed = made(root.path(), "src");
     let bound = made(root.path(), "node-cache");
 
-    let (dir, app) = app_installed(&[&installed], &[bound.display().to_string()]).await;
+    let (dir, app) = app_installed(&[bound.display().to_string()]).await;
 
-    save_paths(&app, &["/home/ada/first"], &["/var/cache/first"]).await;
-    let saved = save_paths(&app, &["/home/ada/second"], &[]).await;
+    save_paths(&app, &["/var/cache/first"]).await;
+    let saved = save_paths(&app, &["/var/cache/second"]).await;
 
     let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
 
-    assert!(written.contains("/home/ada/second"), "{written}");
+    assert!(written.contains("/var/cache/second"), "{written}");
     assert!(
-        !written.contains("/home/ada/first"),
+        !written.contains("/var/cache/first"),
         "the first save's list is gone: {written}"
     );
     assert!(
-        !written.contains("/var/cache/first"),
-        "and so is its bind: {written}"
-    );
-    assert!(
-        !written.contains(&installed.display().to_string()),
+        !written.contains(&bound.display().to_string()),
         "the installation's own was never in this file: {written}"
     );
 
-    // And it is still the boundary, because nothing here could have touched it.
-    let watched: Vec<_> = saved
-        .settings
-        .paths
-        .watched
-        .iter()
-        .map(|entry| entry.source.clone())
-        .collect();
-
-    assert_eq!(
-        watched,
-        vec![PathSource::Installation, PathSource::Settings]
-    );
+    // And it still stands, because nothing here could have touched it.
     assert_eq!(
         saved
             .settings
@@ -1335,8 +1230,8 @@ async fn a_save_replaces_the_settings_paths_and_leaves_the_installations() {
             .iter()
             .map(|entry| entry.source.clone())
             .collect::<Vec<_>>(),
-        vec![PathSource::Installation],
-        "the installation's bind stands and the settings' is gone"
+        vec![PathSource::Installation, PathSource::Settings],
+        "the installation's bind first, then the one this save wrote"
     );
 }
 
@@ -1352,7 +1247,6 @@ async fn save_rules(app: &Router, rules: serde_json::Value) -> SettingsSaved {
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
-            "watched_paths": [],
             "sandbox_binds": [],
             "ignored_comments": { "Set": { "rules": rules } },
         }),
@@ -1515,7 +1409,6 @@ async fn a_refused_save_writes_nothing_at_all() {
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
-            "watched_paths": [],
             "sandbox_binds": [],
             "ignored_comments": { "Set": { "rules": [rule("", "[oh")] } },
         }),

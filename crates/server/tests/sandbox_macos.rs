@@ -105,8 +105,8 @@ const SAYS_WHICH_SCCACHE: &str = "printf 'sccache 0.0.0-the-one-resolved\\n'\n";
 /// the one directory both it and this test can write to and read.
 const COMPILE_SERVER_REPORT: &str = "compile-server-report";
 
-/// A Conversation part-way through its first grilling: a Repo inside a Watched
-/// Path, a Profile to run as, and a worktree under Verkstead's own state
+/// A Conversation part-way through its first grilling: a Repo in a directory of
+/// its own, a Profile to run as, and a worktree under Verkstead's own state
 /// directory.
 ///
 /// Everything is real, for the reason the Linux fixture is: what the sandbox
@@ -115,7 +115,7 @@ const COMPILE_SERVER_REPORT: &str = "compile-server-report";
 struct Grilling {
     /// Kept alive for as long as the fixture is: the directories go when these
     /// drop, and a worktree that vanished mid-probe would fail obscurely.
-    watched: tempfile::TempDir,
+    elsewhere: tempfile::TempDir,
     state: tempfile::TempDir,
     home: tempfile::TempDir,
 
@@ -350,7 +350,7 @@ fi
     /// with something of the account's inside it — so that "the account is
     /// there" is a claim about a directory with contents.
     async fn codex_profile(&self) -> store::Profile {
-        let home = self.watched.path().join("codex-account/.codex");
+        let home = self.elsewhere.path().join("codex-account/.codex");
         std::fs::create_dir_all(&home).unwrap();
         std::fs::write(home.join("config.toml"), "# the account's own\n").unwrap();
 
@@ -360,7 +360,7 @@ fi
 
     /// And one of the third, whose account is one home as the second's is.
     async fn grok_profile(&self) -> store::Profile {
-        let home = self.watched.path().join("grok-account/.grok");
+        let home = self.elsewhere.path().join("grok-account/.grok");
         std::fs::create_dir_all(&home).unwrap();
         std::fs::write(home.join("user-settings.json"), "{}\n").unwrap();
 
@@ -372,7 +372,7 @@ fi
     /// directories opencode keeps an account in — made the way a human makes
     /// one, a `HOME=<it> opencode` run leaving exactly these.
     async fn opencode_profile(&self) -> store::Profile {
-        let home = self.watched.path().join("opencode-account/opencode");
+        let home = self.elsewhere.path().join("opencode-account/opencode");
         let config = home.join(".config/opencode");
         let data = home.join(".local/share/opencode");
 
@@ -439,7 +439,7 @@ async fn grilling() -> Grilling {
 /// checks them out: a read-write companion on a branch of its own, a read-only
 /// one detached at the commit its base resolved to.
 async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Grilling {
-    let watched = tempfile::tempdir().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
 
@@ -454,8 +454,8 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
     std::fs::create_dir_all(home.path().join(".ssh")).unwrap();
     std::fs::write(home.path().join(".ssh/id_ed25519"), "a private key\n").unwrap();
 
-    let repo = repository(watched.path().join("verkstead"));
-    let sibling = repository(watched.path().join("something-else"));
+    let repo = repository(elsewhere.path().join("verkstead"));
+    let sibling = repository(elsewhere.path().join("something-else"));
 
     let pool = store::open_database(&state.path().join("verkstead.db"))
         .await
@@ -466,8 +466,8 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
         .unwrap()
         .expect("the Repo registers");
 
-    let claude_dir = watched.path().join("account/.claude");
-    let config_file = watched.path().join("account/.claude.json");
+    let claude_dir = elsewhere.path().join("account/.claude");
+    let config_file = elsewhere.path().join("account/.claude.json");
     std::fs::create_dir_all(&claude_dir).unwrap();
     std::fs::write(claude_dir.join("settings.json"), "{}\n").unwrap();
     std::fs::write(&config_file, "{}\n").unwrap();
@@ -528,7 +528,7 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
     let mut checkouts = Vec::new();
 
     for (name, mode) in companions {
-        let path = repository(watched.path().join(name));
+        let path = repository(elsewhere.path().join(name));
         let registered = store::register_repo(&pool, &path, name, "main")
             .await
             .unwrap()
@@ -618,7 +618,7 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
         .expect("the executable was just written");
 
     Grilling {
-        watched,
+        elsewhere,
         state,
         home,
         repo,
@@ -888,13 +888,13 @@ async fn no_other_checkout_on_the_machine_is_reachable() {
         &format!(
             r#"
             dir {sibling} sibling
-            dir {watched} watched-path
+            dir {elsewhere} outside-path
             file {readme} repo-readme
             file {gitconfig} host-gitconfig
             file {key} host-key
             "#,
             sibling = quoted(&fixture.sibling),
-            watched = quoted(fixture.watched.path()),
+            elsewhere = quoted(fixture.elsewhere.path()),
             readme = quoted(&fixture.repo.join("README.md")),
             gitconfig = quoted(&fixture.home_path().join(".gitconfig")),
             key = quoted(&fixture.home_path().join(".ssh/id_ed25519")),
@@ -903,7 +903,7 @@ async fn no_other_checkout_on_the_machine_is_reachable() {
 
     assert_eq!(
         reported["sibling"], "refused",
-        "another repository under the same Watched Path is another \
+        "another repository in the same directory is another \
          Conversation's business"
     );
     assert_eq!(
@@ -920,8 +920,8 @@ async fn no_other_checkout_on_the_machine_is_reachable() {
         "and the machine's keys are nobody inside's"
     );
     assert_eq!(
-        reported["watched-path"], "refused",
-        "a Watched Path is where Verkstead may operate, not where a session may"
+        reported["outside-path"], "refused",
+        "where the Repo happens to live is not where a session may work"
     );
 }
 
@@ -1329,7 +1329,7 @@ async fn the_skills_inside_are_the_bundled_ones_and_only_those() {
 
     assert!(
         fixture
-            .watched
+            .elsewhere
             .path()
             .join("account/.claude/skills/the-accounts-own/SKILL.md")
             .is_file(),

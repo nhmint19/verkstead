@@ -78,9 +78,8 @@ mod merges;
 mod nudge;
 /// Telling a session idling on a stored ask that its Answers are there to fetch.
 mod nudging;
-/// Every Watched Path and every Sandbox Configuration bind as the settings page
-/// reads them: which of the two places said each one, and whether the server can
-/// see it.
+/// Every Sandbox Configuration bind as the settings page reads them: which of
+/// the two places said each one, and whether the server can see it.
 mod paths;
 /// The named pipe the server listens on beside its socket, which is the whole
 /// of what a sandboxed Windows session will have to ask through — an
@@ -188,7 +187,6 @@ mod typing;
 mod ui;
 mod updates;
 mod viewer;
-mod watched;
 mod worktrees;
 mod wrapping;
 
@@ -204,11 +202,6 @@ pub use github::Gh;
 /// How fast the backlog is worked, which is part of the same choice — see
 /// [`Agents::at_pace`].
 pub use runner::Pace;
-
-/// The security boundary every filesystem path is decided against. Public
-/// because starting the server is choosing what it may touch, and a caller
-/// standing up a router has to say so.
-pub use watched::{Admission, WatchedPaths};
 
 /// Persistence lives in its own crate so the viewer's endpoints can reach it
 /// without depending on the binary that links them. It is re-exported here
@@ -278,7 +271,6 @@ pub(crate) struct AppState {
     drivers: drivers::Drivers,
 
     updates: updates::Updates,
-    watched: WatchedPaths,
 
     /// And the Sandbox Configuration the installation was started with, which is
     /// here for the settings page rather than for a session: a session's binds
@@ -296,10 +288,9 @@ pub(crate) struct AppState {
     /// spawn see the same thing — see [`settings`].
     settings: settings::Settings,
 
-    /// Where Verkstead keeps what it makes — the worktrees, for now — which is
-    /// not a Watched Path and is not meant to be: the Watched Paths bound what
-    /// the human may point Verkstead at, and this is the directory Verkstead was
-    /// given for its own things.
+    /// Where Verkstead keeps what it makes — the worktrees, for now. Not one of
+    /// the directories the human points Verkstead at: this is the one Verkstead
+    /// was given for its own things.
     data_dir: PathBuf,
 
     /// Held across the window between a checkout being made and the record
@@ -345,7 +336,7 @@ const DATABASE_NAME: &str = "verkstead.db";
 /// not absolute.
 ///
 /// clap applies a delimiter to the flag as well as to the variable, so this is
-/// what `--watched-path` is parsed with too: wrong on Windows, it refuses
+/// what `--sandbox-bind` is parsed with too: wrong on Windows, it refuses
 /// every startup that names a real directory.
 #[cfg(windows)]
 const PATH_LIST_SEPARATOR: char = ';';
@@ -365,9 +356,9 @@ pub struct Config {
     /// Skills, the handoff directories and the settings files. Created if it
     /// does not exist.
     ///
-    /// This is the Data Directory. Not a Watched Path and not one to point at a
-    /// directory the human works in: the Watched Paths bound what Verkstead may
-    /// be pointed at, and this is Verkstead's own.
+    /// This is the Data Directory, and not one to point at a directory the
+    /// human works in: a Repo and an Agent Profile are what the human points
+    /// Verkstead at, and this is Verkstead's own.
     ///
     /// Unsaid, it is the platform's own place for it — `~/.local/share/verkstead`
     /// on Linux, `~/Library/Application Support/Verkstead` on macOS,
@@ -387,29 +378,6 @@ pub struct Config {
     /// from other devices.
     #[arg(long, env = "VERKSTEAD_LISTEN", default_value = "127.0.0.1:8422")]
     pub listen: SocketAddr,
-
-    /// A directory Verkstead may operate inside. Repeat the flag, or separate
-    /// several in the environment variable the way the platform writes `PATH` —
-    /// `:` on Unix, `;` on Windows.
-    ///
-    /// This is a security boundary and not a convenience: nothing outside these
-    /// directories is ever touched, and a Repo is registered only from within
-    /// one. There is no default and no scan — guessing at what a machine's owner
-    /// meant to expose is not a guess worth making.
-    ///
-    /// Nor is there a requirement. The workbench settings say Watched Paths too,
-    /// and the boundary is the union of the two — see [`WatchedPaths`] — so a
-    /// standalone install comes up with none of these, admits nothing at all,
-    /// and is pointed at its first directory from its own settings page. A
-    /// service unit goes on saying them here, where a directory that is not
-    /// there still refuses to start.
-    #[arg(
-        long = "watched-path",
-        env = "VERKSTEAD_WATCHED_PATHS",
-        value_delimiter = PATH_LIST_SEPARATOR,
-        value_name = "DIR"
-    )]
-    pub watched_paths: Vec<PathBuf>,
 
     /// An extra read-write bind every sandbox gets, or `name=DIR` for one only
     /// the Repo registered under that name gets. Repeat the flag, or separate
@@ -499,14 +467,13 @@ pub fn database(data_dir: &Path) -> PathBuf {
 /// Both live under `/api/`, which is also the one prefix the viewer's fallback
 /// refuses to answer with the document — see [`viewer`].
 ///
-/// Watching nothing, which is the closed state: no path is inside a Watched
-/// Path, so no Repo can be registered. That is what everything but the server
-/// itself and the Repo tests wants — see [`router_watching`] for the other one.
+/// Keeping nothing: it is given no Data Directory, so it has nowhere to put a
+/// worktree. That is what everything with no checkout to make wants — see
+/// [`router_keeping`] for the other one.
 pub fn router(pool: SqlitePool) -> Router {
     routed(
         pool,
         updates::Updates::nothing_learned(),
-        WatchedPaths::none(),
         nothing_bound(),
         nowhere(),
         sessions::Sessions::none(),
@@ -514,17 +481,15 @@ pub fn router(pool: SqlitePool) -> Router {
     )
 }
 
-/// The same, watching `watched` — which is what the path browser opens on — and
-/// keeping what it makes in `data_dir`.
+/// The same, keeping what it makes in `data_dir`.
 ///
 /// It runs no sessions: starting a grilling makes the branch and the worktree
 /// and records that it did, and there is nothing here to launch inside them.
 /// See [`router_running_sessions`] for the one that does.
-pub fn router_watching(pool: SqlitePool, watched: WatchedPaths, data_dir: PathBuf) -> Router {
+pub fn router_keeping(pool: SqlitePool, data_dir: PathBuf) -> Router {
     routed(
         pool,
         updates::Updates::nothing_learned(),
-        watched,
         nothing_bound(),
         data_dir,
         sessions::Sessions::none(),
@@ -532,9 +497,8 @@ pub fn router_watching(pool: SqlitePool, watched: WatchedPaths, data_dir: PathBu
     )
 }
 
-/// The same, over the whole of what the *installation* configured — the Watched
-/// Paths its flags named and the Sandbox Configuration binds beside them — and
-/// reaching GitHub through `gh`.
+/// The same, over what the *installation* configured — the Sandbox Configuration
+/// binds its flags named — and reaching GitHub through `gh`.
 ///
 /// What the settings endpoints are stood up over where the question is about
 /// paths: the page draws both sources at once and says which of the two said
@@ -542,7 +506,6 @@ pub fn router_watching(pool: SqlitePool, watched: WatchedPaths, data_dir: PathBu
 /// an installation as well as by a file — see [`paths`].
 pub fn router_installed(
     pool: SqlitePool,
-    watched: WatchedPaths,
     binds: sandbox::SandboxConfig,
     data_dir: PathBuf,
     gh: Gh,
@@ -550,7 +513,6 @@ pub fn router_installed(
     routed(
         pool,
         updates::Updates::nothing_learned(),
-        watched,
         binds,
         data_dir,
         sessions::Sessions::none(),
@@ -567,7 +529,6 @@ pub fn router_installed(
 /// one would be a test that needed a network and an account.
 pub fn router_running_sessions(
     pool: SqlitePool,
-    watched: WatchedPaths,
     data_dir: PathBuf,
     agents: Agents,
     gh: Gh,
@@ -580,7 +541,6 @@ pub fn router_running_sessions(
     routed(
         pool,
         updates::Updates::nothing_learned(),
-        watched,
         binds,
         data_dir,
         sessions::Sessions::under(agents),
@@ -599,7 +559,6 @@ pub fn router_asking_github(pool: SqlitePool, data_dir: PathBuf, gh: Gh) -> Rout
     routed(
         pool,
         updates::Updates::nothing_learned(),
-        WatchedPaths::none(),
         nothing_bound(),
         data_dir,
         sessions::Sessions::none(),
@@ -617,8 +576,8 @@ fn nothing_bound() -> sandbox::SandboxConfig {
 /// The data directory of a router that has no use for one.
 ///
 /// The empty path, which nothing is created in — and nothing tries: a router
-/// watching nothing can register no Repo, so it has no Conversation to start and
-/// no worktree to put anywhere.
+/// stood up for a question about neither a Conversation nor a checkout has no
+/// worktree to put anywhere.
 fn nowhere() -> PathBuf {
     PathBuf::new()
 }
@@ -635,7 +594,6 @@ pub fn router_checking_updates(pool: SqlitePool, releases: Option<&str>) -> Rout
     routed(
         pool,
         updates::watching(releases),
-        WatchedPaths::none(),
         nothing_bound(),
         nowhere(),
         sessions::Sessions::none(),
@@ -646,17 +604,18 @@ pub fn router_checking_updates(pool: SqlitePool, releases: Option<&str>) -> Rout
 fn routed(
     pool: SqlitePool,
     updates: updates::Updates,
-    watched: WatchedPaths,
     binds: sandbox::SandboxConfig,
     data_dir: PathBuf,
     sessions: sessions::Sessions,
     github: Gh,
 ) -> Router {
-    let settings = settings::Settings::in_data_dir(&data_dir);
-
     let state = AppState {
         pool,
-        settings: settings.clone(),
+
+        // A handle on the two files rather than what is in them: they are read
+        // at the moment they are wanted, so what the settings page saves reaches
+        // the next session without a restart — see [`settings`].
+        settings: settings::Settings::in_data_dir(&data_dir),
         nudges: nudge::Nudges::new(),
         settlements: Settlements::new(SETTLEMENT_BACKLOG),
         waits: Waits::new(),
@@ -666,12 +625,7 @@ fn routed(
         drivers: drivers::Drivers::new(),
         updates,
 
-        // The boundary the installation drew, widened by whatever the human has
-        // put in `config.yaml` — read at each admission rather than here, so a
-        // directory added on the settings page admits from the next request on.
-        watched: watched.reading(settings),
-
-        // And what the installation asked every sandbox to bind, kept whole for
+        // What the installation asked every sandbox to bind, kept whole for
         // the settings page: what a session gets is this composed with whatever
         // the file holds at the moment it spawns — see [`sandbox`].
         binds,
@@ -772,7 +726,6 @@ async fn health() -> &'static str {
 pub fn router_with_ui(
     pool: SqlitePool,
     releases: Option<&str>,
-    watched: WatchedPaths,
     data_dir: PathBuf,
     agents: Agents,
     gh: Gh,
@@ -784,7 +737,6 @@ pub fn router_with_ui(
     routed(
         pool,
         updates::watching(releases),
-        watched,
         binds,
         data_dir,
         sessions::Sessions::under(agents),
@@ -825,26 +777,20 @@ pub async fn run(config: Config) -> Result<()> {
 /// that has one bound it before there was a runtime to bind it on — see [`run`]
 /// for why the address is settled first.
 ///
-/// The installation's Watched Paths are resolved before anything else: a
-/// directory that is not there is a misconfiguration to report at startup,
-/// where it can be fixed, rather than one to discover as a refusal weeks later.
-/// Being given none of them is not a misconfiguration — the settings file says
-/// Watched Paths too, and a standalone install starts with nothing configured
-/// anywhere and admits nothing until it is.
+/// A bare `verkstead serve` is configured by nobody and comes up all the same:
+/// there is nothing here that has to be said before the server can be reached,
+/// and everything that *was* said is resolved before it is served over.
 pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<()> {
-    let watched = WatchedPaths::resolve(&config.watched_paths)?;
-
-    // Both resolved at startup for the reason the Watched Paths are: a bind that
-    // names nothing, and a HOME the unit never said, are misconfigurations to
-    // report now rather than sessions that fail to start weeks later with nobody
-    // watching. The home is where a sandbox reads who git commits as, and it is
-    // what `~` means inside one, so a server without one can run no session at
-    // all.
+    // Resolved at startup: a bind that names nothing, and a HOME the unit never
+    // said, are misconfigurations to report now rather than sessions that fail
+    // to start weeks later with nobody watching. The home is where a sandbox
+    // reads who git commits as, and it is what `~` means inside one, so a server
+    // without one can run no session at all.
     let binds = sandbox::SandboxConfig::resolve(&config.sandbox_binds)?;
 
-    // Resolved and then made at startup, for the reason the Watched Paths are
-    // resolved at startup: a machine with nowhere to keep a Data Directory, and
-    // a directory Verkstead cannot write to, are misconfigurations to report now
+    // Resolved and then made at startup, for the reason the binds are resolved
+    // at startup: a machine with nowhere to keep a Data Directory, and a
+    // directory Verkstead cannot write to, are misconfigurations to report now
     // rather than ones to discover as a failed grilling weeks later. Where the
     // flag said nothing this is the platform's own directory — see
     // [`platform::data_dir`] — so the startup line below is now the only place a
@@ -855,9 +801,9 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
 
     // And where a session's HOME comes from, which wants the Data Directory
     // above on the platform that makes a real one under it — see
-    // [`sandbox::Homes`]. Refused for the reason the Watched Paths are: a HOME
-    // the unit never said is a misconfiguration to report now rather than a
-    // session that fails to start weeks later with nobody watching.
+    // [`sandbox::Homes`]. Refused for the reason the binds are: a HOME the unit
+    // never said is a misconfiguration to report now rather than a session that
+    // fails to start weeks later with nobody watching.
     let homes = sandbox::Homes::of_the_server(&data_dir).with_context(|| {
         format!(
             "no {} is set: a session's `~` is the home directory of whoever runs Verkstead, \
@@ -955,8 +901,6 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
         listen = %config.listen,
         data_dir = %data_dir.display(),
         update_check = config.releases().is_some(),
-        watched = ?watched.paths(),
-        settings_watched = ?settings.config().watched_paths(),
         home = %homes.servers().display(),
         sandbox_binds = binds.count(),
         build_cache = ?cache.dir(),
@@ -987,7 +931,6 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
     let app = router_with_ui(
         pool,
         config.releases(),
-        watched,
         data_dir,
         Agents::new(
             homes,

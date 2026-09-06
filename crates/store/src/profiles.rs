@@ -23,8 +23,8 @@
 //! An account's paths are stored resolved, as a Repo's is and for the same
 //! reason: whoever saved the Profile had `..` and every symlink taken out of
 //! them before they arrived, so what is recorded is what the filesystem means
-//! rather than what somebody typed. Whether they are inside a Watched Path is
-//! decided above the store, where the boundary lives.
+//! rather than what somebody typed. Whether they are of the shape their harness
+//! wants is decided above the store, where the reading lives.
 //!
 //! The agent type is a column, and it is what says which shape a row's account
 //! is written in — the launch line's flags and the asking channel are keyed on
@@ -302,8 +302,8 @@ impl Picked {
     /// there is to be none.
     ///
     /// Says nothing about whether a Pairing that was picked is still something
-    /// to run: whether its Profile's pair is where it was left is read against
-    /// the Watched Paths, which is above the store.
+    /// to run: whether its Profile's pair is where it was left is read off the
+    /// filesystem, which is above the store.
     pub fn picked(&self) -> bool {
         !matches!(self, Self::Nothing)
     }
@@ -402,7 +402,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 }
 
 /// Record a Profile, which is expected to have been checked already: that its
-/// pair exists and sits inside the Watched Paths is decided above the store.
+/// pair exists and is of its harness's shape is decided above the store.
 ///
 /// `None` means another Profile is called that.
 pub async fn create_profile(pool: &SqlitePool, facts: &ProfileFacts) -> Result<Option<Profile>> {

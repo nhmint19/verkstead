@@ -2,12 +2,12 @@
 //! the write they both make, and the rows and the field they are both drawn as.
 //!
 //! There are two of those places because a bind belongs where the thing it is
-//! for is. The watched paths and the binds every sandbox gets are the Paths
-//! section — see `Paths.tsx` — and a bind scoped to one Repo is on that Repo's
-//! own pane, where somebody looking at the repository will meet it. What they
-//! are editing is one file either way, so what they are editing it *with* is one
-//! set of parts: two copies would be two accounts of what an entry is and two
-//! places for the wording of a row to drift.
+//! for is. The binds every sandbox gets are the Paths section — see
+//! `Paths.tsx` — and a bind scoped to one Repo is on that Repo's own pane,
+//! where somebody looking at the repository will meet it. What they are editing
+//! is one file either way, so what they are editing it *with* is one set of
+//! parts: two copies would be two accounts of what an entry is and two places
+//! for the wording of a row to drift.
 //!
 //! Every row says the same three things wherever it is drawn. What it names;
 //! whose it is, where that is the installation's, because a unit's word is not
@@ -42,7 +42,6 @@ import type {
   PathSource,
   SettingsSaved,
   SettingsView,
-  WatchedPathEntry,
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty } from "../notices";
@@ -60,8 +59,8 @@ export function useSettings() {
   }));
 }
 
-/// One entry of either list as it is drawn: what the server said about it, and
-/// where it stands among the settings' *own* entries of that list.
+/// One entry of the list as it is drawn: what the server said about it, and
+/// where it stands among the settings' *own* entries of it.
 ///
 /// The second is what a Remove sends, and it is not where the row stands on the
 /// page: the installation's entries are interleaved with them, and one pane's
@@ -95,12 +94,9 @@ export function unresolved(resolution: PathResolution): string | null {
 }
 
 /// Which Repo an entry is written against, or `null` where it is written
-/// against none — a bind every sandbox gets, or a watched path, which is not
-/// written against a Repo at all.
-export function writtenFor(
-  entry: WatchedPathEntry | BindEntry,
-): string | null {
-  return "repo" in entry ? entry.repo : null;
+/// against none, which is a bind every sandbox gets.
+export function writtenFor(entry: BindEntry): string | null {
+  return entry.repo;
 }
 
 /// A list with the entry standing at `at` taken out of it.
@@ -111,22 +107,21 @@ export function without(entries: string[], at: number): string[] {
 /// The settings read, and the one write every press on either pane makes.
 ///
 /// One request writes the whole of `config.yaml`, so a save carries every value
-/// in it and the caller rewrites the one list it is about — `writeWatched` and
-/// `writeBinds` are that, each riding the other list along as it stands. The
-/// author, the token, the build cache and the share-on-Done switch ride along
-/// the same way: what is sent is what the file holds afterwards, so a list or a
-/// value left out would be one emptied.
+/// in it and the caller rewrites the binds it is about — `writeBinds` is that.
+/// The author, the token, the build cache and the share-on-Done switch ride
+/// along the same way: what is sent is what the file holds afterwards, so a
+/// list or a value left out would be one emptied.
 export function useWritingPaths() {
   const queries = useQueryClient();
   const settings = useSettings();
 
   const told = (): SettingsView | undefined => settings.data;
 
-  /// The settings' own entries of both lists, as the strings a save sends back.
+  /// The settings' own entries of the list, as the strings a save sends back.
   const held = () => heldPaths(told());
 
   const save = useMutation(() => ({
-    mutationFn: (lists: { watched_paths: string[]; sandbox_binds: string[] }) => {
+    mutationFn: (lists: { sandbox_binds: string[] }) => {
       const standing = told();
 
       return saveSettings({
@@ -165,16 +160,13 @@ export function useWritingPaths() {
     told,
     held,
     save,
-    writeWatched: (watched_paths: string[]) =>
-      save.mutate({ watched_paths, sandbox_binds: held().sandbox_binds }),
-    writeBinds: (sandbox_binds: string[]) =>
-      save.mutate({ watched_paths: held().watched_paths, sandbox_binds }),
+    writeBinds: (sandbox_binds: string[]) => save.mutate({ sandbox_binds }),
   };
 }
 
 /// One list's rows, or the line that says it has none.
 export function Rows(props: {
-  rows: Row<WatchedPathEntry | BindEntry>[];
+  rows: Row<BindEntry>[];
   /// What is said where the list is empty.
   none: string;
   /// Whether a save is in flight, which is what stops a second press landing on
@@ -262,10 +254,9 @@ export function Rows(props: {
 /// had, which is a look at what is actually there — and that is exactly what
 /// somebody answering the workbench from a phone cannot do for themselves.
 ///
-/// Anywhere rather than inside the Watched Paths, for all three of them. A
-/// watched path is how that boundary is *said*, so a field bounded by it could
-/// only ever offer what is already watched; and a bind is a directory the
-/// boundary has nothing to say about at all.
+/// Anywhere the server can read, which is what every path field in the
+/// workbench is: a bind names somebody else's directory, and there was never a
+/// rule about where one could be.
 export function Adding(props: {
   /// What the field is called on the page, and what its label points at.
   id: string;

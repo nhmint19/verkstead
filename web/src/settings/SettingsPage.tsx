@@ -9,10 +9,10 @@
 //! folded together they are sections of one pane, read down in the order a
 //! fresh install needs them: credentials first, because without them nothing a
 //! session does with a Repo can be pushed, then the shared Rust build cache
-//! every session builds into, then where the share viewer is hosted, then the
-//! paths Verkstead may work inside at all, then how a conflicted pull request
-//! is resolved, then what becomes of a Conversation once it is archived, then
-//! the Agent Profiles and the Repos a Conversation is settled against.
+//! every session builds into, then where the share viewer is hosted, then how a
+//! conflicted pull request is resolved, then what becomes of a Conversation
+//! once it is archived, then the Agent Profiles and the Repos a Conversation is
+//! settled against, and last the extra directories a sandbox is given.
 //!
 //! The conversations pane rides along because it is the app's navigation rather
 //! than the workbench's furniture: configuring a machine is something done
@@ -224,15 +224,6 @@ function Settings(props: {
           open={props.opening === "build-cache"}
           press={() => props.select("build-cache")}
         />
-        {/* The one thing here under the lists rather than beside them: where
-            Verkstead may work at all, and what a session is given beyond its
-            worktree. Under the two above because it is what a Repo is
-            registered from — a machine with no watched path has nothing to put
-            on that list. */}
-        <PathsCard
-          open={props.opening === "paths"}
-          press={() => props.select("paths")}
-        />
         {/* And the last thing Verkstead itself was told: what a session sent at
             a pull request that will not merge is told to do about it. Last
             because it is the one nobody has to read — what it does with nothing
@@ -266,6 +257,15 @@ function Settings(props: {
           opening={repoOpened(props.opening)}
           open={(id) => props.select(opensRepo(id))}
           add={() => props.select(opensRepo("new"))}
+        />
+        {/* Last of the lot, under the Repos: it holds the extra directories a
+            session is given beyond its own worktree, which is the one thing
+            here nobody has to say anything about at all. It sat above the lists
+            while a Watched Path was what a Repo was registered from; with the
+            binds alone in it, that reason is gone and nothing replaces it. */}
+        <PathsCard
+          open={props.opening === "paths"}
+          press={() => props.select("paths")}
         />
       </div>
     </>

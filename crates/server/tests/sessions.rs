@@ -84,7 +84,7 @@ use verkstead_server::platform::Platform;
 use verkstead_server::sandbox::{Executable, Homes, Reachable, SandboxConfig};
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
-use verkstead_server::{Agents, Gh, Pace, WatchedPaths, open_database, router_running_sessions};
+use verkstead_server::{Agents, Gh, Pace, open_database, router_running_sessions};
 use verkstead_store::Decision;
 
 /// The Brief every Conversation here is started from, and what the stub agent
@@ -182,7 +182,7 @@ fn equipped(data_dir: &Path) -> Option<Executable> {
 struct Grilling {
     /// Dropped last, and only these keep the directories alive: a worktree that
     /// vanished mid-session would fail obscurely.
-    _watched: tempfile::TempDir,
+    _elsewhere: tempfile::TempDir,
     home: tempfile::TempDir,
     state: tempfile::TempDir,
 
@@ -205,11 +205,11 @@ struct Grilling {
 impl Grilling {
     /// The registered repository this Conversation is against.
     ///
-    /// [`bench_at_pace`] puts it at one place under the watched directory and
+    /// [`bench_at_pace`] puts it at one place under a directory of its own and
     /// the fixture keeps that directory alive, so where it is is a fact about
     /// the bench rather than something to thread through.
     fn repo(&self) -> PathBuf {
-        self._watched.path().join("verkstead")
+        self._elsewhere.path().join("verkstead")
     }
 
     /// And the home the OpenCode Profile this bench saved keeps its account in.
@@ -219,7 +219,7 @@ impl Grilling {
     /// rather than something to thread through — the same bargain
     /// [`Grilling::repo`] makes.
     fn opencode_account(&self) -> PathBuf {
-        self._watched.path().join("opencode").join(".opencode")
+        self._elsewhere.path().join("opencode").join(".opencode")
     }
 
     /// The Conversation as the workbench reads it.
@@ -420,7 +420,6 @@ impl Grilling {
     async fn restarted(&self, stub: &str, gh: &str) -> Router {
         router_running_sessions(
             open_database(&self.database).await.unwrap(),
-            WatchedPaths::none(),
             self.state.path().to_owned(),
             Agents::running(
                 vec!["/bin/sh".to_owned(), "-c".to_owned(), stub.to_owned()],
@@ -2311,7 +2310,7 @@ async fn grilling_however_started(
 /// Brief and grills, and the other adopts a roadmap the repository already
 /// holds — see [`adopting`].
 struct Bench {
-    watched: tempfile::TempDir,
+    elsewhere: tempfile::TempDir,
     state: tempfile::TempDir,
     home: tempfile::TempDir,
     spill: tempfile::TempDir,
@@ -2337,7 +2336,7 @@ impl Bench {
     /// move off this one without moving off the Profile.
     async fn under_every_pairing(&self, id: i64) {
         for role in ["grilling", "implementation", "review"] {
-            let profile = profile(&self.app, self.watched.path(), role).await;
+            let profile = profile(&self.app, self.elsewhere.path(), role).await;
             let pairing = serde_json::json!({
                 "profile_id": profile,
                 "model": format!("claude-{role}-5"),
@@ -2474,7 +2473,7 @@ impl Bench {
         models: &[&str],
         roles: &[(&str, &str)],
     ) {
-        let home = self.watched.path().join(name).join(format!(".{name}"));
+        let home = self.elsewhere.path().join(name).join(format!(".{name}"));
         std::fs::create_dir_all(&home).unwrap();
 
         for directory in inside {
@@ -2554,14 +2553,14 @@ impl Bench {
         assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
     }
 
-    /// Register a second repository under the watched directory, and hand back
+    /// Register a second repository under the same directory, and hand back
     /// the id a Conversation would add it as a companion by.
     ///
     /// A repository of its own rather than a checkout of this one: what a
     /// companion is, is another registered Repo, and two Repos over one
     /// directory is a different thing entirely.
     async fn register(&self, name: &str) -> i64 {
-        let path = repository(self.watched.path().join(name));
+        let path = repository(self.elsewhere.path().join(name));
         let registered: Registered = post(
             &self.app,
             "/api/ui/repos",
@@ -2582,7 +2581,7 @@ impl Bench {
     /// The fixture the tests read, once there is a Conversation running in it.
     fn holding(self, id: i64) -> Grilling {
         Grilling {
-            _watched: self.watched,
+            _elsewhere: self.elsewhere,
             home: self.home,
             state: self.state,
             spill: self.spill,
@@ -2642,7 +2641,7 @@ async fn bench_at_pace(
         .await
         .expect("the suite's room is never closed");
 
-    let watched = tempfile::tempdir().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
 
@@ -2678,15 +2677,9 @@ async fn bench_at_pace(
         None => agents,
     };
 
-    let app = router_running_sessions(
-        pool,
-        WatchedPaths::resolve(&[watched.path().to_owned()]).unwrap(),
-        state.path().to_owned(),
-        agents,
-        gh_stub(gh),
-    );
+    let app = router_running_sessions(pool, state.path().to_owned(), agents, gh_stub(gh));
 
-    let repo = repository(watched.path().join("verkstead"));
+    let repo = repository(elsewhere.path().join("verkstead"));
     let registered: Registered =
         post(&app, "/api/ui/repos", &serde_json::json!({ "path": repo })).await;
     assert_eq!(registered, Registered::Added);
@@ -2695,7 +2688,7 @@ async fn bench_at_pace(
     let repo_id = repos[0].id;
 
     Bench {
-        watched,
+        elsewhere,
         state,
         home,
         spill,
@@ -2856,16 +2849,16 @@ fn handoff(view: &ConversationView) -> Option<&verkstead_render::HandoffEvent> {
     })
 }
 
-/// An Agent Profile saved from a pair inside `watched`, on models that are
+/// An Agent Profile saved from a pair inside `root`, on models that are
 /// worth reading back.
 ///
 /// Two of them, `claude-<name>-5` and `claude-<name>-4.8`. The first is what
 /// every Conversation here is paired with; the second is there so that a pick
 /// can change the *model* under a Profile that does not change, which is a
 /// different pick and not the same one made twice.
-async fn profile(app: &Router, watched: &Path, name: &str) -> i64 {
-    let claude_dir = watched.join(name).join(".claude");
-    let config_file = watched.join(name).join(".claude.json");
+async fn profile(app: &Router, root: &Path, name: &str) -> i64 {
+    let claude_dir = root.join(name).join(".claude");
+    let config_file = root.join(name).join(".claude.json");
     std::fs::create_dir_all(&claude_dir).unwrap();
     std::fs::write(&config_file, "{}\n").unwrap();
 
@@ -3423,7 +3416,7 @@ async fn a_session_is_named_before_it_starts_and_writes_its_log_under_that_name(
     );
 
     let log = fixture
-        ._watched
+        ._elsewhere
         .path()
         .join("grilling/.claude/projects/stub")
         .join(format!("{name}.jsonl"));
@@ -5028,7 +5021,6 @@ async fn a_capture_survives_the_server_restarting() {
     // restart is from the store's side of things.
     let restarted = router_running_sessions(
         open_database(&fixture.database).await.unwrap(),
-        WatchedPaths::none(),
         fixture.state.path().to_owned(),
         Agents::running(
             vec!["/bin/sh".to_owned(), "-c".to_owned(), "true".to_owned()],
@@ -7183,7 +7175,6 @@ async fn a_restarted_server_watches_the_checks_it_was_left_wrapping_up() {
 
     let _restarted = router_running_sessions(
         open_database(&fixture.database).await.unwrap(),
-        WatchedPaths::none(),
         fixture.state.path().to_owned(),
         Agents::running(
             vec!["/bin/sh".to_owned(), "-c".to_owned(), "true".to_owned()],

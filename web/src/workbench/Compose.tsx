@@ -245,7 +245,7 @@ function Compose(props: {
   // Asked of the server rather than worked out here, for the reason the server
   // holds the memory at all: the workbench is answered from a phone as readily
   // as from a desk, and every judgement about whether a remembered pairing still
-  // runs is made where the profiles and the watched paths are.
+  // runs is made where the profiles and the repositories are.
   const remembered = useReading(() => ({
     queryKey: ["repos", on(state()), "pairings"],
     queryFn: () => loadRepoPairings(on(state())!),

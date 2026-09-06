@@ -70,8 +70,8 @@ const SAYS_WHICH_SCCACHE: &str = "printf 'sccache 0.0.0-the-one-resolved\\n'\n";
 /// the one directory both it and this test can write to and read.
 const COMPILE_SERVER_REPORT: &str = "compile-server-report";
 
-/// A Conversation part-way through its first grilling: a Repo inside a Watched
-/// Path, a Profile to run as, and a worktree under Verkstead's own state
+/// A Conversation part-way through its first grilling: a Repo in a directory of
+/// its own, a Profile to run as, and a worktree under Verkstead's own state
 /// directory.
 ///
 /// Everything is real. The repository is a repository, the worktree is one git
@@ -81,7 +81,7 @@ const COMPILE_SERVER_REPORT: &str = "compile-server-report";
 struct Grilling {
     /// Kept alive for as long as the fixture is: the directories go when these
     /// drop, and a worktree that vanished mid-probe would fail obscurely.
-    watched: tempfile::TempDir,
+    elsewhere: tempfile::TempDir,
     state: tempfile::TempDir,
     home: tempfile::TempDir,
 
@@ -356,11 +356,11 @@ fi
     /// What the fixture's own Claude Profile names: the directory half of the
     /// account, and the file half.
     fn claude_dir(&self) -> PathBuf {
-        self.watched.path().join("account/.claude")
+        self.elsewhere.path().join("account/.claude")
     }
 
     fn claude_config(&self) -> PathBuf {
-        self.watched.path().join("account/.claude.json")
+        self.elsewhere.path().join("account/.claude.json")
     }
 
     /// Write `secrets.yaml` as the settings page would, so that the sandboxes
@@ -377,12 +377,12 @@ fi
 
     /// A Profile of the second agent type, whose whole account is one home.
     ///
-    /// Saved into the same store the fixture's own was, with a home inside the
-    /// Watched Path holding something of the account's — so that "the home is
+    /// Saved into the same store the fixture's own was, with a home beside the
+    /// repository holding something of the account's — so that "the home is
     /// bound" is a claim about a directory with contents rather than about an
     /// empty one.
     async fn codex_profile(&self) -> store::Profile {
-        let home = self.watched.path().join("codex-account/.codex");
+        let home = self.elsewhere.path().join("codex-account/.codex");
         std::fs::create_dir_all(&home).unwrap();
         std::fs::write(home.join("config.toml"), "# the account's own\n").unwrap();
 
@@ -406,7 +406,7 @@ fi
     /// anything inside such a home (ADR-0011), and what would be hidden if
     /// something were is the skills grok itself ships.
     async fn grok_profile(&self) -> store::Profile {
-        let home = self.watched.path().join("grok-account/.grok");
+        let home = self.elsewhere.path().join("grok-account/.grok");
         std::fs::create_dir_all(home.join("skills/the-accounts-own")).unwrap();
         std::fs::write(
             home.join("skills/the-accounts-own/SKILL.md"),
@@ -437,7 +437,7 @@ fi
     /// the Profile names, and its two global paths are under HOME, where a
     /// fresh sandbox has nothing at all.
     async fn opencode_profile(&self) -> store::Profile {
-        let home = self.watched.path().join("opencode-account/opencode");
+        let home = self.elsewhere.path().join("opencode-account/opencode");
         let config = home.join(".config/opencode");
         let data = home.join(".local/share/opencode");
 
@@ -501,7 +501,7 @@ async fn grilling() -> Grilling {
 /// checks them out: a read-write companion on a branch of its own, a read-only
 /// one detached at the commit its base resolved to.
 async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Grilling {
-    let watched = tempfile::tempdir().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
 
@@ -544,8 +544,8 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
     )
     .unwrap();
 
-    let repo = repository(watched.path().join("verkstead"));
-    let sibling = repository(watched.path().join("something-else"));
+    let repo = repository(elsewhere.path().join("verkstead"));
+    let sibling = repository(elsewhere.path().join("something-else"));
 
     let pool = store::open_database(&state.path().join("verkstead.db"))
         .await
@@ -556,8 +556,8 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
         .unwrap()
         .expect("the Repo registers");
 
-    let claude_dir = watched.path().join("account/.claude");
-    let config_file = watched.path().join("account/.claude.json");
+    let claude_dir = elsewhere.path().join("account/.claude");
+    let config_file = elsewhere.path().join("account/.claude.json");
     std::fs::create_dir_all(&claude_dir).unwrap();
     std::fs::write(claude_dir.join("settings.json"), "{}\n").unwrap();
     std::fs::write(&config_file, "{}\n").unwrap();
@@ -620,7 +620,7 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
     let mut checkouts = Vec::new();
 
     for (name, mode) in companions {
-        let path = repository(watched.path().join(name));
+        let path = repository(elsewhere.path().join(name));
         let registered = store::register_repo(&pool, &path, name, "main")
             .await
             .unwrap()
@@ -712,7 +712,7 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
         .expect("the executable was just written");
 
     Grilling {
-        watched,
+        elsewhere,
         state,
         home,
         repo,
@@ -1368,7 +1368,7 @@ async fn an_account_that_is_one_directory_is_joined_into_the_profile_too() {
 
     assert!(
         fixture
-            .watched
+            .elsewhere
             .path()
             .join("codex-account/.codex/auth.json")
             .exists(),
@@ -2188,10 +2188,10 @@ async fn no_other_checkout_on_the_machine_is_reachable() {
             r#"
             dir {sibling} sibling
             file {readme} repo-readme
-            say watched-holds "$(ls -A {watched} | sort | tr '\n' ' ')"
+            say outside-holds "$(ls -A {elsewhere} | sort | tr '\n' ' ')"
             say repo-holds "$(ls -A {repo} | sort | tr '\n' ' ')"
             "#,
-            watched = quoted(fixture.watched.path()),
+            elsewhere = quoted(fixture.elsewhere.path()),
             repo = quoted(&fixture.repo),
             sibling = quoted(&fixture.sibling),
             readme = quoted(&fixture.repo.join("README.md")),
@@ -2200,7 +2200,7 @@ async fn no_other_checkout_on_the_machine_is_reachable() {
 
     assert_eq!(
         reported["sibling"], "absent",
-        "another repository under the same Watched Path is another Conversation's business"
+        "another repository in the same directory is another Conversation's business"
     );
     assert_eq!(
         reported["repo-readme"], "absent",
@@ -2208,12 +2208,12 @@ async fn no_other_checkout_on_the_machine_is_reachable() {
     );
 
     // A bind's parent directories have to exist for it to land on, so the
-    // Watched Path is inside as a scaffold: empty tmpfs directories holding
-    // nothing but what was deliberately bound, and writing in them writes
-    // nothing the host will ever see.
+    // directory the repository is in is inside as a scaffold: empty tmpfs
+    // directories holding nothing but what was deliberately bound, and writing
+    // in them writes nothing the host will ever see.
     assert_eq!(
-        reported["watched-holds"], "verkstead ",
-        "nothing under a Watched Path arrives except by being bound — and the \
+        reported["outside-holds"], "verkstead ",
+        "nothing around the Repo arrives except by being bound — and the \
          Profile's pair arrives in HOME rather than where it lives"
     );
     assert_eq!(

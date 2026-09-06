@@ -1,19 +1,17 @@
-//! The paths on the settings page: the directories Verkstead may be pointed at,
-//! and the extra directories every sandbox is given.
+//! The paths on the settings page: the extra directories every sandbox is
+//! given, over and above the worktree a session works in.
 //!
-//! Both are said in two places — the installation's flags or environment, and
-//! `config.yaml` — and Verkstead goes by the union of the two. So both are drawn
+//! They are said in two places — the installation's flags or environment, and
+//! `config.yaml` — and a session gets the union of the two. So both are drawn
 //! here, and each row says which of the two said it: the installation's are the
 //! unit's word and there is nothing on a phone that could rewrite a unit, so
 //! they are read-only wherever they appear, and only the settings' own are added
 //! and taken away.
 //!
-//! What makes this section worth having at all is the standalone install: a bare
-//! binary comes up with nothing configured anywhere, admits nothing, and is
-//! pointed at its first directory from here. That is the state the pane opens in
-//! on a fresh machine, and it says what it costs — nothing can be registered
-//! until a Watched Path exists — because a page that drew two empty lists would
-//! be a page that looked finished.
+//! An empty list is the ordinary state rather than a machine half set up: a
+//! session reaches its own worktree, its Repo's git directory and its Profile's
+//! account without anything being said here, and a bind is what somebody adds
+//! when one needs a package registry or a cache beyond that.
 //!
 //! Every row reports whether the server can currently see what it names, which
 //! is the one thing a human cannot check from a phone. A directory nobody has
@@ -24,7 +22,7 @@
 //! that sentence is how somebody learns the installer has to widen the unit
 //! before what they saved can work.
 //!
-//! The card counts every one of those, including the ones on a Repo's pane
+//! The card counts every one of them, including the ones on a Repo's pane
 //! rather than on this one. A bind that has quietly stopped resolving is exactly
 //! what nobody goes looking for, so the one warning there is has to be where
 //! somebody scanning the settings will meet it — and it says which pane to open,
@@ -45,8 +43,8 @@
 //! ones, each saying which name it was written for and that nothing holds it.
 //!
 //! Two halves in two panes, like every other section: a card in the middle pane
-//! saying how the two lists stand and whether anything is wrong with them, and
-//! the editing in the details pane it opens, at `/settings/paths`. Both read the
+//! saying how the list stands and whether anything is wrong with it, and the
+//! editing in the details pane it opens, at `/settings/paths`. Both read the
 //! one settings query the sections above them read.
 //!
 //! A row saves on its own press. Adding one is the Add beside the field and
@@ -107,7 +105,7 @@ function drawn(
   );
 }
 
-/// How many entries either list holds that name something the server cannot
+/// How many entries the list holds that name something the server cannot
 /// currently see — whoever said them, because the installation's own go stale
 /// the same way a settings row does.
 ///
@@ -117,9 +115,8 @@ function drawn(
 /// phone — so a count that skipped it would leave the only warning there is on a
 /// pane nobody opens unless they already suspect something.
 function unseen(paths: PathsView | undefined): number {
-  const rows = [...(paths?.watched ?? []), ...(paths?.binds ?? [])];
-
-  return rows.filter((entry) => unresolved(entry.resolution)).length;
+  return (paths?.binds ?? []).filter((entry) => unresolved(entry.resolution))
+    .length;
 }
 
 /// What the card says about them: how many, and where to go and read why.
@@ -149,8 +146,8 @@ function counted(many: number, one: string, more: string): string {
 /// The paths as they stand, as the card that opens them.
 ///
 /// What is on the card is what somebody scanning the page is after: how much of
-/// each list stands, and whether anything about it wants doing — which is either
-/// no Watched Path at all, or an entry that is saved and does nothing.
+/// the list stands, and whether anything about it wants doing — which is an
+/// entry that is saved and does nothing.
 export function PathsCard(props: {
   /// Whether the pane beside this is the one that is open.
   open: boolean;
@@ -179,29 +176,18 @@ export function PathsCard(props: {
           >
             <h2>Paths</h2>
 
-            {/* The state a fresh standalone install opens in, and what it costs
-                said with it: a boundary around nothing admits nothing, so there
-                is no repo to register and nothing to start work on. */}
-            <Show when={paths().watched.length === 0}>
-              <p class={styles.warning}>
-                No watched path is configured, so no repo can be registered —
-                Verkstead touches nothing on disk until one is.
-              </p>
-            </Show>
-
-            {/* And the other thing the browser can see and the human cannot: a
-                row that is saved, is in the file, and does nothing, because what
-                it names is not where the server is looking. Counted wherever it
-                is drawn, because a bind on a Repo's pane goes stale unwatched
-                the same way one here does. */}
+            {/* The one thing the browser can see and the human cannot: a row
+                that is saved, is in the file, and does nothing, because what it
+                names is not where the server is looking. Counted wherever it is
+                drawn, because a bind on a Repo's pane goes stale unwatched the
+                same way one here does. */}
             <Show when={unseen(paths()) > 0}>
               <p class={styles.warning}>{unseenSays(paths())}</p>
             </Show>
 
             <p class={styles.standing}>
-              {counted(paths().watched.length, "watched path", "watched paths")}
-              , and {counted(global(paths()).length, "bind", "binds")} every
-              sandbox gets.
+              {counted(global(paths()).length, "bind", "binds")} every sandbox
+              gets.
             </p>
           </CardButton>
         )}
@@ -210,7 +196,7 @@ export function PathsCard(props: {
   );
 }
 
-/// And the two lists themselves, which is the details pane the card opens.
+/// And the list itself, which is the details pane the card opens.
 ///
 /// There is no Save over the whole of it and no Cancel: each row is its own
 /// press, and a details pane is left by opening something else or by the way
@@ -219,8 +205,7 @@ export function PathsPane(props: {
   /// The way back to the settings, which is the pane this one was entered from.
   back: () => void;
 }): JSX.Element {
-  const { settings, told, held, save, writeWatched, writeBinds } =
-    useWritingPaths();
+  const { settings, told, held, save, writeBinds } = useWritingPaths();
 
   // And which Repos are registered, which is the only thing that tells a bind
   // written for one from a stray — see [`drawn`]. `undefined` while the read is
@@ -247,45 +232,6 @@ export function PathsPane(props: {
         <Match when={told()?.paths}>
           {(paths) => (
             <div class={styles.paths}>
-              <section class={styles.list}>
-                <h2>Watched paths</h2>
-
-                <Note>
-                  The directories Verkstead may operate inside. A repo is
-                  registered only from within one, and nothing outside every
-                  watched path is touched.
-                </Note>
-
-                {/* What a fresh standalone install opens on, said with what it
-                    costs: an empty list on its own would read as a page with
-                    nothing left to ask for. */}
-                <Show when={paths().watched.length === 0}>
-                  <p class={styles.warning}>
-                    No watched path is configured anywhere, so nothing can be
-                    registered. Add the directory your repositories are in.
-                  </p>
-                </Show>
-
-                <Rows
-                  rows={rowed(paths().watched)}
-                  none="No watched paths."
-                  saving={save.isPending}
-                  remove={(at) =>
-                    writeWatched(without(held().watched_paths, at))
-                  }
-                />
-
-                <Adding
-                  id="watched-path"
-                  label="Add a watched path"
-                  placeholder="/home/you/src"
-                  saving={save.isPending}
-                  add={(path) =>
-                    writeWatched([...held().watched_paths, path])
-                  }
-                />
-              </section>
-
               <section class={styles.list}>
                 <h2>Sandbox binds</h2>
 

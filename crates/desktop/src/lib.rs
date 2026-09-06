@@ -81,9 +81,9 @@ pub const APP_ID: &str = "net.tobico.Verkstead";
 /// How the desktop app is started.
 ///
 /// One flag of its own, and the server's own beneath it: the app *is* the
-/// server, so what points it at a Data Directory, an address and a Watched Path
-/// is what points `verkstead serve` at them, said the same way and read from the
-/// same environment. Nothing here resolves a directory — started with nothing
+/// server, so what points it at a Data Directory and an address is what points
+/// `verkstead serve` at them, said the same way and read from the same
+/// environment. Nothing here resolves a directory — started with nothing
 /// said, that is the platform's own Data Directory, which is the server's
 /// default rather than the app's doing.
 ///

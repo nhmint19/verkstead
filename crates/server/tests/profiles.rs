@@ -25,7 +25,7 @@ use verkstead_render::{
     BriefSaved, Broken, ConversationView, PickedView, ProfileAccount, ProfileChosen,
     ProfileDeleted, ProfileEntry, ProfileSaved, Registered, RepoPairingsView, Started,
 };
-use verkstead_server::{WatchedPaths, open_database, router_watching, store};
+use verkstead_server::{open_database, router_keeping, store};
 
 /// A directory to keep accounts and repositories in, the app over it, and the
 /// directory holding the database alive.
@@ -44,11 +44,7 @@ async fn workbench() -> (tempfile::TempDir, tempfile::TempDir, Router) {
     // file grills, so nothing is ever put in it.
     let data_dir = dir.path().to_owned();
 
-    (
-        accounts,
-        dir,
-        router_watching(pool, WatchedPaths::none(), data_dir),
-    )
+    (accounts, dir, router_keeping(pool, data_dir))
 }
 
 /// A claude dir and config file pair at `root`, as `work-sandbox` would find

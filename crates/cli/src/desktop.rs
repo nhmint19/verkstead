@@ -39,11 +39,11 @@ const VERB: &str = "desktop";
 /// only printed would be a window that never opened and no reason given.
 ///
 /// **And everything after it**, which is the server's own startup and then the
-/// serving. A Data Directory that cannot be written, a Watched Path that is not
-/// there, no `HOME` for a session to have one — every one of them lands there,
-/// and so does the machine with nowhere to resolve a Data Directory to, which
-/// is refused at startup precisely because a refusal was supposed to have
-/// somewhere to be worded.
+/// serving. A Data Directory that cannot be written, a Sandbox Configuration
+/// bind that is not there, no `HOME` for a session to have one — every one of
+/// them lands there, and so does the machine with nowhere to resolve a Data
+/// Directory to, which is refused at startup precisely because a refusal was
+/// supposed to have somewhere to be worded.
 ///
 /// So it is said three ways, none of them enough on its own: on the standard
 /// error for whoever started this from a shell — which is `main`'s doing, as it

@@ -992,7 +992,7 @@ fn volume(path: &Path) -> Option<Vec<u8>> {
 ///
 /// **Every path this codebase stored by resolving it carries one.** Rust's
 /// `canonicalize` writes `\\?\` on this platform and a Profile's account is
-/// admitted through one — see [`crate::watched::WatchedPaths::admit`] — where a
+/// resolved through one — see [`crate::resolved::resolve`] — where a
 /// session's own profile, built by joining names together, has none. And
 /// [`asked`] answers in whichever namespace it was asked in: `\\?\C:\` for the
 /// account and `C:\` for the profile, which compared as bytes are two volumes.
@@ -3403,7 +3403,7 @@ mod tests {
     /// spelling of.
     ///
     /// Which is the whole of what refused every session on Windows: a Profile's
-    /// account is admitted through a `canonicalize` and carries `\\?\`, a
+    /// account is resolved through a `canonicalize` and carries `\\?\`, a
     /// session's own profile is names joined together and carries none, and the
     /// machine answers *which volume* in whichever namespace it was asked in.
     /// So `\\?\C:\` and `C:\` came back for one drive and the two compared as

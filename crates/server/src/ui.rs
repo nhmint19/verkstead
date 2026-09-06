@@ -3746,13 +3746,13 @@ async fn unsubscribe(
 }
 
 /// `GET /api/ui/settings` — what Verkstead has been told: the git author, that
-/// there is a GitHub token, and every path either place has said.
+/// there is a GitHub token, and every bind either place has said.
 ///
 /// Read off the two files at the moment it is asked for, like everything else
 /// that reads them: the files are the source of truth, so a token or an author
 /// somebody hand-edited into place is what this comes back with.
 ///
-/// The paths are the one part read from more than the files: the installation's
+/// The binds are the one part read from more than the files: the installation's
 /// own were said on the command line, and each entry comes back saying which of
 /// the two said it and whether the server can see what it names — see
 /// [`crate::paths`].
@@ -3760,7 +3760,6 @@ async fn settings(State(state): State<AppState>) -> HttpResponse {
     Json(as_told(
         &state.settings,
         state.sessions.caches_compiles(),
-        &state.watched,
         &state.binds,
     ))
     .into_response()
@@ -3799,9 +3798,8 @@ async fn save_settings(
     let caches_compiles = state.sessions.caches_compiles();
 
     // And what the installation configured, for the read that rides back with
-    // the save: the page draws both sources, and neither of these is anything a
-    // save can touch.
-    let watched = state.watched.clone();
+    // the save: the page draws both sources, and this is not anything a save
+    // can touch.
     let installed = state.binds.clone();
 
     let saved = tokio::task::spawn_blocking(move || {
@@ -3833,7 +3831,7 @@ async fn save_settings(
                 // How things stand, which is how they stood: nothing was
                 // written, and the page draws the errors over what the human
                 // still has in front of them.
-                settings: as_told(&settings, caches_compiles, &watched, &installed),
+                settings: as_told(&settings, caches_compiles, &installed),
                 verified: None,
                 refused,
             });
@@ -3864,13 +3862,12 @@ async fn save_settings(
             // And whether Done shares the record to the pull request, which is
             // a switch: two answers, and the save says which of them this is.
             edit.share_on_done,
-            // And the paths as values too: what is sent is what the file holds
+            // And the binds as values too: what is sent is what the file holds
             // afterwards, so a row taken off the page is a row taken out of the
             // file. Only the settings' own — the installation's are the unit's
             // word, they are not in this file, and nothing here could rewrite
             // them if they were.
             edit.sandbox_binds,
-            edit.watched_paths,
             // And the rules, decided above: either what was already written down
             // or the whole list the page sent, in the order it sent it.
             rules,
@@ -3908,7 +3905,7 @@ async fn save_settings(
         });
 
         Ok::<_, std::io::Error>(SettingsSaved {
-            settings: as_told(&settings, caches_compiles, &watched, &installed),
+            settings: as_told(&settings, caches_compiles, &installed),
             verified,
             // Nothing turned down: a save that got this far was one there was
             // nothing wrong with.
@@ -3982,7 +3979,6 @@ fn compile_caching(cached: bool) -> CompileCaching {
 fn as_told(
     settings: &crate::settings::Settings,
     caches_compiles: bool,
-    watched: &crate::WatchedPaths,
     binds: &crate::sandbox::SandboxConfig,
 ) -> SettingsView {
     let secrets = settings.secrets();
@@ -4037,7 +4033,7 @@ fn as_told(
         // whether the server can see it now — see [`crate::paths`]. Read from
         // the file again rather than off the `config` above, because that is
         // where the whole of this one question is answered.
-        paths: crate::paths::told(watched, binds, settings),
+        paths: crate::paths::told(binds, settings),
 
         // And the ignore rules exactly as the file holds them, a pattern that
         // will not compile included: this is what the editor draws back into

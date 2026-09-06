@@ -212,7 +212,7 @@ impl App {
     }
 
     /// A Conversation to ask from, made the way the workbench makes one: a Repo
-    /// registered from inside the Watched Path, and a Conversation against it.
+    /// registered by its path, and a Conversation against it.
     fn asking_from(&self, repo: &Path) -> i64 {
         let registered: serde_json::Value = self.through_the_viewer(
             "/api/ui/repos",
@@ -400,9 +400,9 @@ fn flags(port: u16, data_dir: &Path) -> [String; 4] {
     ]
 }
 
-/// And the same with a Watched Path of the test's own, for the tests that put
-/// something inside one.
-fn watching(port: u16, data_dir: &Path, watched: &Path) -> [String; 6] {
+/// And the same with a Sandbox Configuration bind of the test's own, for the
+/// test that wants a startup the server refuses.
+fn binding(port: u16, data_dir: &Path, bind: &Path) -> [String; 6] {
     let [listen, address, dir, at] = flags(port, data_dir);
 
     [
@@ -410,8 +410,8 @@ fn watching(port: u16, data_dir: &Path, watched: &Path) -> [String; 6] {
         address,
         dir,
         at,
-        "--watched-path".into(),
-        watched.to_str().unwrap().into(),
+        "--sandbox-bind".into(),
+        bind.to_str().unwrap().into(),
     ]
 }
 
@@ -427,22 +427,22 @@ fn as_args(flags: &[String]) -> Vec<&str> {
 fn the_verb_serves_the_server_the_same_binary_asks() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("home");
-    let watched = tmp.path().join("watched");
+    let working = tmp.path().join("working");
     let data_dir = tmp.path().join("data");
-    std::fs::create_dir_all(&watched).unwrap();
+    std::fs::create_dir_all(&working).unwrap();
     let port = free_port();
 
-    let flags = watching(port, &data_dir, &watched);
+    let flags = flags(port, &data_dir);
     let mut args = as_args(&flags);
     args.push("--no-open");
     let mut app = App::start(port, None, &home, &args, &[]);
 
-    let conversation = app.asking_from(&repo_with_a_commit(&watched));
+    let conversation = app.asking_from(&repo_with_a_commit(&working));
 
     let mut asking = Command::new(env!("CARGO_BIN_EXE_verkstead"))
         .arg("ask")
         .env("VERKSTEAD_SERVER", app.asking_url(conversation))
-        .current_dir(&watched)
+        .current_dir(&working)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -800,9 +800,10 @@ fn nowhere_to_keep_a_log_file_serves_and_says_where_the_log_went() {
 /// Everything that goes wrong after the address is taken goes wrong where there
 /// is a log file to say so in, and this is what says it lands there: an icon
 /// that appeared and vanished is otherwise the whole of what the human was told.
-/// A Watched Path that is not there is the shortest of those failures — the
-/// server resolves them before it makes anything — and it stands here for the
-/// Data Directory that cannot be written and the machine with no `HOME`.
+/// A Sandbox Configuration bind that is not there is the shortest of those
+/// failures — the server resolves them before it makes anything — and it stands
+/// here for the Data Directory that cannot be written and the machine with no
+/// `HOME`.
 ///
 /// It is also a thing about the *verb*, its events carrying a target of their
 /// own that the app's log filter has to admit: what says the app stopped is
@@ -822,7 +823,7 @@ fn a_startup_that_fails_after_the_address_says_so_in_the_log() {
     let data_dir = tmp.path().join("data");
     let missing = tmp.path().join("not-a-directory");
 
-    let flags = watching(free_port(), &data_dir, &missing);
+    let flags = binding(free_port(), &data_dir, &missing);
     let mut args = as_args(&flags);
     args.push("--no-open");
 

@@ -487,27 +487,6 @@ pub struct Config {
     )]
     sandbox_binds: Vec<String>,
 
-    /// And the Watched Paths said here rather than at the installation: a flat
-    /// list of absolute directories, the same thing `--watched-path` names.
-    ///
-    /// They widen the boundary rather than standing in for the part of it the
-    /// installation drew, and they are read at the moment an admission is
-    /// decided, so a directory added here admits from the next request on. Which
-    /// is why nothing here is checked as it is read: an entry naming a directory
-    /// that is not there covers nothing at that moment, with a word in the log,
-    /// where a startup flag naming one refuses to start — see
-    /// [`crate::WatchedPaths::admit`].
-    ///
-    /// An empty list is what a standalone install starts with, and it is a
-    /// closed boundary rather than an open one: the type fails closed whatever
-    /// is here, so a Verkstead nobody has configured may touch nothing at all.
-    #[serde(
-        default,
-        deserialize_with = "rows_written",
-        skip_serializing_if = "Vec::is_empty"
-    )]
-    watched_paths: Vec<String>,
-
     /// And the comments Wrapping is never to address: a list of rules, each an
     /// optional regex over the author's login and an optional regex over the
     /// comment's body, matched anywhere in either.
@@ -560,7 +539,6 @@ impl Config {
             conflict_resolution: config.conflict_resolution,
             share_on_done: config.share_on_done,
             sandbox_binds: entries_written(config.sandbox_binds),
-            watched_paths: entries_written(config.watched_paths),
             ignored_comments: rules_kept(config.ignored_comments),
         })
     }
@@ -578,7 +556,6 @@ impl Config {
         conflict_resolution: ConflictResolution,
         share_on_done: bool,
         sandbox_binds: Vec<String>,
-        watched_paths: Vec<String>,
         ignored_comments: Vec<IgnoreRule>,
     ) -> Config {
         Config {
@@ -597,7 +574,6 @@ impl Config {
             // And the switch beside it, for the reason above it.
             share_on_done: Some(share_on_done),
             sandbox_binds: entries_written(sandbox_binds),
-            watched_paths: entries_written(watched_paths),
             // Whole, and not put through the reading half's own drop above: what
             // reaches here has already been through [`IgnoreRule::trouble`] at
             // the endpoint, which refuses the rule the reading merely skips —
@@ -649,14 +625,6 @@ impl Config {
     /// installation configured and nothing beside it.
     pub fn sandbox_binds(&self) -> &[String] {
         &self.sandbox_binds
-    }
-
-    /// And the Watched Paths it holds, in the order they were written down. An
-    /// empty list where nobody has added any, which is a boundary drawn by
-    /// whatever the installation configured — and, on an installation that
-    /// configured none, a boundary around nothing.
-    pub fn watched_paths(&self) -> &[String] {
-        &self.watched_paths
     }
 
     /// And the comments nothing is ever to be dispatched about, in the order
@@ -1256,7 +1224,6 @@ mod tests {
                 false,
                 vec![],
                 vec![],
-                vec![],
             ))
             .unwrap();
 
@@ -1272,7 +1239,6 @@ mod tests {
                 Cleanup::default(),
                 ConflictResolution::Merge,
                 false,
-                vec![],
                 vec![],
                 vec![],
             ))
@@ -1353,7 +1319,6 @@ mod tests {
                 true,
                 vec![],
                 vec![],
-                vec![],
             ))
             .unwrap();
 
@@ -1366,7 +1331,6 @@ mod tests {
                 Cleanup::default(),
                 ConflictResolution::Merge,
                 false,
-                vec![],
                 vec![],
                 vec![],
             ))
@@ -1489,7 +1453,6 @@ mod tests {
                 false,
                 vec![],
                 vec![],
-                vec![],
             ))
             .unwrap();
 
@@ -1524,7 +1487,6 @@ mod tests {
                 ),
                 ConflictResolution::Merge,
                 false,
-                vec![],
                 vec![],
                 vec![],
             ))
@@ -1729,7 +1691,6 @@ mod tests {
                 false,
                 vec![],
                 vec![],
-                vec![],
             ))
             .unwrap();
 
@@ -1762,7 +1723,6 @@ mod tests {
                 false,
                 vec![],
                 vec![],
-                vec![],
             ))
             .unwrap();
 
@@ -1793,7 +1753,6 @@ mod tests {
                 false,
                 vec![],
                 vec![],
-                vec![],
             ))
             .unwrap();
 
@@ -1815,7 +1774,6 @@ mod tests {
                 Cleanup::default(),
                 ConflictResolution::Merge,
                 false,
-                vec![],
                 vec![],
                 vec![],
             ))
@@ -1860,7 +1818,6 @@ mod tests {
                 false,
                 vec![],
                 vec![],
-                vec![],
             ))
             .unwrap();
 
@@ -1886,7 +1843,6 @@ mod tests {
                 Cleanup::default(),
                 ConflictResolution::Merge,
                 false,
-                vec![],
                 vec![],
                 vec![],
             ))
@@ -1952,7 +1908,6 @@ mod tests {
                 false,
                 vec!["/var/cache/verkstead-node".to_owned()],
                 vec![],
-                vec![],
             ))
             .unwrap();
 
@@ -1972,60 +1927,10 @@ mod tests {
                 false,
                 vec![],
                 vec![],
-                vec![],
             ))
             .unwrap();
 
         assert!(settings.config().sandbox_binds().is_empty());
-    }
-
-    #[test]
-    fn the_watched_paths_are_what_the_config_file_says() {
-        let config = Config::read("watched_paths:\n  - /home/ada/src\n  - /srv/repos\n").unwrap();
-
-        assert_eq!(config.watched_paths(), ["/home/ada/src", "/srv/repos"]);
-    }
-
-    /// A boundary nobody has widened, which is every path outside whatever the
-    /// installation said — see [`crate::WatchedPaths`].
-    #[test]
-    fn a_file_with_no_watched_paths_in_it_says_none() {
-        assert!(
-            Config::read("git_author:\n  name: Ada\n")
-                .unwrap()
-                .watched_paths()
-                .is_empty()
-        );
-        assert!(Config::read("").unwrap().watched_paths().is_empty());
-    }
-
-    #[test]
-    fn a_blank_watched_path_is_no_path_and_a_padded_one_is_the_path_inside_it() {
-        let config =
-            Config::read("watched_paths:\n  - ''\n  - '  /home/ada/src  '\n  -\n").unwrap();
-
-        assert_eq!(config.watched_paths(), ["/home/ada/src"]);
-    }
-
-    #[test]
-    fn a_saved_watched_path_is_what_the_next_read_says() {
-        let dir = tempfile::tempdir().unwrap();
-        let settings = Settings::in_data_dir(dir.path());
-
-        settings
-            .save_config(&Config::of(
-                GitAuthor::default(),
-                RustBuildCache::default(),
-                Cleanup::default(),
-                ConflictResolution::Merge,
-                false,
-                vec![],
-                vec!["/home/ada/src".to_owned()],
-                vec![],
-            ))
-            .unwrap();
-
-        assert_eq!(settings.config().watched_paths(), ["/home/ada/src"]);
     }
 
     #[test]
@@ -2097,7 +2002,6 @@ mod tests {
                 Cleanup::default(),
                 ConflictResolution::Merge,
                 false,
-                vec![],
                 vec![],
                 vec![IgnoreRule::of(
                     Some("coderabbitai".to_owned()),

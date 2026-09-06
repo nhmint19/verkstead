@@ -81,12 +81,11 @@ import unset from "./fixtures/settings-unset.json" with { type: "json" };
 
 const TOLD = told as SettingsView;
 
-/// The paths the fixture holds, as a save puts them back on the wire: the
+/// The binds the fixture holds, as a save puts them back on the wire: the
 /// settings' own entries, and a Repo's bind in the `name=path` grammar the file
 /// keeps them in. Every section's save carries them, because one request writes
 /// the whole of `config.yaml` — a list left out would be a list emptied.
 const PATHS = {
-  watched_paths: ["/home/ada/src"],
   sandbox_binds: [
     "/var/cache/verkstead-node",
     "verkstead=/var/cache/verkstead-cargo",
@@ -1221,6 +1220,23 @@ describe("the settings page", () => {
     ).toHaveLength(PROFILES.length);
   });
 
+  /// And the Paths under the Repos rather than over them. It sat above the
+  /// lists while a repo was registered only from inside a watched path — a
+  /// machine with none had nothing to put on that list — and with the sandbox
+  /// binds alone in it that reason is gone.
+  it("draws the paths below the repos", async () => {
+    const { container } = thePage();
+
+    const settings = panes(container)[1]!;
+
+    const repos = await drawn(settings, `.${repoList.repos}`);
+    const card = await drawn(settings, `.${paths.pathsCard}`);
+
+    expect(
+      repos.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   /// The gear is what opened this pane, so it reads as the open one — which is
   /// what the cards under it say about themselves.
   it("reads the gear in the conversations as open", async () => {
@@ -1344,10 +1360,10 @@ describe("the path a details pane stands at", () => {
     await waitFor(() => expect(history.get()).toBe("/"));
   });
 
-  it("draws the two lists in the details pane, and reads the paths card as open", async () => {
+  it("draws the binds in the details pane, and reads the paths card as open", async () => {
     const { container } = thePage("/settings/paths");
 
-    await waitFor(() => screen.getByLabelText("Add a watched path"));
+    await waitFor(() => screen.getByLabelText("Add a bind"));
 
     const face = await drawn<HTMLElement>(container, `.${paths.pathsCard}`);
     expect(face.getAttribute("aria-pressed")).toBe("true");

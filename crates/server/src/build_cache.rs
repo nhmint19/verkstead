@@ -138,10 +138,10 @@ pub fn compiles_through_an_sccache(platform: Platform) -> bool {
 
 /// The build cache this server hands out: where it is, and what it can offer.
 ///
-/// Resolved once at startup, like the Watched Paths and the Sandbox
-/// Configuration, and for the reason those are: a cache directory that cannot
-/// be made is a misconfiguration to report at startup rather than a session
-/// that fails to start weeks later with nobody watching.
+/// Resolved once at startup, like the Sandbox Configuration, and for the reason
+/// that is: a cache directory that cannot be made is a misconfiguration to
+/// report at startup rather than a session that fails to start weeks later with
+/// nobody watching.
 ///
 /// The switch that turns it off is *not* here. It is in `config.yaml` and is
 /// read at every session spawn — see [`BuildCache::shared`] — so flipping it in

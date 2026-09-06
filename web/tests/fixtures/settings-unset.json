@@ -19,8 +19,7 @@
   "github_token": null,
   "ignored_comments": [],
   "paths": {
-    "binds": [],
-    "watched": []
+    "binds": []
   },
   "rust_build_cache": {
     "compiles": "NoSccache",

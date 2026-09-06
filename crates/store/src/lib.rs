@@ -659,7 +659,7 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // the keypair when this is the database's first run.
     push::apply_schema(pool).await?;
 
-    // The Repos registered from inside the Watched Paths.
+    // The git repositories Verkstead has been told about.
     repos::apply_schema(pool).await?;
 
     // The Agent Profiles a session can be run under.

@@ -35,11 +35,10 @@ import unset from "./fixtures/settings-unset.json" with { type: "json" };
 const TOLD = told as SettingsView;
 const UNSET = unset as SettingsView;
 
-/// The paths the fixture holds, as a save puts them back on the wire — every
+/// The binds the fixture holds, as a save puts them back on the wire — every
 /// section's save carries them, because one request writes the whole of
 /// `config.yaml`.
 const PATHS = {
-  watched_paths: ["/home/ada/src"],
   sandbox_binds: [
     "/var/cache/verkstead-node",
     "verkstead=/var/cache/verkstead-cargo",

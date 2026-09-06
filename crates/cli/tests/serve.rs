@@ -95,9 +95,8 @@ impl Serve {
 
     /// The plain form: the flags every test but the environment one uses.
     ///
-    /// `dir` is the Watched Path as well as the working directory. A test that
-    /// is not about the boundary still has to give the server something real to
-    /// watch, whether or not it would have started without it.
+    /// `dir` is the working directory the server is started in, which is all it
+    /// is: nothing about where a repository may be is said on the command line.
     fn with_flags(dir: &Path, port: u16, data_dir: &Path) -> Self {
         Self::start(
             dir,
@@ -107,8 +106,6 @@ impl Serve {
                 &format!("127.0.0.1:{port}"),
                 "--data-dir",
                 data_dir.to_str().unwrap(),
-                "--watched-path",
-                dir.to_str().unwrap(),
             ],
             &[],
         )
@@ -130,7 +127,7 @@ impl Serve {
     }
 
     /// A Conversation to ask from, made the way the workbench makes one: a Repo
-    /// registered from inside the Watched Path, and a Conversation against it.
+    /// registered by its path, and a Conversation against it.
     ///
     /// Every Set is asked from one, and the base URL a session is given is what
     /// says which — so a test standing in for a session has to have one to be
@@ -265,7 +262,6 @@ fn refused_to_start(args: &[&str]) -> String {
         .arg("serve")
         .args(args)
         .env_remove("RUST_LOG")
-        .env_remove("VERKSTEAD_WATCHED_PATHS")
         .env_remove("VERKSTEAD_DATA_DIR")
         .env_remove("VERKSTEAD_LISTEN")
         .output()
@@ -285,7 +281,7 @@ fn refused_to_start(args: &[&str]) -> String {
 /// comes up, and it registers a repository it was never pointed at — which is
 /// the whole of what a bare binary being usable out of the box means.
 #[test]
-fn serving_without_a_watched_path_starts_and_registers_anywhere() {
+fn serving_with_no_flags_at_all_starts_and_registers_anywhere() {
     let tmp = tempfile::tempdir().unwrap();
     let elsewhere = tempfile::tempdir().unwrap();
     let repo = repo_with_a_commit(elsewhere.path());
@@ -317,16 +313,16 @@ fn serving_without_a_watched_path_starts_and_registers_anywhere() {
     let logged = uncoloured(&serving.stop());
 
     assert!(
-        logged.contains("watched=[]"),
-        "the startup line should say what is watched, and that nothing is, \
-         got:\n{logged}"
+        !logged.contains("watched"),
+        "the startup line should say nothing about a boundary that no longer \
+         exists, got:\n{logged}"
     );
 }
 
 /// `logged` with the terminal colouring taken out.
 ///
 /// The subscriber colours its field names whether or not anything is a
-/// terminal, so `watched=[]` reaches a pipe with escapes between the name and
+/// terminal, so `data_dir=…` reaches a pipe with escapes between the name and
 /// the value. A test reading a field name has to take them off first.
 fn uncoloured(logged: &str) -> String {
     let mut plain = String::with_capacity(logged.len());
@@ -348,13 +344,20 @@ fn uncoloured(logged: &str) -> String {
     plain
 }
 
-/// A Watched Path that is not there covers nothing, so every repo inside it
-/// would be refused with no hint as to why. Said at startup instead, where it
-/// can be fixed.
+/// And the boundary that used to be said here is not a flag any more: a
+/// `--watched-path` on the command line is an unknown option rather than a
+/// second answer to where Verkstead may work.
 #[test]
-fn serving_with_a_watched_path_that_is_not_there_refuses_to_start() {
+fn the_boundary_flag_is_gone_rather_than_ignored() {
     let tmp = tempfile::tempdir().unwrap();
-    let missing = tmp.path().join("never-made");
+    let help = stdout(&run(&["serve", "--help"]));
+
+    for phrase in ["--watched-path", "VERKSTEAD_WATCHED_PATHS"] {
+        assert!(
+            !help.contains(phrase),
+            "`verkstead serve --help` should no longer mention {phrase:?}, got:\n{help}"
+        );
+    }
 
     let refusal = refused_to_start(&[
         "--listen",
@@ -362,12 +365,13 @@ fn serving_with_a_watched_path_that_is_not_there_refuses_to_start() {
         "--data-dir",
         tmp.path().to_str().unwrap(),
         "--watched-path",
-        missing.to_str().unwrap(),
+        tmp.path().to_str().unwrap(),
     ]);
 
     assert!(
-        refusal.contains(missing.to_str().unwrap()),
-        "the refusal should name the path it could not resolve, got:\n{refusal}"
+        refusal.contains("--watched-path"),
+        "starting with the flag that is gone should be refused by name, \
+         got:\n{refusal}"
     );
 }
 
@@ -565,10 +569,8 @@ fn the_help_describes_the_flags_and_their_defaults() {
     for phrase in [
         "--listen",
         "--data-dir",
-        "--watched-path",
         "VERKSTEAD_LISTEN",
         "VERKSTEAD_DATA_DIR",
-        "VERKSTEAD_WATCHED_PATHS",
         "127.0.0.1:8422",
         "verkstead.db",
     ] {
@@ -599,7 +601,7 @@ fn the_options_the_data_directory_replaced_are_gone() {
         );
     }
 
-    let refusal = refused_to_start(&["--database", "verkstead.db", "--watched-path", "."]);
+    let refusal = refused_to_start(&["--database", "verkstead.db"]);
     assert!(
         refusal.contains("--database"),
         "starting with the old flag should be refused by name, got:\n{refusal}"
@@ -651,8 +653,6 @@ fn rust_log_overrides_the_default_filter() {
             "--listen",
             &format!("127.0.0.1:{port}"),
             "--data-dir",
-            tmp.path().to_str().unwrap(),
-            "--watched-path",
             tmp.path().to_str().unwrap(),
         ],
         &[("RUST_LOG", "error")],

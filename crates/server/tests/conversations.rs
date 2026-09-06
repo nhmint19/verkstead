@@ -29,15 +29,15 @@ use verkstead_render::{
     ProfileSaved, Registered, Resolved, RoadmapPane, ShowingArchived, Standing, Started,
     SteerCompanionRefusal, SteerOpened, TimelineEvent,
 };
-use verkstead_server::{WatchedPaths, open_database, router_watching, store};
+use verkstead_server::{open_database, router_keeping, store};
 
-/// A router watching `watched`, plus the directory holding its database and its
-/// data directory alive.
+/// A router, plus the directory holding its database and its data directory
+/// alive.
 ///
 /// One directory holds both, which is what the real server does: the database is
 /// `verkstead.db` inside the Data Directory.
-async fn app_watching(watched: &Path) -> (tempfile::TempDir, Router) {
-    let (dir, _pool, app) = app_and_pool_watching(watched).await;
+async fn app_keeping() -> (tempfile::TempDir, Router) {
+    let (dir, _pool, app) = app_and_pool_keeping().await;
 
     (dir, app)
 }
@@ -46,15 +46,14 @@ async fn app_watching(watched: &Path) -> (tempfile::TempDir, Router) {
 /// reads and no endpoint of this namespace writes. A Cleanup's trim is the one
 /// of those: the sweep does it in the background, and what the page has to say
 /// about it is read back here.
-async fn app_and_pool_watching(watched: &Path) -> (tempfile::TempDir, SqlitePool, Router) {
+async fn app_and_pool_keeping() -> (tempfile::TempDir, SqlitePool, Router) {
     let dir = tempfile::tempdir().unwrap();
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
-    let watched = WatchedPaths::resolve(&[watched.to_owned()]).unwrap();
     let data_dir = dir.path().to_owned();
 
-    (dir, pool.clone(), router_watching(pool, watched, data_dir))
+    (dir, pool.clone(), router_keeping(pool, data_dir))
 }
 
 /// A git repository at `path`, with one commit on `main` so it has a branch to
@@ -89,11 +88,12 @@ fn git(dir: &Path, args: &[&str]) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 
-/// A watched directory holding one registered repository, and the app over it.
+/// A directory of its own holding one registered repository, and the app over
+/// it.
 async fn workbench() -> (tempfile::TempDir, tempfile::TempDir, Router, PathBuf, i64) {
-    let watched = tempfile::tempdir().unwrap();
-    let (dir, app) = app_watching(watched.path()).await;
-    let repo = repository(watched.path().join("verkstead"));
+    let elsewhere = tempfile::tempdir().unwrap();
+    let (dir, app) = app_keeping().await;
+    let repo = repository(elsewhere.path().join("verkstead"));
 
     let registered: Registered =
         post(&app, "/api/ui/repos", &serde_json::json!({ "path": repo })).await;
@@ -101,10 +101,10 @@ async fn workbench() -> (tempfile::TempDir, tempfile::TempDir, Router, PathBuf, 
 
     let repo_id = listed_repos(&app).await;
 
-    (watched, dir, app, repo, repo_id)
+    (elsewhere, dir, app, repo, repo_id)
 }
 
-/// The same, with the pool beside it — see [`app_and_pool_watching`].
+/// The same, with the pool beside it — see [`app_and_pool_keeping`].
 async fn workbench_and_pool() -> (
     tempfile::TempDir,
     tempfile::TempDir,
@@ -112,9 +112,9 @@ async fn workbench_and_pool() -> (
     SqlitePool,
     i64,
 ) {
-    let watched = tempfile::tempdir().unwrap();
-    let (dir, pool, app) = app_and_pool_watching(watched.path()).await;
-    let repo = repository(watched.path().join("verkstead"));
+    let elsewhere = tempfile::tempdir().unwrap();
+    let (dir, pool, app) = app_and_pool_keeping().await;
+    let repo = repository(elsewhere.path().join("verkstead"));
 
     let registered: Registered =
         post(&app, "/api/ui/repos", &serde_json::json!({ "path": repo })).await;
@@ -122,19 +122,19 @@ async fn workbench_and_pool() -> (
 
     let repo_id = listed_repos(&app).await;
 
-    (watched, dir, app, pool, repo_id)
+    (elsewhere, dir, app, pool, repo_id)
 }
 
-/// A watched directory holding one registered repository that was *cloned* from
-/// an upstream, and the app over it.
+/// A directory of its own holding one registered repository that was *cloned*
+/// from an upstream, and the app over it.
 ///
 /// The upstream is what "origin" means for the rest of a test: commits pushed
 /// on to it are commits the clone has not seen, which is the whole state these
-/// are about. It lives in the data directory's tempdir rather than the watched
-/// one so that nothing registers it by accident.
+/// are about. It lives in the data directory's tempdir rather than beside the
+/// clone so that nothing registers it by accident.
 ///
-/// Hands back the watched directory, the data directory, the app, the clone,
-/// the upstream and the Repo's id.
+/// Hands back that directory, the data directory, the app, the clone, the
+/// upstream and the Repo's id.
 async fn workbench_with_origin() -> (
     tempfile::TempDir,
     tempfile::TempDir,
@@ -143,13 +143,13 @@ async fn workbench_with_origin() -> (
     PathBuf,
     i64,
 ) {
-    let watched = tempfile::tempdir().unwrap();
-    let (dir, app) = app_watching(watched.path()).await;
+    let elsewhere = tempfile::tempdir().unwrap();
+    let (dir, app) = app_keeping().await;
 
     let upstream = repository(dir.path().join("upstream"));
-    let repo = watched.path().join("verkstead");
+    let repo = elsewhere.path().join("verkstead");
     git(
-        watched.path(),
+        elsewhere.path(),
         &[
             "clone",
             &upstream.to_string_lossy(),
@@ -170,7 +170,7 @@ async fn workbench_with_origin() -> (
 
     let repo_id = listed_repos(&app).await;
 
-    (watched, dir, app, repo, upstream, repo_id)
+    (elsewhere, dir, app, repo, upstream, repo_id)
 }
 
 /// Put another commit on `repo`'s checked-out branch, and say what it stands at.
@@ -317,7 +317,7 @@ fn read<T: DeserializeOwned>(body: &str) -> T {
 
 #[tokio::test]
 async fn a_conversation_starts_against_a_registered_repo_and_appears_in_the_sidebar() {
-    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
 
     let id = started(&app, repo_id).await;
 
@@ -337,7 +337,7 @@ async fn a_conversation_starts_against_a_registered_repo_and_appears_in_the_side
 /// a Draft off.
 #[tokio::test]
 async fn a_new_conversation_is_started_on_a_name_nobody_has_settled_on() {
-    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
 
     let id = started(&app, repo_id).await;
 
@@ -357,7 +357,7 @@ async fn a_new_conversation_is_started_on_a_name_nobody_has_settled_on() {
 /// has to be one git will take when the branch is finally created.
 #[tokio::test]
 async fn the_prefilled_branch_name_is_two_words_git_would_take() {
-    let (_watched, _dir, app, repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, repo, repo_id) = workbench().await;
 
     let id = started(&app, repo_id).await;
     let branch = opened(&app, id).await.branch;
@@ -376,7 +376,7 @@ async fn the_prefilled_branch_name_is_two_words_git_would_take() {
 
 #[tokio::test]
 async fn a_conversation_cannot_be_started_against_a_repo_that_is_not_registered() {
-    let (_watched, _dir, app, _repo, _repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, _repo_id) = workbench().await;
 
     assert_eq!(start(&app, 404).await, Started::NoSuchRepo);
     assert!(sidebar(&app).await.is_empty());
@@ -386,7 +386,7 @@ async fn a_conversation_cannot_be_started_against_a_repo_that_is_not_registered(
 /// the right-hand panes are drawn from.
 #[tokio::test]
 async fn opening_a_conversation_brings_its_repo_and_its_timeline_with_it() {
-    let (_watched, _dir, app, repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
 
     let view = opened(&app, id).await;
@@ -412,7 +412,7 @@ async fn opening_a_conversation_brings_its_repo_and_its_timeline_with_it() {
 /// — and beside its own source, because it is the one the human edits.
 #[tokio::test]
 async fn a_written_brief_comes_back_as_markdown_and_as_html() {
-    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
 
     assert_eq!(
@@ -448,7 +448,7 @@ async fn a_written_brief_comes_back_as_markdown_and_as_html() {
 /// drafting there is one Brief and editing it rewrites it.
 #[tokio::test]
 async fn editing_the_brief_rewrites_the_one_event_rather_than_adding_another() {
-    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
 
     write_brief(&app, id, "# First thought\n").await;
@@ -463,7 +463,7 @@ async fn editing_the_brief_rewrites_the_one_event_rather_than_adding_another() {
 /// browser is not automatically safe to put back in one.
 #[tokio::test]
 async fn a_brief_is_sanitised_on_the_way_out() {
-    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
 
     write_brief(&app, id, "<script>alert('pwned')</script>\n").await;
@@ -478,7 +478,7 @@ async fn a_brief_is_sanitised_on_the_way_out() {
 
 #[tokio::test]
 async fn a_drafting_conversations_branch_is_the_humans_to_name() {
-    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
 
     assert_eq!(
@@ -503,7 +503,7 @@ async fn a_drafting_conversations_branch_is_the_humans_to_name() {
 /// typed a name and thought better of it is where they began.
 #[tokio::test]
 async fn clearing_the_branch_field_hands_the_name_back_to_verkstead() {
-    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
     let prefilled = opened(&app, id).await.branch;
 
@@ -540,7 +540,7 @@ async fn clearing_the_branch_field_hands_the_name_back_to_verkstead() {
 /// rather than when the branch is finally created.
 #[tokio::test]
 async fn a_name_git_would_not_take_for_a_branch_is_refused() {
-    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
     let prefilled = opened(&app, id).await.branch;
 
@@ -561,7 +561,7 @@ async fn a_name_git_would_not_take_for_a_branch_is_refused() {
 
 #[tokio::test]
 async fn the_name_is_taken_without_the_whitespace_around_it() {
-    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
 
     assert_eq!(
@@ -575,7 +575,7 @@ async fn the_name_is_taken_without_the_whitespace_around_it() {
 /// point of picking one is coming off whatever is on it when the work starts.
 #[tokio::test]
 async fn a_picked_branch_is_recorded_by_name() {
-    let (_watched, _dir, app, repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
 
     git(&repo, &["branch", "release"]);
@@ -594,7 +594,7 @@ async fn a_picked_branch_is_recorded_by_name() {
 /// somebody else pushed is a thing to build on, and it is not checked out here.
 #[tokio::test]
 async fn a_remote_tracking_branch_is_pickable_too() {
-    let (_watched, _dir, app, repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
 
     let head = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
@@ -615,7 +615,7 @@ async fn a_remote_tracking_branch_is_pickable_too() {
 /// because a branch is the whole of what there is to pick.
 #[tokio::test]
 async fn anything_that_is_not_one_of_the_repos_branches_is_refused() {
-    let (_watched, _dir, app, repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
 
     let head = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
@@ -635,7 +635,7 @@ async fn anything_that_is_not_one_of_the_repos_branches_is_refused() {
 /// branch called nothing — and what it goes back to is the rule.
 #[tokio::test]
 async fn clearing_the_base_branch_puts_the_conversation_back_on_the_rule() {
-    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
 
     base(&app, id, Some("main")).await;
@@ -646,10 +646,10 @@ async fn clearing_the_base_branch_puts_the_conversation_back_on_the_rule() {
     }
 }
 
-/// A second registered repository in the same watched directory, for the tests
+/// A second registered repository in the same directory, for the tests
 /// about working alongside one. Hands back its Repo id.
-async fn second_repo(app: &Router, watched: &Path, name: &str) -> i64 {
-    let path = repository(watched.join(name));
+async fn second_repo(app: &Router, elsewhere: &Path, name: &str) -> i64 {
+    let path = repository(elsewhere.join(name));
 
     let registered: Registered =
         post(app, "/api/ui/repos", &serde_json::json!({ "path": path })).await;
@@ -695,8 +695,8 @@ async fn companions(app: &Router, id: i64) -> Vec<String> {
 /// taken away again.
 #[tokio::test]
 async fn a_repo_is_added_to_work_alongside_and_taken_away_again() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let askance = second_repo(&app, watched.path(), "askance").await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let askance = second_repo(&app, elsewhere.path(), "askance").await;
     let id = started(&app, repo_id).await;
 
     assert!(companions(&app, id).await.is_empty());
@@ -775,8 +775,8 @@ async fn only_companion(app: &Router, id: i64) -> verkstead_render::CompanionVie
 /// The three things a row settles about a companion, each landing on its own.
 #[tokio::test]
 async fn a_companion_is_configured_on_the_row_it_draws() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let askance = second_repo(&app, watched.path(), "askance").await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let askance = second_repo(&app, elsewhere.path(), "askance").await;
     let id = started(&app, repo_id).await;
 
     assert_eq!(
@@ -816,8 +816,8 @@ async fn a_companion_is_configured_on_the_row_it_draws() {
 /// companion starts on and what clearing the field goes back to.
 #[tokio::test]
 async fn an_empty_companion_branch_is_mirroring_rather_than_a_name() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let askance = second_repo(&app, watched.path(), "askance").await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let askance = second_repo(&app, elsewhere.path(), "askance").await;
     let id = started(&app, repo_id).await;
 
     add_companion(&app, id, askance).await;
@@ -846,8 +846,8 @@ async fn an_empty_companion_branch_is_mirroring_rather_than_a_name() {
 /// nobody will cut.
 #[tokio::test]
 async fn flipping_a_companion_back_to_read_only_takes_its_branch_name_with_it() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let askance = second_repo(&app, watched.path(), "askance").await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let askance = second_repo(&app, elsewhere.path(), "askance").await;
     let id = started(&app, repo_id).await;
 
     add_companion(&app, id, askance).await;
@@ -873,8 +873,8 @@ async fn flipping_a_companion_back_to_read_only_takes_its_branch_name_with_it() 
 /// pick.
 #[tokio::test]
 async fn a_companions_base_is_one_of_its_own_branches() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
-    let askance = second_repo(&app, watched.path(), "askance").await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    let askance = second_repo(&app, elsewhere.path(), "askance").await;
     let id = started(&app, repo_id).await;
 
     add_companion(&app, id, askance).await;
@@ -904,9 +904,9 @@ async fn a_companions_base_is_one_of_its_own_branches() {
 /// three is refused, whatever a stale page believed.
 #[tokio::test]
 async fn configuring_a_companion_is_settled_once_the_grilling_has_started() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let askance = second_repo(&app, watched.path(), "askance").await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let askance = second_repo(&app, elsewhere.path(), "askance").await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     add_companion(&app, id, askance).await;
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
@@ -934,8 +934,8 @@ async fn configuring_a_companion_is_settled_once_the_grilling_has_started() {
 /// which is worth saying rather than reporting as done.
 #[tokio::test]
 async fn a_repo_that_is_not_a_companion_is_not_configured() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let askance = second_repo(&app, watched.path(), "askance").await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let askance = second_repo(&app, elsewhere.path(), "askance").await;
     let id = started(&app, repo_id).await;
 
     assert_eq!(
@@ -957,7 +957,7 @@ async fn a_repo_that_is_not_a_companion_is_not_configured() {
 /// itself would be that repository twice in one sandbox.
 #[tokio::test]
 async fn a_conversation_is_not_a_companion_of_itself() {
-    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
 
     assert_eq!(
@@ -971,8 +971,8 @@ async fn a_conversation_is_not_a_companion_of_itself() {
 /// rather than making a second checkout of it.
 #[tokio::test]
 async fn a_repo_already_added_is_not_added_twice() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let askance = second_repo(&app, watched.path(), "askance").await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let askance = second_repo(&app, elsewhere.path(), "askance").await;
     let id = started(&app, repo_id).await;
 
     assert_eq!(
@@ -991,7 +991,7 @@ async fn a_repo_already_added_is_not_added_twice() {
 /// Conversation may compose into its sandbox.
 #[tokio::test]
 async fn a_repo_that_is_not_registered_is_not_a_companion() {
-    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
 
     assert_eq!(
@@ -1006,10 +1006,10 @@ async fn a_repo_that_is_not_registered_is_not_a_companion() {
 /// page believed.
 #[tokio::test]
 async fn companions_are_settled_once_the_grilling_has_started() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let askance = second_repo(&app, watched.path(), "askance").await;
-    let alone = second_repo(&app, watched.path(), "alone").await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let askance = second_repo(&app, elsewhere.path(), "askance").await;
+    let alone = second_repo(&app, elsewhere.path(), "alone").await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     assert_eq!(
         add_companion(&app, id, askance).await,
@@ -1032,7 +1032,7 @@ async fn companions_are_settled_once_the_grilling_has_started() {
 
 #[tokio::test]
 async fn a_conversation_that_is_not_there_says_so_however_it_is_asked_about() {
-    let (_watched, _dir, app, _repo, _repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, _repo_id) = workbench().await;
 
     let (status, _) = fetch(
         &app,
@@ -1081,7 +1081,7 @@ async fn a_conversation_that_is_not_there_says_so_however_it_is_asked_about() {
 /// An id out of a URL the human may have typed, which is not always a number.
 #[tokio::test]
 async fn an_id_that_is_not_a_number_names_no_conversation() {
-    let (_watched, _dir, app, _repo, _repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, _repo_id) = workbench().await;
 
     let (status, _) = fetch(
         &app,
@@ -1097,7 +1097,7 @@ async fn an_id_that_is_not_a_number_names_no_conversation() {
 
 #[tokio::test]
 async fn nothing_started_means_an_empty_sidebar() {
-    let (_watched, _dir, app, _repo, _repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, _repo_id) = workbench().await;
 
     assert!(sidebar(&app).await.is_empty());
 }
@@ -1128,7 +1128,7 @@ async fn place(app: &Router, ids: &[i64]) {
 
 #[tokio::test]
 async fn the_sidebar_comes_back_in_the_order_it_was_dragged_into() {
-    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let first = started(&app, repo_id).await;
     let second = started(&app, repo_id).await;
     let third = started(&app, repo_id).await;
@@ -1154,7 +1154,7 @@ async fn the_sidebar_comes_back_in_the_order_it_was_dragged_into() {
 /// they just started will be looked for.
 #[tokio::test]
 async fn a_conversation_started_after_the_order_lands_at_the_top() {
-    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let first = started(&app, repo_id).await;
     let second = started(&app, repo_id).await;
 
@@ -1167,7 +1167,7 @@ async fn a_conversation_started_after_the_order_lands_at_the_top() {
 /// A viewer sends the list it drew, and a row can be gone by the time it lands.
 #[tokio::test]
 async fn an_order_naming_a_conversation_that_is_not_there_is_still_taken() {
-    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let first = started(&app, repo_id).await;
     let second = started(&app, repo_id).await;
 
@@ -1176,10 +1176,10 @@ async fn an_order_naming_a_conversation_that_is_not_there_is_still_taken() {
     assert_eq!(order(&app).await, vec![second, first]);
 }
 
-/// A claude dir and config file pair inside `watched`, so a Profile saved from
+/// A claude dir and config file pair inside `elsewhere`, so a Profile saved from
 /// it is one a session could actually be run under.
-fn pair(watched: &Path, account: &str) -> (PathBuf, PathBuf) {
-    let home = watched.join(account);
+fn pair(elsewhere: &Path, account: &str) -> (PathBuf, PathBuf) {
+    let home = elsewhere.join(account);
     let claude_dir = home.join(".claude");
     let config_file = home.join(".claude.json");
 
@@ -1190,8 +1190,8 @@ fn pair(watched: &Path, account: &str) -> (PathBuf, PathBuf) {
 }
 
 /// Save an Agent Profile and hand back its id.
-async fn profile(app: &Router, watched: &Path, name: &str) -> i64 {
-    let (claude_dir, config_file) = pair(watched, name);
+async fn profile(app: &Router, elsewhere: &Path, name: &str) -> i64 {
+    let (claude_dir, config_file) = pair(elsewhere, name);
 
     let saved: ProfileSaved = post(
         app,
@@ -1426,12 +1426,12 @@ fn steered(view: &ConversationView) -> Vec<(&'static str, Lifecycle)> {
 
 /// Everything a Conversation needs before it will grill: every Profile chosen
 /// and a Brief written. Hands back the Conversation's id.
-async fn ready(app: &Router, watched: &Path, repo_id: i64) -> i64 {
+async fn ready(app: &Router, elsewhere: &Path, repo_id: i64) -> i64 {
     let id = started(app, repo_id).await;
 
-    let grilling = profile(app, watched, "fable").await;
-    let implementation = profile(app, watched, "opus").await;
-    let review = profile(app, watched, "haiku").await;
+    let grilling = profile(app, elsewhere, "fable").await;
+    let implementation = profile(app, elsewhere, "opus").await;
+    let review = profile(app, elsewhere, "haiku").await;
     choose(app, id, "grilling", grilling).await;
     choose(app, id, "implementation", implementation).await;
     choose(app, id, "review", review).await;
@@ -1470,8 +1470,8 @@ fn worktrees(repo: &Path) -> Vec<PathBuf> {
 /// that says it is grilling.
 #[tokio::test]
 async fn starting_a_grilling_makes_the_branch_and_the_worktree() {
-    let (watched, dir, app, repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
 
@@ -1496,7 +1496,7 @@ async fn starting_a_grilling_makes_the_branch_and_the_worktree() {
     );
 
     // Named for the Repo and the branch, under the data directory — which is
-    // where the database is, and not inside any Watched Path.
+    // where the database is, and not inside the repository it was cut from.
     let worktree = view
         .worktree
         .expect("a grilling Conversation has a worktree");
@@ -1528,8 +1528,8 @@ async fn starting_a_grilling_makes_the_branch_and_the_worktree() {
 /// start* — resolving for the first time.
 #[tokio::test]
 async fn starting_records_the_commit_the_work_branched_from() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     assert_eq!(
         opened(&app, id).await.base_commit,
@@ -1556,8 +1556,8 @@ async fn starting_records_the_commit_the_work_branched_from() {
 /// Conversation's work. See the server's `commits` module.
 #[tokio::test]
 async fn starting_records_the_branch_the_base_resolved_through() {
-    let (watched, dir, app, repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     git(&repo, &["branch", "release"]);
     assert_eq!(
@@ -1586,8 +1586,8 @@ async fn starting_records_the_branch_the_base_resolved_through() {
 /// it — which is the rule an unpicked base resolved by anyway.
 #[tokio::test]
 async fn starting_from_no_pick_records_the_default_branch() {
-    let (watched, dir, app, _repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
 
@@ -1612,8 +1612,8 @@ async fn starting_from_no_pick_records_the_default_branch() {
 /// branch's tip.
 #[tokio::test]
 async fn the_picked_branch_is_what_the_branch_is_made_off() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     let first = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
     git(&repo, &["branch", "release"]);
@@ -1645,8 +1645,8 @@ async fn the_picked_branch_is_what_the_branch_is_made_off() {
 /// picked.
 #[tokio::test]
 async fn a_picked_branch_is_resolved_where_it_stands_at_grill_start() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     git(&repo, &["branch", "release"]);
     assert_eq!(
@@ -1678,8 +1678,8 @@ async fn a_picked_branch_is_resolved_where_it_stands_at_grill_start() {
 /// week behind the work the branch is meant to come off.
 #[tokio::test]
 async fn an_unpicked_base_comes_off_origins_tip_rather_than_the_local_branch() {
-    let (watched, _dir, app, repo, upstream, repo_id) = workbench_with_origin().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_with_origin().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     // Origin moves on, and this checkout hears nothing about it: neither its own
     // `main` nor its copy of origin's has any idea.
@@ -1712,8 +1712,8 @@ async fn an_unpicked_base_comes_off_origins_tip_rather_than_the_local_branch() {
 /// a picked remote-tracking branch stands where it now stands.
 #[tokio::test]
 async fn a_picked_base_is_still_the_one_the_work_comes_off() {
-    let (watched, _dir, app, repo, upstream, repo_id) = workbench_with_origin().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_with_origin().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     let held = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
     git(&repo, &["branch", "release"]);
@@ -1736,8 +1736,8 @@ async fn a_picked_base_is_still_the_one_the_work_comes_off() {
 /// against, so it comes off its own default branch and is never refused for it.
 #[tokio::test]
 async fn a_repo_with_no_remote_comes_off_its_local_default_branch() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     let moved_to = commit(&repo, "second.md");
 
@@ -1754,8 +1754,8 @@ async fn a_repo_with_no_remote_comes_off_its_local_default_branch() {
 /// human can go and fix, which is the whole reason it is named.
 #[tokio::test]
 async fn a_fetch_that_fails_refuses_the_start_by_name() {
-    let (watched, dir, app, repo, _upstream, repo_id) = workbench_with_origin().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, repo, _upstream, repo_id) = workbench_with_origin().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     let nowhere = dir.path().join("no-such-remote");
     git(
@@ -1776,7 +1776,7 @@ async fn a_fetch_that_fails_refuses_the_start_by_name() {
 /// different for the human to go and do.
 #[tokio::test]
 async fn starting_is_refused_by_name_when_a_profile_is_unchosen() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
     write_brief(&app, id, "# Rate limiting\n").await;
 
@@ -1786,7 +1786,7 @@ async fn starting_is_refused_by_name_when_a_profile_is_unchosen() {
         &app,
         id,
         "grilling",
-        profile(&app, watched.path(), "fable").await,
+        profile(&app, elsewhere.path(), "fable").await,
     )
     .await;
     assert_eq!(
@@ -1798,7 +1798,7 @@ async fn starting_is_refused_by_name_when_a_profile_is_unchosen() {
         &app,
         id,
         "implementation",
-        profile(&app, watched.path(), "opus").await,
+        profile(&app, elsewhere.path(), "opus").await,
     )
     .await;
     assert_eq!(grill(&app, id).await, GrillingStarted::NoReviewProfile);
@@ -1807,7 +1807,7 @@ async fn starting_is_refused_by_name_when_a_profile_is_unchosen() {
         &app,
         id,
         "review",
-        profile(&app, watched.path(), "haiku").await,
+        profile(&app, elsewhere.path(), "haiku").await,
     )
     .await;
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
@@ -1817,10 +1817,10 @@ async fn starting_is_refused_by_name_when_a_profile_is_unchosen() {
 /// pane says so — so pressing the button anyway has to say the same thing.
 #[tokio::test]
 async fn starting_is_refused_when_a_chosen_profiles_pair_has_gone() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
-    std::fs::remove_dir_all(watched.path().join("fable")).unwrap();
+    std::fs::remove_dir_all(elsewhere.path().join("fable")).unwrap();
 
     assert!(!opened(&app, id).await.ready_to_grill);
     assert_eq!(grill(&app, id).await, GrillingStarted::ProfileBroken);
@@ -1830,27 +1830,27 @@ async fn starting_is_refused_when_a_chosen_profiles_pair_has_gone() {
 /// freeze nothing worth having.
 #[tokio::test]
 async fn starting_is_refused_when_the_brief_is_empty() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
     choose(
         &app,
         id,
         "grilling",
-        profile(&app, watched.path(), "fable").await,
+        profile(&app, elsewhere.path(), "fable").await,
     )
     .await;
     choose(
         &app,
         id,
         "implementation",
-        profile(&app, watched.path(), "opus").await,
+        profile(&app, elsewhere.path(), "opus").await,
     )
     .await;
     choose(
         &app,
         id,
         "review",
-        profile(&app, watched.path(), "haiku").await,
+        profile(&app, elsewhere.path(), "haiku").await,
     )
     .await;
 
@@ -1869,8 +1869,8 @@ async fn starting_is_refused_when_the_brief_is_empty() {
 /// button is pressed, which is exactly why it is asked again.
 #[tokio::test]
 async fn starting_is_refused_when_the_base_branch_no_longer_resolves() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     git(&repo, &["branch", "doomed"]);
     assert_eq!(base(&app, id, Some("doomed")).await, BaseRecorded::Recorded);
@@ -1890,8 +1890,8 @@ async fn starting_is_refused_when_the_base_branch_no_longer_resolves() {
 /// is somebody's work, and the name is one the human typed and meant.
 #[tokio::test]
 async fn starting_is_refused_when_the_named_branch_is_already_there() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     assert_eq!(
         rename(&app, id, "rate-limiting").await,
@@ -1911,8 +1911,8 @@ async fn starting_is_refused_when_the_named_branch_is_already_there() {
 /// the human never saw that name and cannot have meant it.
 #[tokio::test]
 async fn a_start_invents_another_name_where_the_one_it_has_is_taken() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     let carried = opened(&app, id).await.branch;
     git(&repo, &["branch", &carried]);
@@ -1950,14 +1950,14 @@ async fn a_start_invents_another_name_where_the_one_it_has_is_taken() {
 /// refusal a companion's own typed name would get.
 #[tokio::test]
 async fn a_start_invents_around_a_companion_that_holds_the_name() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
-    let companion = second_repo(&app, watched.path(), "askance").await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    let companion = second_repo(&app, elsewhere.path(), "askance").await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     add_companion(&app, id, companion).await;
     companion_mode(&app, id, companion, CompanionMode::ReadWrite).await;
 
-    let askance = watched.path().join("askance");
+    let askance = elsewhere.path().join("askance");
     let carried = opened(&app, id).await.branch;
 
     // Free in the Conversation's own repository and taken in the companion's,
@@ -1981,8 +1981,8 @@ async fn a_start_invents_around_a_companion_that_holds_the_name() {
 /// somebody's, and there is no shortage of other names.
 #[tokio::test]
 async fn a_start_invents_around_a_name_only_the_remote_holds() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     let carried = opened(&app, id).await.branch;
     let tip = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
@@ -2049,10 +2049,10 @@ fn has_branch(repo: &Path, branch: &str) -> bool {
 /// its own where it is worked in, and a record of where each of them went.
 #[tokio::test]
 async fn starting_a_grilling_checks_every_companion_out() {
-    let (watched, dir, app, _repo, repo_id) = workbench().await;
-    let reading = second_repo(&app, watched.path(), "askance").await;
-    let writing = second_repo(&app, watched.path(), "granit").await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+    let reading = second_repo(&app, elsewhere.path(), "askance").await;
+    let writing = second_repo(&app, elsewhere.path(), "granit").await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     add_companion(&app, id, reading).await;
     add_companion(&app, id, writing).await;
@@ -2061,8 +2061,8 @@ async fn starting_a_grilling_checks_every_companion_out() {
         CompanionModeChosen::Chosen
     );
 
-    let askance = watched.path().join("askance");
-    let granit = watched.path().join("granit");
+    let askance = elsewhere.path().join("askance");
+    let granit = elsewhere.path().join("granit");
     let tip = git(&askance, &["rev-parse", "HEAD"]).trim().to_owned();
 
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
@@ -2127,13 +2127,13 @@ async fn starting_a_grilling_checks_every_companion_out() {
 /// been checked out.
 #[tokio::test]
 async fn a_companion_left_on_the_rule_records_what_the_rule_came_to() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let reading = second_repo(&app, watched.path(), "askance").await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let reading = second_repo(&app, elsewhere.path(), "askance").await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     add_companion(&app, id, reading).await;
 
-    let askance = watched.path().join("askance");
+    let askance = elsewhere.path().join("askance");
 
     // A commit made after the companion was added and before the start, so what
     // is recorded can only have come from resolving the rule at grill start
@@ -2175,13 +2175,13 @@ async fn a_companion_that_cannot_be_delivered_refuses_the_start_by_name() {
         CompanionRefusal::NoBaseCommit,
         CompanionRefusal::BranchExists,
     ] {
-        let (watched, dir, app, repo, repo_id) = workbench().await;
-        let companion = second_repo(&app, watched.path(), "askance").await;
-        let id = ready(&app, watched.path(), repo_id).await;
+        let (elsewhere, dir, app, repo, repo_id) = workbench().await;
+        let companion = second_repo(&app, elsewhere.path(), "askance").await;
+        let id = ready(&app, elsewhere.path(), repo_id).await;
 
         add_companion(&app, id, companion).await;
 
-        let askance = watched.path().join("askance");
+        let askance = elsewhere.path().join("askance");
 
         match why {
             // A remote that answers to nothing: what a checkout would come off
@@ -2240,18 +2240,18 @@ async fn a_companion_that_cannot_be_delivered_refuses_the_start_by_name() {
 /// in the way of the directory it would need.
 #[tokio::test]
 async fn a_start_refused_over_a_companion_unmakes_the_checkouts_it_had_made() {
-    let (watched, dir, app, repo, repo_id) = workbench().await;
-    let first = second_repo(&app, watched.path(), "askance").await;
-    let last = second_repo(&app, watched.path(), "granit").await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, repo, repo_id) = workbench().await;
+    let first = second_repo(&app, elsewhere.path(), "askance").await;
+    let last = second_repo(&app, elsewhere.path(), "granit").await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     for companion in [first, last] {
         add_companion(&app, id, companion).await;
         companion_mode(&app, id, companion, CompanionMode::ReadWrite).await;
     }
 
-    let askance = watched.path().join("askance");
-    let granit = watched.path().join("granit");
+    let askance = elsewhere.path().join("askance");
+    let granit = elsewhere.path().join("granit");
 
     git(&granit, &["branch", "feature"]);
     assert_eq!(
@@ -2312,8 +2312,8 @@ async fn a_start_refused_over_a_companion_unmakes_the_checkouts_it_had_made() {
 /// a session, and there is none.
 #[tokio::test]
 async fn clicking_steer_stops_the_drive_and_leaves_it_stopped_when_nothing_follows() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
 
     assert_eq!(
@@ -2353,8 +2353,8 @@ async fn clicking_steer_stops_the_drive_and_leaves_it_stopped_when_nothing_follo
 /// on one would be a badge with no press to answer it.
 #[tokio::test]
 async fn steering_into_done_moves_it_and_starts_nothing() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
 
     assert_eq!(
@@ -2402,8 +2402,8 @@ async fn steering_into_done_moves_it_and_starts_nothing() {
 /// refusal.
 #[tokio::test]
 async fn a_draft_is_somewhere_to_steer_from_too() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     assert_eq!(
         steer(&app, id).await,
@@ -2444,8 +2444,8 @@ async fn a_draft_is_somewhere_to_steer_from_too() {
 /// it belongs to has no Draft to leave.
 #[tokio::test]
 async fn steering_a_draft_into_grilling_makes_its_branch_and_worktree() {
-    let (watched, dir, app, repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     let tip = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
 
@@ -2520,8 +2520,8 @@ async fn steering_a_draft_into_grilling_makes_its_branch_and_worktree() {
 /// Brief that is already there.
 #[tokio::test]
 async fn steering_into_grilling_without_a_brief_writes_none() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     assert_eq!(
         steer(&app, id).await,
@@ -2560,12 +2560,12 @@ async fn steering_into_grilling_without_a_brief_writes_none() {
 /// somebody wrote.
 #[tokio::test]
 async fn steering_into_grilling_with_no_brief_anywhere_is_refused_by_name() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
 
-    let grilling = profile(&app, watched.path(), "fable").await;
-    let implementation = profile(&app, watched.path(), "opus").await;
-    let review = profile(&app, watched.path(), "haiku").await;
+    let grilling = profile(&app, elsewhere.path(), "fable").await;
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
     choose(&app, id, "grilling", grilling).await;
     choose(&app, id, "implementation", implementation).await;
     choose(&app, id, "review", review).await;
@@ -2618,8 +2618,8 @@ async fn steering_into_grilling_with_no_brief_anywhere_is_refused_by_name() {
 /// where it was, on the branch it was on, with the round it was in.
 #[tokio::test]
 async fn a_conversation_whose_profile_was_removed_is_steered_back_onto_another() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
 
     let interviewing = opened(&app, id)
         .await
@@ -2653,7 +2653,7 @@ async fn a_conversation_whose_profile_was_removed_is_steered_back_onto_another()
         "a state a session runs in needs one, and the modal is where it is picked",
     );
 
-    let rescue = profile(&app, watched.path(), "rescue").await;
+    let rescue = profile(&app, elsewhere.path(), "rescue").await;
 
     let steered: ConversationSteered = post(
         &app,
@@ -2688,10 +2688,10 @@ async fn a_conversation_whose_profile_was_removed_is_steered_back_onto_another()
 /// into are nobody's to re-settle here.
 #[tokio::test]
 async fn steering_into_grilling_settles_the_grilling_pairing() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
-    let picked = profile(&app, watched.path(), "steering").await;
+    let picked = profile(&app, elsewhere.path(), "steering").await;
     let building = opened(&app, id)
         .await
         .implementation_pairing
@@ -2745,8 +2745,8 @@ async fn steering_into_grilling_settles_the_grilling_pairing() {
 /// be a fresh set of eyes would undo the whole reason for picking it apart.
 #[tokio::test]
 async fn steering_into_wrapping_leaves_a_review_account_the_human_chose_alone() {
-    let (watched, dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
@@ -2770,7 +2770,7 @@ async fn steering_into_wrapping_leaves_a_review_account_the_human_chose_alone() 
 
     pool.close().await;
 
-    let picked = profile(&app, watched.path(), "steering").await;
+    let picked = profile(&app, elsewhere.path(), "steering").await;
     let before = opened(&app, id).await;
     let interviewing = before
         .grilling_pairing
@@ -2834,18 +2834,18 @@ async fn steering_into_wrapping_leaves_a_review_account_the_human_chose_alone() 
 /// pull request. Filling is not replacing — there was no choice to undo.
 #[tokio::test]
 async fn steering_into_wrapping_fills_a_review_nobody_picked_an_account_for() {
-    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
 
     // Everything but the review, which is what a Conversation steered out of
     // Draft has: the pickers freeze at the move, and Implementing settles only
     // what builds.
-    let building = profile(&app, watched.path(), "opus").await;
+    let building = profile(&app, elsewhere.path(), "opus").await;
     choose(
         &app,
         id,
         "grilling",
-        profile(&app, watched.path(), "fable").await,
+        profile(&app, elsewhere.path(), "fable").await,
     )
     .await;
     choose(&app, id, "implementation", building).await;
@@ -2933,8 +2933,8 @@ async fn steering_into_wrapping_fills_a_review_nobody_picked_an_account_for() {
 /// — there is nothing missing.
 #[tokio::test]
 async fn steering_into_wrapping_leaves_a_conversation_with_no_review_unreviewed() {
-    let (watched, dir, app, _repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     assert_eq!(no_review(&app, id).await, ProfileChosen::Chosen);
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
@@ -2962,7 +2962,7 @@ async fn steering_into_wrapping_leaves_a_conversation_with_no_review_unreviewed(
 
     pool.close().await;
 
-    let picked = profile(&app, watched.path(), "steering").await;
+    let picked = profile(&app, elsewhere.path(), "steering").await;
 
     assert_eq!(
         steer(&app, id).await,
@@ -3013,8 +3013,8 @@ async fn steering_into_wrapping_leaves_a_conversation_with_no_review_unreviewed(
 /// click left: stopped, where it stood.
 #[tokio::test]
 async fn steering_into_implementing_with_nothing_to_do_is_refused_by_name() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
 
     assert!(
@@ -3067,8 +3067,8 @@ async fn steering_into_implementing_with_nothing_to_do_is_refused_by_name() {
 /// left it unsaid would be a Conversation nobody could start again.
 #[tokio::test]
 async fn steering_into_implementing_with_an_instruction_records_what_was_asked_for() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
 
     assert_eq!(
@@ -3123,8 +3123,8 @@ async fn steering_into_implementing_with_an_instruction_records_what_was_asked_f
 /// chosen, on the branch that is already there.
 #[tokio::test]
 async fn steering_a_closed_conversation_into_grilling_gives_it_a_worktree_back() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
 
     let view = opened(&app, id).await;
@@ -3198,8 +3198,8 @@ async fn steering_a_closed_conversation_into_grilling_gives_it_a_worktree_back()
 /// and the new Brief under the move.
 #[tokio::test]
 async fn a_finished_conversation_steered_into_grilling_opens_a_second_round() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
 
     assert_eq!(
@@ -3274,8 +3274,8 @@ async fn a_finished_conversation_steered_into_grilling_opens_a_second_round() {
 /// grilled about, and this is one session's whole job.
 #[tokio::test]
 async fn steering_a_finished_conversation_into_follow_up_records_the_brief() {
-    let (watched, dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
@@ -3373,8 +3373,8 @@ async fn steering_a_finished_conversation_into_follow_up_records_the_brief() {
 /// refused by, asked of the target that turns on the same fact.
 #[tokio::test]
 async fn steering_into_follow_up_with_nothing_to_follow_up_is_refused_by_name() {
-    let (watched, dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
 
     assert_eq!(
         steer(&app, id).await,
@@ -3444,8 +3444,8 @@ async fn steering_into_follow_up_with_nothing_to_follow_up_is_refused_by_name() 
 /// still there, and the Conversation is still grilling.
 #[tokio::test]
 async fn steering_into_wrapping_without_a_pull_request_is_refused_by_name() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
 
     assert_eq!(
@@ -3481,8 +3481,8 @@ async fn steering_into_wrapping_without_a_pull_request_is_refused_by_name() {
 /// wrap up.
 #[tokio::test]
 async fn a_draft_has_no_pull_request_to_be_steered_onto() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     assert_eq!(
         steer(&app, id).await,
@@ -3507,7 +3507,7 @@ async fn a_draft_has_no_pull_request_to_be_steered_onto() {
 /// could never name one — the id comes out of a URL the human may have typed.
 #[tokio::test]
 async fn steering_a_conversation_that_is_not_there_says_so() {
-    let (_watched, _dir, app, _repo, _repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, _repo_id) = workbench().await;
 
     assert_eq!(steer(&app, 404).await, SteerOpened::NoSuchConversation);
     assert_eq!(
@@ -3536,8 +3536,8 @@ async fn steering_a_conversation_that_is_not_there_says_so() {
 /// would mean.
 #[tokio::test]
 async fn a_conversation_that_has_started_cannot_start_again() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
     assert_eq!(grill(&app, id).await, GrillingStarted::NotDrafting);
@@ -3547,7 +3547,7 @@ async fn a_conversation_that_has_started_cannot_start_again() {
 
 #[tokio::test]
 async fn grilling_a_conversation_that_is_not_there_says_so() {
-    let (_watched, _dir, app, _repo, _repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, _repo_id) = workbench().await;
 
     assert_eq!(grill(&app, 404).await, GrillingStarted::NoSuchConversation);
 
@@ -3566,8 +3566,8 @@ async fn grilling_a_conversation_that_is_not_there_says_so() {
 /// Brief and the branch name stop being the human's to change.
 #[tokio::test]
 async fn grilling_freezes_the_brief_and_the_branch_name() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
     let branch = opened(&app, id).await.branch;
 
     grill(&app, id).await;
@@ -3597,8 +3597,8 @@ async fn grilling_freezes_the_brief_and_the_branch_name() {
 /// cheap and may hold work worth reading.
 #[tokio::test]
 async fn closing_removes_the_worktree_and_keeps_the_branch() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
     grill(&app, id).await;
 
     let view = opened(&app, id).await;
@@ -3636,10 +3636,10 @@ async fn closing_removes_the_worktree_and_keeps_the_branch() {
 /// branch is a name and a commit that may hold work worth reading.
 #[tokio::test]
 async fn closing_removes_every_companion_worktree_and_keeps_their_branches() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let reading = second_repo(&app, watched.path(), "askance").await;
-    let writing = second_repo(&app, watched.path(), "granit").await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let reading = second_repo(&app, elsewhere.path(), "askance").await;
+    let writing = second_repo(&app, elsewhere.path(), "granit").await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     add_companion(&app, id, reading).await;
     add_companion(&app, id, writing).await;
@@ -3654,8 +3654,8 @@ async fn closing_removes_every_companion_worktree_and_keeps_their_branches() {
 
     assert_eq!(close(&app, id).await, ConversationClosed::Closed);
 
-    let askance = watched.path().join("askance");
-    let granit = watched.path().join("granit");
+    let askance = elsewhere.path().join("askance");
+    let granit = elsewhere.path().join("granit");
 
     assert!(!read.exists(), "the read-only directory should be gone");
     assert!(!written.exists(), "and so should the read-write one");
@@ -3676,8 +3676,8 @@ async fn closing_removes_every_companion_worktree_and_keeps_their_branches() {
 
 #[tokio::test]
 async fn closing_twice_is_not_an_error() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
     grill(&app, id).await;
 
     assert_eq!(close(&app, id).await, ConversationClosed::Closed);
@@ -3693,7 +3693,7 @@ async fn closing_twice_is_not_an_error() {
 /// one where nothing was ever made.
 #[tokio::test]
 async fn a_drafting_conversation_can_be_closed() {
-    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
 
     assert_eq!(close(&app, id).await, ConversationClosed::Closed);
@@ -3708,8 +3708,8 @@ async fn a_drafting_conversation_can_be_closed() {
 /// asked for is that the directory be gone, and it is.
 #[tokio::test]
 async fn closing_a_conversation_whose_worktree_has_already_gone_works() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
     grill(&app, id).await;
 
     let path = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
@@ -3727,8 +3727,8 @@ async fn closing_a_conversation_whose_worktree_has_already_gone_works() {
 /// log, and the sweep that follows deletes it outright.
 #[tokio::test]
 async fn closing_a_conversation_whose_worktree_git_will_not_remove_sweeps_it_away() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
     grill(&app, id).await;
 
     let path = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
@@ -3764,8 +3764,8 @@ async fn closing_a_conversation_whose_worktree_git_will_not_remove_sweeps_it_awa
 /// nobody's to cancel.
 #[tokio::test]
 async fn a_close_the_browser_left_part_way_through_still_finishes() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
     grill(&app, id).await;
 
     let path = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
@@ -3830,9 +3830,9 @@ async fn a_close_the_browser_left_part_way_through_still_finishes() {
 /// may be touched however the sweep was triggered.
 #[tokio::test]
 async fn closing_one_conversation_sweeps_the_strays_and_leaves_the_live_worktrees() {
-    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
 
-    let closing = ready(&app, watched.path(), repo_id).await;
+    let closing = ready(&app, elsewhere.path(), repo_id).await;
     grill(&app, closing).await;
     let closing_path = PathBuf::from(opened(&app, closing).await.worktree.unwrap().path);
 
@@ -3870,8 +3870,8 @@ async fn closing_one_conversation_sweeps_the_strays_and_leaves_the_live_worktree
 /// comes off the sidebar, and the record is the record either press leaves.
 #[tokio::test]
 async fn closing_and_archiving_in_one_press_does_both() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
     grill(&app, id).await;
 
     let path = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
@@ -3900,7 +3900,7 @@ async fn closing_and_archiving_in_one_press_does_both() {
 /// point of saying so rather than refusing: what the human asked for holds.
 #[tokio::test]
 async fn closing_and_archiving_one_already_closed_puts_it_away() {
-    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
     close(&app, id).await;
 
@@ -3915,7 +3915,7 @@ async fn closing_and_archiving_one_already_closed_puts_it_away() {
 
 #[tokio::test]
 async fn closing_and_archiving_a_conversation_that_is_not_there_says_so() {
-    let (_watched, _dir, app, _repo, _repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, _repo_id) = workbench().await;
 
     assert_eq!(
         close_and_archive(&app, 404).await,
@@ -3925,7 +3925,7 @@ async fn closing_and_archiving_a_conversation_that_is_not_there_says_so() {
 
 #[tokio::test]
 async fn closing_a_conversation_that_is_not_there_says_so() {
-    let (_watched, _dir, app, _repo, _repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, _repo_id) = workbench().await;
 
     assert_eq!(
         close(&app, 404).await,
@@ -3938,8 +3938,8 @@ async fn closing_a_conversation_that_is_not_there_says_so() {
 /// where it was. Nothing leaves a Timeline.
 #[tokio::test]
 async fn archiving_a_closed_conversation_takes_it_off_the_sidebar() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
     close(&app, id).await;
 
     assert_eq!(archive(&app, id).await, ConversationArchived::Archived);
@@ -3957,7 +3957,7 @@ async fn archiving_a_closed_conversation_takes_it_off_the_sidebar() {
 /// Archiving twice is not an error — what the human asked for holds either way.
 #[tokio::test]
 async fn archiving_twice_is_not_an_error() {
-    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
     close(&app, id).await;
 
@@ -3973,8 +3973,8 @@ async fn archiving_twice_is_not_an_error() {
 /// from: it is closed first and archived after.
 #[tokio::test]
 async fn a_conversation_that_is_not_closed_cannot_be_archived() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     assert_eq!(archive(&app, id).await, ConversationArchived::NotClosed);
 
@@ -3986,7 +3986,7 @@ async fn a_conversation_that_is_not_closed_cannot_be_archived() {
 
 #[tokio::test]
 async fn archiving_a_conversation_that_is_not_there_says_so() {
-    let (_watched, _dir, app, _repo, _repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, _repo_id) = workbench().await;
 
     assert_eq!(
         archive(&app, 404).await,
@@ -4044,8 +4044,8 @@ async fn stored_state(dir: &tempfile::TempDir, id: i64) -> String {
 /// again afterwards.
 #[tokio::test]
 async fn a_conversation_whose_state_word_is_unreadable_can_still_be_closed_and_archived() {
-    let (watched, dir, app, repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
     grill(&app, id).await;
 
     let path = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
@@ -4101,7 +4101,7 @@ async fn a_conversation_whose_state_word_is_unreadable_can_still_be_closed_and_a
 /// wherever it cannot read the state.
 #[tokio::test]
 async fn archiving_a_conversation_whose_state_word_is_unreadable_says_it_is_not_closed() {
-    let (_watched, dir, app, _repo, repo_id) = workbench().await;
+    let (_elsewhere, dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
     corrupt_the_state(&dir, id).await;
 
@@ -4114,7 +4114,7 @@ async fn archiving_a_conversation_whose_state_word_is_unreadable_says_it_is_not_
 /// they are not drawn at all.
 #[tokio::test]
 async fn the_toggle_shows_and_hides_what_has_been_archived() {
-    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let kept = started(&app, repo_id).await;
     let put_away = started(&app, repo_id).await;
     close(&app, put_away).await;
@@ -4138,7 +4138,7 @@ async fn the_toggle_shows_and_hides_what_has_been_archived() {
 /// back off the server — which is what a second viewer opening the sidebar is.
 #[tokio::test]
 async fn the_toggle_is_read_back_off_the_server() {
-    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
     close(&app, id).await;
     archive(&app, id).await;
@@ -4157,8 +4157,8 @@ async fn the_toggle_is_read_back_off_the_server() {
 /// on the list again with the toggle off.
 #[tokio::test]
 async fn unarchiving_returns_a_conversation_to_the_ordinary_list() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
     close(&app, id).await;
     archive(&app, id).await;
 
@@ -4187,8 +4187,8 @@ async fn unarchiving_returns_a_conversation_to_the_ordinary_list() {
 /// did.
 #[tokio::test]
 async fn a_trimmed_conversation_says_so_on_its_page() {
-    let (watched, _dir, app, pool, repo_id) = workbench_and_pool().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, pool, repo_id) = workbench_and_pool().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
     close(&app, id).await;
     archive(&app, id).await;
 
@@ -4222,7 +4222,7 @@ async fn a_trimmed_conversation_says_so_on_its_page() {
 /// asked for holds either way.
 #[tokio::test]
 async fn unarchiving_one_that_is_not_archived_is_not_an_error() {
-    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
 
     assert_eq!(
@@ -4234,7 +4234,7 @@ async fn unarchiving_one_that_is_not_archived_is_not_an_error() {
 
 #[tokio::test]
 async fn unarchiving_a_conversation_that_is_not_there_says_so() {
-    let (_watched, _dir, app, _repo, _repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, _repo_id) = workbench().await;
 
     assert_eq!(
         unarchive(&app, 404).await,
@@ -4246,8 +4246,8 @@ async fn unarchiving_a_conversation_that_is_not_there_says_so() {
 /// fail on later.
 #[tokio::test]
 async fn a_conversation_whose_worktree_has_gone_says_so() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
     grill(&app, id).await;
 
     let worktree = opened(&app, id).await.worktree.unwrap();
@@ -4263,9 +4263,9 @@ async fn a_conversation_whose_worktree_has_gone_says_so() {
 /// Two Conversations on one branch name in one Repo cannot share a directory.
 #[tokio::test]
 async fn two_conversations_wanting_one_name_get_a_directory_each() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
 
-    let first = ready(&app, watched.path(), repo_id).await;
+    let first = ready(&app, elsewhere.path(), repo_id).await;
     assert_eq!(
         rename(&app, first, "rate-limiting").await,
         BranchRenamed::Renamed
@@ -4471,8 +4471,8 @@ fn handoff(view: &ConversationView) -> Option<&verkstead_render::HandoffEvent> {
 }
 
 /// A Conversation that is grilling for real: branch, worktree and all.
-async fn grilling(app: &Router, watched: &Path, repo_id: i64) -> i64 {
-    let id = ready(app, watched, repo_id).await;
+async fn grilling(app: &Router, elsewhere: &Path, repo_id: i64) -> i64 {
+    let id = ready(app, elsewhere, repo_id).await;
     assert_eq!(grill(app, id).await, GrillingStarted::Started);
     id
 }
@@ -4485,8 +4485,8 @@ async fn grilling(app: &Router, watched: &Path, repo_id: i64) -> i64 {
 /// Conversation is the artifact that session goes on to produce.
 #[tokio::test]
 async fn picking_a_direction_on_the_closing_set_settles_it() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
 
     let set = ask(&app, id, PROPOSING).await;
     assert_eq!(
@@ -4517,8 +4517,8 @@ async fn picking_a_direction_on_the_closing_set_settles_it() {
 /// the proposal exactly as agreeing with it does.
 #[tokio::test]
 async fn a_pick_the_agent_did_not_recommend_is_the_one_that_runs() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
 
     picking(&app, ask(&app, id, RECOMMENDING_INLINE).await, "roadmap").await;
 
@@ -4564,8 +4564,8 @@ async fn lock(app: &Router, set_id: i64) -> verkstead_render::Locked {
 /// something answerable rather than whether a session is idling on the answer.
 #[tokio::test]
 async fn a_conversation_with_an_unanswered_set_is_waiting_on_the_human() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
 
     assert!(!only_row(&app).await.waiting, "nothing has been asked yet");
 
@@ -4581,8 +4581,8 @@ async fn a_conversation_with_an_unanswered_set_is_waiting_on_the_human() {
 
 #[tokio::test]
 async fn a_set_that_was_locked_unanswered_stops_drawing_the_human_too() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
 
     let set = ask(&app, id, ORDINARY).await;
     assert!(only_row(&app).await.waiting);
@@ -4596,8 +4596,8 @@ async fn a_set_that_was_locked_unanswered_stops_drawing_the_human_too() {
 /// left drawing them once it is answered.
 #[tokio::test]
 async fn a_closing_set_stops_drawing_the_human_the_moment_it_is_picked_on() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
 
     let set = ask(&app, id, PROPOSING).await;
     assert!(only_row(&app).await.waiting);
@@ -4617,7 +4617,7 @@ async fn a_closing_set_stops_drawing_the_human_the_moment_it_is_picked_on() {
 /// marking it as an ask. So the flag stays off, whatever else is true of it.
 #[tokio::test]
 async fn a_draft_is_never_marked_as_waiting() {
-    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
 
     let set = ask(&app, id, ORDINARY).await;
@@ -4655,8 +4655,8 @@ fn standings(view: &ConversationView) -> Vec<&Standing> {
 /// closing has no session after it to leave one for.
 #[tokio::test]
 async fn closing_locks_every_set_it_finds_open() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
 
     let answered = ask(&app, id, ORDINARY).await;
     answer_ordinary(&app, answered).await;
@@ -4699,8 +4699,8 @@ async fn closing_locks_every_set_it_finds_open() {
 /// it is what happened, and the Notice explaining it is still on the Timeline.
 #[tokio::test]
 async fn a_closed_conversation_carries_neither_waiting_mark() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
 
     // The click is the shortest way to a stop written down: it stops the drive
     // and opens the modal, and nothing here submits one.
@@ -4740,7 +4740,7 @@ async fn a_closed_conversation_carries_neither_waiting_mark() {
 /// teaches them to stop reading the discs.
 #[tokio::test]
 async fn closing_takes_the_news_off_the_row_the_human_never_opened() {
-    let (_watched, dir, app, _repo, repo_id) = workbench().await;
+    let (_elsewhere, dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
@@ -4773,8 +4773,8 @@ async fn closing_takes_the_news_off_the_row_the_human_never_opened() {
 /// answerable ask is still an ask.
 #[tokio::test]
 async fn a_done_conversation_with_an_open_set_is_still_waiting() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
 
     ask(&app, id, ORDINARY).await;
 
@@ -4805,8 +4805,8 @@ async fn a_done_conversation_with_an_open_set_is_still_waiting() {
 /// the answer is what turns it off again.
 #[tokio::test]
 async fn the_conversation_view_says_when_an_open_ask_is_waiting_on_the_human() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
 
     assert!(
         !waits(&app, id).await,
@@ -4830,8 +4830,8 @@ async fn the_conversation_view_says_when_an_open_ask_is_waiting_on_the_human() {
 /// *which* mark the head draws. This is whether there is one at all.
 #[tokio::test]
 async fn the_conversation_view_says_when_a_stop_is_waiting_on_the_human() {
-    let (watched, dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
@@ -4908,8 +4908,8 @@ async fn waits(app: &Router, id: i64) -> bool {
 /// wire is this file's.
 #[tokio::test]
 async fn a_sessions_event_says_what_it_was_launched_under() {
-    let (watched, dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
@@ -4962,13 +4962,13 @@ async fn a_sessions_event_says_what_it_was_launched_under() {
 /// above without knowing anything.
 #[tokio::test]
 async fn a_sessions_event_says_which_harness_ran_it() {
-    let (watched, dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
 
-    let profile_id = codex_profile(&app, watched.path(), "hopper").await;
+    let profile_id = codex_profile(&app, elsewhere.path(), "hopper").await;
     let pairing = store::Pairing {
         profile: store::load_profile(&pool, profile_id)
             .await
@@ -5006,8 +5006,8 @@ async fn a_sessions_event_says_which_harness_ran_it() {
 /// things recorded is looked up when the Timeline is read.
 #[tokio::test]
 async fn what_the_profile_became_afterwards_changes_nothing() {
-    let (watched, dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
@@ -5030,7 +5030,7 @@ async fn what_the_profile_became_afterwards_changes_nothing() {
         .await
         .unwrap();
 
-    let home = codex_home(watched.path(), "fable");
+    let home = codex_home(elsewhere.path(), "fable");
     let saved: ProfileSaved = post(
         &app,
         &format!("/api/ui/profiles/{}", picked.profile.id),
@@ -5058,11 +5058,11 @@ async fn what_the_profile_became_afterwards_changes_nothing() {
     pool.close().await;
 }
 
-/// A Codex home inside `watched`, which is the whole of what a Codex account
+/// A Codex home inside `elsewhere`, which is the whole of what a Codex account
 /// is — see `tests/profiles.rs`, where the shape of each type's account is the
 /// subject.
-fn codex_home(watched: &Path, account: &str) -> PathBuf {
-    let home = watched.join(account).join(".codex");
+fn codex_home(elsewhere: &Path, account: &str) -> PathBuf {
+    let home = elsewhere.join(account).join(".codex");
     std::fs::create_dir_all(&home).unwrap();
     home
 }
@@ -5070,13 +5070,13 @@ fn codex_home(watched: &Path, account: &str) -> PathBuf {
 /// Save a Codex Profile and hand back its id, [`profile`]'s way: through the
 /// endpoint the human saves one through, so what is recorded is what a save
 /// leaves behind.
-async fn codex_profile(app: &Router, watched: &Path, name: &str) -> i64 {
+async fn codex_profile(app: &Router, elsewhere: &Path, name: &str) -> i64 {
     let saved: ProfileSaved = post(
         app,
         "/api/ui/profiles",
         &serde_json::json!({
             "name": name,
-            "account": { "agent_type": "Codex", "home": codex_home(watched, name) },
+            "account": { "agent_type": "Codex", "home": codex_home(elsewhere, name) },
             "models": ["gpt-5.2-codex"],
         }),
     )
@@ -5100,8 +5100,8 @@ async fn codex_profile(app: &Router, watched: &Path, name: &str) -> i64 {
 /// everything drawn from one goes on being drawn.
 #[tokio::test]
 async fn a_session_that_was_never_paired_says_nothing_about_it() {
-    let (watched, dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
@@ -5132,8 +5132,8 @@ async fn a_session_that_was_never_paired_says_nothing_about_it() {
 /// it, so a Timeline from between the two is a pairing with no agent beside it.
 #[tokio::test]
 async fn a_session_paired_before_the_agent_was_recorded_says_nothing_about_it() {
-    let (watched, dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
@@ -5193,8 +5193,8 @@ async fn printed(app: &Router, id: i64) -> verkstead_render::AgentOutputEvent {
 /// the file with an agent in it.
 #[tokio::test]
 async fn a_conversation_with_no_session_running_is_not_working() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    grilling(&app, elsewhere.path(), repo_id).await;
 
     assert!(!only_row(&app).await.working);
 }
@@ -5204,8 +5204,8 @@ async fn a_conversation_with_no_session_running_is_not_working() {
 /// `git add -A` is the whole reason the file is not in there.
 #[tokio::test]
 async fn a_handoff_never_lands_in_the_repository() {
-    let (watched, dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
 
     handoff_written(dir.path(), id, "# What we settled\n");
 
@@ -5249,8 +5249,8 @@ async fn no_answer_takes_the_handoff_the_grilling_wrote() {
             serde_json::json!({ "answers": [{ "label": "Q9", "selected": 2 }] }),
         ),
     ] {
-        let (watched, dir, app, _repo, repo_id) = workbench().await;
-        let id = grilling(&app, watched.path(), repo_id).await;
+        let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+        let id = grilling(&app, elsewhere.path(), repo_id).await;
 
         let written = handoff_written(dir.path(), id, "# What we settled\n");
         let set = ask(&app, id, PROPOSING).await;
@@ -5273,8 +5273,8 @@ async fn no_answer_takes_the_handoff_the_grilling_wrote() {
 
 #[tokio::test]
 async fn answering_an_ordinary_grilling_set_leaves_the_grilling_running() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
 
     let set = ask(&app, id, ORDINARY).await;
     assert_eq!(
@@ -5295,7 +5295,7 @@ async fn answering_an_ordinary_grilling_set_leaves_the_grilling_running() {
 /// not finished with it.
 ///
 /// One test over the three, because what the pick does is the same for each: it
-/// is what the tail is watched for, and nothing else. What ends that session and
+/// is what the tail is elsewhere for, and nothing else. What ends that session and
 /// moves the Conversation is the artifact landing, which wants an agent to write
 /// it: `sessions.rs` is where each is asked end to end.
 #[tokio::test]
@@ -5305,8 +5305,8 @@ async fn a_pick_leaves_the_conversation_grilling() {
         ("task-list", verkstead_schema::Direction::TaskList),
         ("roadmap", verkstead_schema::Direction::Roadmap),
     ] {
-        let (watched, dir, app, _repo, repo_id) = workbench().await;
-        let id = grilling(&app, watched.path(), repo_id).await;
+        let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+        let id = grilling(&app, elsewhere.path(), repo_id).await;
 
         let written = handoff_written(dir.path(), id, "# What we settled\n");
 
@@ -5320,7 +5320,7 @@ async fn a_pick_leaves_the_conversation_grilling() {
         assert_eq!(
             view.direction,
             Some(direction),
-            "the pick is recorded: it is what the artifact is watched for — picking {picked}",
+            "the pick is recorded: it is what the artifact is elsewhere for — picking {picked}",
         );
         assert_eq!(
             view.state,
@@ -5342,8 +5342,8 @@ async fn a_pick_leaves_the_conversation_grilling() {
 /// endpoint that served it are gone with the state they belonged to.
 #[tokio::test]
 async fn there_is_no_endpoint_left_to_choose_a_direction_on() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
 
     let response = app
         .clone()
@@ -5370,8 +5370,8 @@ async fn there_is_no_endpoint_left_to_choose_a_direction_on() {
 
 #[tokio::test]
 async fn disagreeing_with_a_proposal_leaves_the_grilling_running() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
 
     let set = ask(&app, id, PROPOSING).await;
 
@@ -5405,8 +5405,8 @@ async fn disagreeing_with_a_proposal_leaves_the_grilling_running() {
 
 #[tokio::test]
 async fn a_proposal_put_again_after_a_refusal_can_be_picked_on() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
 
     // Refused, so the grilling carries on holding the thread.
     answered(
@@ -5442,8 +5442,8 @@ async fn a_proposal_put_again_after_a_refusal_can_be_picked_on() {
 /// against.
 #[tokio::test]
 async fn a_proposal_with_no_reasoning_is_refused_as_it_arrives() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
 
     let unreasoned = PROPOSING
         .split("  rationale:")
@@ -5510,8 +5510,8 @@ fn pinned(view: &ConversationView) -> Option<&verkstead_render::TaskListEvent> {
 /// rather than as one more thing on the record.
 #[tokio::test]
 async fn a_backlog_in_the_worktree_is_pinned_to_the_timeline() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
     grill(&app, id).await;
 
     let worktree = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
@@ -5547,8 +5547,8 @@ async fn a_backlog_in_the_worktree_is_pinned_to_the_timeline() {
 /// task moves it without anything being written down.
 #[tokio::test]
 async fn the_task_list_follows_the_worktree_as_it_changes() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
     grill(&app, id).await;
 
     let worktree = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
@@ -5577,8 +5577,8 @@ async fn the_task_list_follows_the_worktree_as_it_changes() {
 /// The ordinary case, and the one every Conversation starts in.
 #[tokio::test]
 async fn a_conversation_with_no_backlog_has_nothing_pinned() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     // Before there is a worktree at all, and after there is one with nothing in
     // it: both are a Conversation with no backlog.
@@ -5599,8 +5599,8 @@ async fn backlog_pane(app: &Router, id: i64) -> BacklogPane {
 /// are one reading of `.tasks/`, so the entries line up.
 #[tokio::test]
 async fn the_task_list_opens_as_every_task_document_it_names() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
     grill(&app, id).await;
 
     let worktree = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
@@ -5647,8 +5647,8 @@ async fn the_task_list_opens_as_every_task_document_it_names() {
 /// would do about each of them is the same nothing.
 #[tokio::test]
 async fn a_conversation_with_no_backlog_has_no_pane_to_open() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     // Before there is a worktree at all.
     assert_eq!(refused_backlog(&app, id).await, StatusCode::NOT_FOUND);
@@ -5725,8 +5725,8 @@ async fn roadmap_pane(app: &Router, id: i64, name: &str) -> RoadmapPane {
 /// Both are one reading of `docs/roadmaps/`, so the entries line up.
 #[tokio::test]
 async fn the_stage_list_opens_as_every_stage_brief_it_names() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
     grill(&app, id).await;
 
     let worktree = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
@@ -5790,8 +5790,8 @@ async fn the_stage_list_opens_as_every_stage_brief_it_names() {
 /// do about each of them is the same nothing.
 #[tokio::test]
 async fn a_conversation_with_no_such_roadmap_has_no_pane_to_open() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     // Before there is a worktree at all.
     assert_eq!(
@@ -5935,7 +5935,7 @@ async fn adopting(app: &Router, repo_id: i64, name: &str) -> i64 {
 /// roadmap and the stage adopting would start.
 #[tokio::test]
 async fn adopting_a_roadmap_starts_a_draft_naming_it_and_its_next_stage() {
-    let (_watched, _dir, app, repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, repo, repo_id) = workbench().await;
     roadmap(
         &repo,
         OPEN_AT_THREE,
@@ -5977,7 +5977,7 @@ async fn adopting_a_roadmap_starts_a_draft_naming_it_and_its_next_stage() {
 /// the shape with a Brief to write and a grilling to start.
 #[tokio::test]
 async fn a_conversation_started_the_ordinary_way_is_adopting_nothing() {
-    let (_watched, _dir, app, repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, repo, repo_id) = workbench().await;
     roadmap(
         &repo,
         OPEN_AT_THREE,
@@ -5995,7 +5995,7 @@ async fn a_conversation_started_the_ordinary_way_is_adopting_nothing() {
 /// stage the page names.
 #[tokio::test]
 async fn the_stage_an_adoption_names_is_read_at_the_base_commit() {
-    let (_watched, _dir, app, repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, repo, repo_id) = workbench().await;
     roadmap(
         &repo,
         OPEN_AT_THREE,
@@ -6030,7 +6030,7 @@ async fn the_stage_an_adoption_names_is_read_at_the_base_commit() {
 /// Which of the ways it can be is the press's to say by name.
 #[tokio::test]
 async fn an_adoption_names_no_stage_where_the_roadmap_has_none_to_start() {
-    let (_watched, _dir, app, repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, repo, repo_id) = workbench().await;
     roadmap(
         &repo,
         OPEN_AT_THREE,
@@ -6049,7 +6049,7 @@ async fn an_adoption_names_no_stage_where_the_roadmap_has_none_to_start() {
 
 #[tokio::test]
 async fn adopting_against_a_repo_that_is_not_registered_says_so() {
-    let (_watched, _dir, app, _repo, _repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, _repo, _repo_id) = workbench().await;
 
     assert_eq!(adopt(&app, 404, "mvp").await, Started::NoSuchRepo);
     assert!(sidebar(&app).await.is_empty());
@@ -6077,12 +6077,12 @@ async fn press_adopt(app: &Router, id: i64) -> Adopted {
 /// Everything an adoption needs before the press: both Profiles chosen, which
 /// is the whole of what an adopting Conversation has to settle — the Brief is
 /// the stage brief and it arrives with the stage.
-async fn ready_to_adopt(app: &Router, watched: &Path, repo_id: i64, name: &str) -> i64 {
+async fn ready_to_adopt(app: &Router, elsewhere: &Path, repo_id: i64, name: &str) -> i64 {
     let id = adopting(app, repo_id, name).await;
 
-    let grilling = profile(app, watched, "fable").await;
-    let implementation = profile(app, watched, "opus").await;
-    let review = profile(app, watched, "haiku").await;
+    let grilling = profile(app, elsewhere, "fable").await;
+    let implementation = profile(app, elsewhere, "opus").await;
+    let review = profile(app, elsewhere, "haiku").await;
     choose(app, id, "grilling", grilling).await;
     choose(app, id, "implementation", implementation).await;
     choose(app, id, "review", review).await;
@@ -6178,10 +6178,10 @@ fn alongside(repo_id: i64, mode: &str) -> serde_json::Value {
 /// that asks them again — of a repository joining now, and of nothing else.
 #[tokio::test]
 async fn steering_puts_a_companion_in_and_checks_it_out() {
-    let (watched, dir, app, _repo, repo_id) = workbench().await;
-    let reading = second_repo(&app, watched.path(), "askance").await;
-    let writing = second_repo(&app, watched.path(), "granit").await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+    let reading = second_repo(&app, elsewhere.path(), "askance").await;
+    let writing = second_repo(&app, elsewhere.path(), "granit").await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
     assert!(companions(&app, id).await.is_empty());
@@ -6211,7 +6211,7 @@ async fn steering_puts_a_companion_in_and_checks_it_out() {
 
     // The read-only one is detached at whatever its base came to, and holds no
     // branch in somebody else's repository.
-    let askance = watched.path().join("askance");
+    let askance = elsewhere.path().join("askance");
     let detached = checked_out(&view, "askance");
 
     assert_eq!(companion(&view, "askance").mode, CompanionMode::ReadOnly);
@@ -6228,7 +6228,7 @@ async fn steering_puts_a_companion_in_and_checks_it_out() {
 
     // And the read-write one is on a branch of its own, mirroring the
     // Conversation's because nothing was typed in the field.
-    let granit = watched.path().join("granit");
+    let granit = elsewhere.path().join("granit");
     let worked = checked_out(&view, "granit");
 
     assert_eq!(companion(&view, "granit").mode, CompanionMode::ReadWrite);
@@ -6285,10 +6285,10 @@ async fn steering_puts_a_companion_in_and_checks_it_out() {
 /// than obeyed.
 #[tokio::test]
 async fn steering_into_done_puts_no_companion_in() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let joining = second_repo(&app, watched.path(), "granit").await;
-    let reading = second_repo(&app, watched.path(), "askance").await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let joining = second_repo(&app, elsewhere.path(), "granit").await;
+    let reading = second_repo(&app, elsewhere.path(), "askance").await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     add_companion(&app, id, reading).await;
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
@@ -6320,7 +6320,7 @@ async fn steering_into_done_puts_no_companion_in() {
         "and nothing on the Timeline says a repository went anywhere",
     );
     assert!(
-        !has_branch(&watched.path().join("granit"), &view.branch),
+        !has_branch(&elsewhere.path().join("granit"), &view.branch),
         "nor is there a branch in it",
     );
 
@@ -6328,7 +6328,7 @@ async fn steering_into_done_puts_no_companion_in() {
     // where it was, and no branch cut in its repository either.
     assert_eq!(companion(&view, "askance").mode, CompanionMode::ReadOnly);
     assert_eq!(checked_out(&view, "askance"), detached);
-    assert!(!has_branch(&watched.path().join("askance"), &view.branch));
+    assert!(!has_branch(&elsewhere.path().join("askance"), &view.branch));
 }
 
 /// Each of the three questions git is asked about a companion refuses the whole
@@ -6341,13 +6341,13 @@ async fn a_companion_a_steer_cannot_deliver_refuses_it_by_name() {
         SteerCompanionRefusal::NoBaseCommit,
         SteerCompanionRefusal::BranchExists,
     ] {
-        let (watched, dir, app, _repo, repo_id) = workbench().await;
-        let joining = second_repo(&app, watched.path(), "askance").await;
-        let id = ready(&app, watched.path(), repo_id).await;
+        let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+        let joining = second_repo(&app, elsewhere.path(), "askance").await;
+        let id = ready(&app, elsewhere.path(), repo_id).await;
 
         assert_eq!(grill(&app, id).await, GrillingStarted::Started);
 
-        let askance = watched.path().join("askance");
+        let askance = elsewhere.path().join("askance");
         let branch = opened(&app, id).await.branch;
 
         let row = match why {
@@ -6415,9 +6415,9 @@ async fn a_companion_a_steer_cannot_deliver_refuses_it_by_name() {
 /// rather than obeyed.
 #[tokio::test]
 async fn a_repo_a_steer_cannot_put_in_is_refused_by_name() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let already = second_repo(&app, watched.path(), "askance").await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let already = second_repo(&app, elsewhere.path(), "askance").await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     add_companion(&app, id, already).await;
     companion_mode(&app, id, already, CompanionMode::ReadWrite).await;
@@ -6481,10 +6481,10 @@ async fn a_repo_a_steer_cannot_put_in_is_refused_by_name() {
 /// started, and the branch is cut from where it stands at the steer.
 #[tokio::test]
 async fn steering_opens_a_read_only_companion_up() {
-    let (watched, dir, app, _repo, repo_id) = workbench().await;
-    let named = second_repo(&app, watched.path(), "askance").await;
-    let mirroring = second_repo(&app, watched.path(), "granit").await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+    let named = second_repo(&app, elsewhere.path(), "askance").await;
+    let mirroring = second_repo(&app, elsewhere.path(), "granit").await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     add_companion(&app, id, named).await;
     add_companion(&app, id, mirroring).await;
@@ -6492,8 +6492,8 @@ async fn steering_opens_a_read_only_companion_up() {
 
     let view = opened(&app, id).await;
     let branch = view.branch.clone();
-    let askance = watched.path().join("askance");
-    let granit = watched.path().join("granit");
+    let askance = elsewhere.path().join("askance");
+    let granit = elsewhere.path().join("granit");
 
     // Where each of them was read through until now: detached, at the commit
     // its base came to when the Conversation started.
@@ -6619,10 +6619,10 @@ async fn an_upgrade_git_will_not_make_refuses_the_steer_by_name() {
         SteerCompanionRefusal::NoBaseCommit,
         SteerCompanionRefusal::BranchExists,
     ] {
-        let (watched, dir, app, _repo, repo_id) = workbench().await;
-        let reading = second_repo(&app, watched.path(), "askance").await;
-        let id = ready(&app, watched.path(), repo_id).await;
-        let askance = watched.path().join("askance");
+        let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+        let reading = second_repo(&app, elsewhere.path(), "askance").await;
+        let id = ready(&app, elsewhere.path(), repo_id).await;
+        let askance = elsewhere.path().join("askance");
 
         add_companion(&app, id, reading).await;
 
@@ -6707,11 +6707,11 @@ async fn an_upgrade_git_will_not_make_refuses_the_steer_by_name() {
 /// spelled if it could be spelled at all.
 #[tokio::test]
 async fn no_downgrade_and_no_removal_is_obeyed() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let writing = second_repo(&app, watched.path(), "askance").await;
-    let reading = second_repo(&app, watched.path(), "granit").await;
-    let outside = second_repo(&app, watched.path(), "ember").await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let writing = second_repo(&app, elsewhere.path(), "askance").await;
+    let reading = second_repo(&app, elsewhere.path(), "granit").await;
+    let outside = second_repo(&app, elsewhere.path(), "ember").await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     add_companion(&app, id, writing).await;
     companion_mode(&app, id, writing, CompanionMode::ReadWrite).await;
@@ -6813,10 +6813,10 @@ async fn no_downgrade_and_no_removal_is_obeyed() {
 /// given.
 #[tokio::test]
 async fn steering_a_draft_checks_out_the_companions_it_was_configured_with() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let reading = second_repo(&app, watched.path(), "askance").await;
-    let writing = second_repo(&app, watched.path(), "granit").await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let reading = second_repo(&app, elsewhere.path(), "askance").await;
+    let writing = second_repo(&app, elsewhere.path(), "granit").await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     add_companion(&app, id, reading).await;
     add_companion(&app, id, writing).await;
@@ -6863,8 +6863,8 @@ async fn steering_a_draft_checks_out_the_companions_it_was_configured_with() {
 /// the branch already there is left alone.
 #[tokio::test]
 async fn steering_a_draft_invents_around_a_name_the_repository_holds() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     let carried = opened(&app, id).await.branch;
 
@@ -6905,8 +6905,8 @@ async fn steering_a_draft_invents_around_a_name_the_repository_holds() {
 /// must not reach.
 #[tokio::test]
 async fn steering_a_conversation_that_has_worked_keeps_the_branch_it_was_on() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
 
@@ -6949,10 +6949,10 @@ async fn steering_a_conversation_that_has_worked_keeps_the_branch_it_was_on() {
 /// a branch that is still there is checked out again rather than cut over.
 #[tokio::test]
 async fn steering_a_closed_conversation_checks_its_companions_out_again() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let reading = second_repo(&app, watched.path(), "askance").await;
-    let writing = second_repo(&app, watched.path(), "granit").await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let reading = second_repo(&app, elsewhere.path(), "askance").await;
+    let writing = second_repo(&app, elsewhere.path(), "granit").await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     add_companion(&app, id, reading).await;
     add_companion(&app, id, writing).await;
@@ -6961,7 +6961,7 @@ async fn steering_a_closed_conversation_checks_its_companions_out_again() {
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
 
     let branch = opened(&app, id).await.branch;
-    let granit = watched.path().join("granit");
+    let granit = elsewhere.path().join("granit");
 
     assert_eq!(close(&app, id).await, ConversationClosed::Closed);
     assert!(
@@ -7005,7 +7005,7 @@ async fn steering_a_closed_conversation_checks_its_companions_out_again() {
 /// that is implementing the stage.
 #[tokio::test]
 async fn adopting_starts_the_stage_on_its_own_branch_off_the_base_commit() {
-    let (watched, dir, app, repo, repo_id) = workbench().await;
+    let (elsewhere, dir, app, repo, repo_id) = workbench().await;
     roadmap(
         &repo,
         OPEN_AT_THREE,
@@ -7013,7 +7013,7 @@ async fn adopting_starts_the_stage_on_its_own_branch_off_the_base_commit() {
     );
     let tip = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
 
-    let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
 
     assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
 
@@ -7062,16 +7062,16 @@ async fn adopting_starts_the_stage_on_its_own_branch_off_the_base_commit() {
 /// repository the human put there.
 #[tokio::test]
 async fn adopting_checks_out_the_companions_it_was_configured_with() {
-    let (watched, dir, app, repo, repo_id) = workbench().await;
+    let (elsewhere, dir, app, repo, repo_id) = workbench().await;
     roadmap(
         &repo,
         OPEN_AT_THREE,
         &["03-implementation.md", "04-wrap-up.md"],
     );
 
-    let reading = second_repo(&app, watched.path(), "askance").await;
-    let writing = second_repo(&app, watched.path(), "granit").await;
-    let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
+    let reading = second_repo(&app, elsewhere.path(), "askance").await;
+    let writing = second_repo(&app, elsewhere.path(), "granit").await;
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
 
     add_companion(&app, id, reading).await;
     add_companion(&app, id, writing).await;
@@ -7096,7 +7096,7 @@ async fn adopting_checks_out_the_companions_it_was_configured_with() {
 
     // The read-only one is detached at whatever its base came to, and holds no
     // branch in somebody else's repository.
-    let askance = watched.path().join("askance");
+    let askance = elsewhere.path().join("askance");
     let detached = checked_out(&view, "askance");
 
     assert_eq!(
@@ -7112,7 +7112,7 @@ async fn adopting_checks_out_the_companions_it_was_configured_with() {
 
     // And the read-write one is on a branch of its own, mirroring the stage's
     // own rather than the name the row was invented under.
-    let granit = watched.path().join("granit");
+    let granit = elsewhere.path().join("granit");
     let worked = checked_out(&view, "granit");
 
     assert_eq!(
@@ -7143,22 +7143,22 @@ async fn adopting_checks_out_the_companions_it_was_configured_with() {
 /// is the whole of what they need.
 #[tokio::test]
 async fn a_companion_adoption_cannot_deliver_refuses_the_press_by_name() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
     roadmap(
         &repo,
         OPEN_AT_THREE,
         &["03-implementation.md", "04-wrap-up.md"],
     );
 
-    let writing = second_repo(&app, watched.path(), "askance").await;
-    let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
+    let writing = second_repo(&app, elsewhere.path(), "askance").await;
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
 
     add_companion(&app, id, writing).await;
     companion_mode(&app, id, writing, CompanionMode::ReadWrite).await;
 
     // Somebody else's branch, by the name the companion's would take: the
     // stage's own name, which is what mirroring comes to here.
-    let askance = watched.path().join("askance");
+    let askance = elsewhere.path().join("askance");
     git(&askance, &["branch", "mvp/03-implementation"]);
 
     assert_eq!(
@@ -7191,9 +7191,9 @@ async fn a_companion_adoption_cannot_deliver_refuses_the_press_by_name() {
 /// ordinary way.
 #[tokio::test]
 async fn a_stage_steered_into_a_second_round_is_not_a_stage_to_adopt_again() {
-    let watched = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_watching(watched.path()).await;
-    let repo = repository(watched.path().join("verkstead"));
+    let elsewhere = tempfile::tempdir().unwrap();
+    let (_dir, app) = app_keeping().await;
+    let repo = repository(elsewhere.path().join("verkstead"));
 
     let registered: Registered =
         post(&app, "/api/ui/repos", &serde_json::json!({ "path": repo })).await;
@@ -7206,7 +7206,7 @@ async fn a_stage_steered_into_a_second_round_is_not_a_stage_to_adopt_again() {
         &["03-implementation.md", "04-wrap-up.md"],
     );
 
-    let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
     assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
 
     assert_eq!(
@@ -7242,14 +7242,14 @@ async fn a_stage_steered_into_a_second_round_is_not_a_stage_to_adopt_again() {
 /// from, and what was adopted from where.
 #[tokio::test]
 async fn an_adopted_stage_carries_its_brief_and_says_what_it_adopted() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
     roadmap(
         &repo,
         OPEN_AT_THREE,
         &["03-implementation.md", "04-wrap-up.md"],
     );
 
-    let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
     assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
 
     let view = opened(&app, id).await;
@@ -7281,7 +7281,7 @@ async fn an_adopted_stage_carries_its_brief_and_says_what_it_adopted() {
 /// that is next *there*.
 #[tokio::test]
 async fn the_stage_adopted_is_the_one_the_base_commit_has_open() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
     roadmap(
         &repo,
         OPEN_AT_THREE,
@@ -7294,7 +7294,7 @@ async fn the_stage_adopted_is_the_one_the_base_commit_has_open() {
     // the tip has open.
     roadmap(&repo, OPEN_AT_FOUR, &[]);
 
-    let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
     assert_eq!(
         base(&app, id, Some("predecessor")).await,
         BaseRecorded::Recorded
@@ -7367,7 +7367,7 @@ async fn nothing_adopted(app: &Router, id: i64, repo: &Path) {
 /// the grilling one is carried because every stage after it inherits both.
 #[tokio::test]
 async fn adopting_is_refused_by_name_when_a_profile_is_unchosen() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
     roadmap(
         &repo,
         OPEN_AT_THREE,
@@ -7383,7 +7383,7 @@ async fn adopting_is_refused_by_name_when_a_profile_is_unchosen() {
         &app,
         id,
         "grilling",
-        profile(&app, watched.path(), "fable").await,
+        profile(&app, elsewhere.path(), "fable").await,
     )
     .await;
 
@@ -7397,7 +7397,7 @@ async fn adopting_is_refused_by_name_when_a_profile_is_unchosen() {
         &app,
         id,
         "implementation",
-        profile(&app, watched.path(), "opus").await,
+        profile(&app, elsewhere.path(), "opus").await,
     )
     .await;
 
@@ -7408,7 +7408,7 @@ async fn adopting_is_refused_by_name_when_a_profile_is_unchosen() {
         &app,
         id,
         "review",
-        profile(&app, watched.path(), "haiku").await,
+        profile(&app, elsewhere.path(), "haiku").await,
     )
     .await;
 
@@ -7419,15 +7419,15 @@ async fn adopting_is_refused_by_name_when_a_profile_is_unchosen() {
 /// a different job from choosing one.
 #[tokio::test]
 async fn adopting_is_refused_when_a_chosen_profiles_pair_has_gone() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
     roadmap(
         &repo,
         OPEN_AT_THREE,
         &["03-implementation.md", "04-wrap-up.md"],
     );
 
-    let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
-    std::fs::remove_dir_all(watched.path().join("fable")).unwrap();
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+    std::fs::remove_dir_all(elsewhere.path().join("fable")).unwrap();
 
     assert_eq!(press_adopt(&app, id).await, Adopted::ProfileBroken);
     nothing_adopted(&app, id, &repo).await;
@@ -7437,7 +7437,7 @@ async fn adopting_is_refused_when_a_chosen_profiles_pair_has_gone() {
 /// a stage from, and one that has been adopted already has been started once.
 #[tokio::test]
 async fn only_a_drafting_adopting_conversation_can_be_adopted() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
     roadmap(
         &repo,
         OPEN_AT_THREE,
@@ -7453,7 +7453,7 @@ async fn only_a_drafting_adopting_conversation_can_be_adopted() {
     );
     nothing_adopted(&app, ordinary, &repo).await;
 
-    let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
 
     assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
     assert_eq!(
@@ -7469,14 +7469,14 @@ async fn only_a_drafting_adopting_conversation_can_be_adopted() {
 /// button is pressed, which is exactly why it is asked again.
 #[tokio::test]
 async fn adopting_is_refused_when_the_base_branch_no_longer_resolves() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
     roadmap(
         &repo,
         OPEN_AT_THREE,
         &["03-implementation.md", "04-wrap-up.md"],
     );
 
-    let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
 
     git(&repo, &["branch", "doomed"]);
     assert_eq!(base(&app, id, Some("doomed")).await, BaseRecorded::Recorded);
@@ -7495,7 +7495,7 @@ async fn adopting_is_refused_when_the_base_branch_no_longer_resolves() {
 /// a stage somebody else ticked, on a machine that has not pulled since.
 #[tokio::test]
 async fn adopting_reads_the_roadmap_at_origins_tip() {
-    let (watched, _dir, app, _repo, upstream, repo_id) = workbench_with_origin().await;
+    let (elsewhere, _dir, app, _repo, upstream, repo_id) = workbench_with_origin().await;
 
     // The roadmap is committed on origin and nowhere else: this checkout has
     // heard nothing about it, and neither has its copy of `origin/main`.
@@ -7506,7 +7506,7 @@ async fn adopting_reads_the_roadmap_at_origins_tip() {
     );
     let tip = git(&upstream, &["rev-parse", "HEAD"]).trim().to_owned();
 
-    let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
 
     assert_eq!(
         stage_of(&opened(&app, id).await).label,
@@ -7533,7 +7533,7 @@ async fn adopting_reads_the_roadmap_at_origins_tip() {
 /// vouch for. Being offline, or having lost an authentication, is theirs to fix.
 #[tokio::test]
 async fn adopting_is_refused_by_name_when_the_fetch_fails() {
-    let (watched, dir, app, repo, _upstream, repo_id) = workbench_with_origin().await;
+    let (elsewhere, dir, app, repo, _upstream, repo_id) = workbench_with_origin().await;
 
     // Committed here, so that what refuses the press is the fetch and not the
     // roadmap being missing.
@@ -7543,7 +7543,7 @@ async fn adopting_is_refused_by_name_when_the_fetch_fails() {
         &["03-implementation.md", "04-wrap-up.md"],
     );
 
-    let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
 
     let nowhere = dir.path().join("no-such-remote");
     git(
@@ -7561,14 +7561,14 @@ async fn adopting_is_refused_by_name_when_the_fetch_fails() {
 /// the stage.
 #[tokio::test]
 async fn adopting_is_refused_by_name_for_each_way_the_stage_has_gone() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
     roadmap(
         &repo,
         OPEN_AT_THREE,
         &["03-implementation.md", "04-wrap-up.md"],
     );
 
-    let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
 
     // Somebody finished the roadmap by hand while the page stood open.
     roadmap(&repo, ALL_DONE, &[]);
@@ -7604,14 +7604,14 @@ async fn adopting_is_refused_by_name_for_each_way_the_stage_has_gone() {
 /// it is somebody's work, whatever the roadmap's boxes say.
 #[tokio::test]
 async fn adopting_is_refused_when_the_stages_own_branch_is_taken() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
     roadmap(
         &repo,
         OPEN_AT_THREE,
         &["03-implementation.md", "04-wrap-up.md"],
     );
 
-    let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
     git(&repo, &["branch", "mvp/03-implementation"]);
 
     assert_eq!(press_adopt(&app, id).await, Adopted::BranchExists);
@@ -7631,14 +7631,14 @@ async fn adopting_is_refused_when_the_stages_own_branch_is_taken() {
 /// finished, and saying so would send the human looking at the wrong document.
 #[tokio::test]
 async fn adopting_is_refused_when_no_such_roadmap_is_at_the_base() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
     roadmap(
         &repo,
         OPEN_AT_THREE,
         &["03-implementation.md", "04-wrap-up.md"],
     );
 
-    let id = ready_to_adopt(&app, watched.path(), repo_id, "public-release").await;
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "public-release").await;
 
     assert_eq!(press_adopt(&app, id).await, Adopted::NoRoadmap);
     nothing_adopted(&app, id, &repo).await;
@@ -7650,7 +7650,7 @@ async fn adopting_is_refused_when_no_such_roadmap_is_at_the_base() {
 /// own state and the pair of accounts it would run under.
 #[tokio::test]
 async fn the_cheap_refusals_are_answered_before_the_ones_git_is_paid_for() {
-    let (_watched, _dir, app, repo, repo_id) = workbench().await;
+    let (_elsewhere, _dir, app, repo, repo_id) = workbench().await;
     roadmap(&repo, ALL_DONE, &["03-implementation.md"]);
     git(&repo, &["branch", "mvp/03-implementation"]);
 
@@ -7667,14 +7667,14 @@ async fn the_cheap_refusals_are_answered_before_the_ones_git_is_paid_for() {
 /// How a pull request's checks are is carried to both copies of its card: the
 /// one pinned above the record and the one at the moment it opened.
 ///
-/// Walked through the store rather than watched for, as the narrowing below is:
+/// Walked through the store rather than elsewhere for, as the narrowing below is:
 /// what is under test is the reading, and asking GitHub is `src/checks.rs`'s.
 /// The aggregate and nothing else — what every check is called belongs to the
 /// details pane.
 #[tokio::test]
 async fn how_a_pull_requests_checks_are_reaches_both_copies_of_its_card() {
-    let (watched, dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
@@ -7734,7 +7734,7 @@ fn checks(view: &ConversationView) -> [Option<CheckRollup>; 2] {
 /// same card — and drawn in whatever state the Conversation is in, this one
 /// never leaving Wrapping at all.
 ///
-/// Walked through the store rather than watched for, as the checks above are:
+/// Walked through the store rather than elsewhere for, as the checks above are:
 /// what is under test is the reading, and asking GitHub is `src/checks.rs`'s and
 /// `src/merges.rs`'s.
 ///
@@ -7744,8 +7744,8 @@ fn checks(view: &ConversationView) -> [Option<CheckRollup>; 2] {
 /// tell *it merges* from *nobody asked*.
 #[tokio::test]
 async fn whether_a_pull_request_merges_reaches_both_copies_of_its_card() {
-    let (watched, dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
@@ -7839,15 +7839,15 @@ fn merges(view: &ConversationView) -> [Option<Merging>; 2] {
 /// repository and not in the other — and each card says what is true of its own.
 #[tokio::test]
 async fn each_pull_request_carries_whether_its_own_branch_merges() {
-    let (watched, dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
 
     // A second registered repository, standing in for the read-write companion
     // the work also committed in.
-    let beside = second_repo(&app, watched.path(), "askance").await;
+    let beside = second_repo(&app, elsewhere.path(), "askance").await;
 
     store::record_pull_request(
         &pool,
@@ -7919,8 +7919,8 @@ async fn each_pull_request_carries_whether_its_own_branch_merges() {
 /// its own. What these ask is the reading in front of it.
 #[tokio::test]
 async fn resolving_a_conflict_is_refused_where_there_is_none_to_resolve() {
-    let (watched, dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
@@ -8002,8 +8002,8 @@ async fn resolving_a_conflict_is_refused_where_there_is_none_to_resolve() {
 /// refuses, rather than which of the ways a checkout goes was this one.
 #[tokio::test]
 async fn resolving_a_conflict_is_refused_where_there_is_nowhere_to_resolve_it() {
-    let (watched, dir, app, repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
@@ -8075,8 +8075,8 @@ async fn resolving(app: &Router, id: i64) -> Resolved {
 /// move at either end of it.
 #[tokio::test]
 async fn a_wrap_up_down_to_its_checks_says_so_on_the_card_and_in_the_sidebar() {
-    let (watched, dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
@@ -8155,8 +8155,8 @@ async fn a_wrap_up_down_to_its_checks_says_so_on_the_card_and_in_the_sidebar() {
 /// it, and the label is for one with nobody in it.
 #[tokio::test]
 async fn a_wrap_up_that_narrows_twice_is_worth_saying_so_twice() {
-    let (watched, dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
@@ -8267,7 +8267,7 @@ async fn a_wrap_up_that_narrows_twice_is_worth_saying_so_twice() {
 /// own list.
 #[tokio::test]
 async fn looking_at_a_conversation_takes_the_news_off_its_row() {
-    let (_watched, dir, app, _repo, repo_id) = workbench().await;
+    let (_elsewhere, dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
@@ -8312,8 +8312,8 @@ async fn looking_at_a_conversation_takes_the_news_off_its_row() {
 /// either into the other would lose the one the human can act on.
 #[tokio::test]
 async fn news_on_a_row_leaves_what_is_waiting_on_it_alone() {
-    let (watched, dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
@@ -8382,7 +8382,7 @@ async fn unseen(app: &Router, id: i64) -> bool {
 /// choice the human made.
 #[tokio::test]
 async fn no_review_makes_a_draft_as_ready_to_start_as_a_review_pairing_does() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
     write_brief(&app, id, "# Rate limiting\n").await;
 
@@ -8390,14 +8390,14 @@ async fn no_review_makes_a_draft_as_ready_to_start_as_a_review_pairing_does() {
         &app,
         id,
         "grilling",
-        profile(&app, watched.path(), "fable").await,
+        profile(&app, elsewhere.path(), "fable").await,
     )
     .await;
     choose(
         &app,
         id,
         "implementation",
-        profile(&app, watched.path(), "opus").await,
+        profile(&app, elsewhere.path(), "opus").await,
     )
     .await;
 
@@ -8427,8 +8427,8 @@ async fn no_review_makes_a_draft_as_ready_to_start_as_a_review_pairing_does() {
 /// And it is fixed when grilling starts, exactly as the Pairings beside it are.
 #[tokio::test]
 async fn no_review_is_fixed_once_the_grilling_has_started() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     assert_eq!(no_review(&app, id).await, ProfileChosen::Chosen);
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
@@ -8449,7 +8449,7 @@ async fn no_review_is_fixed_once_the_grilling_has_started() {
 /// picker still refuses the start exactly as it always did.
 #[tokio::test]
 async fn no_grilling_makes_a_draft_as_ready_to_start_as_a_grilling_pairing_does() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
     write_brief(&app, id, "# Rate limiting\n").await;
 
@@ -8457,14 +8457,14 @@ async fn no_grilling_makes_a_draft_as_ready_to_start_as_a_grilling_pairing_does(
         &app,
         id,
         "implementation",
-        profile(&app, watched.path(), "opus").await,
+        profile(&app, elsewhere.path(), "opus").await,
     )
     .await;
     choose(
         &app,
         id,
         "review",
-        profile(&app, watched.path(), "haiku").await,
+        profile(&app, elsewhere.path(), "haiku").await,
     )
     .await;
 
@@ -8497,8 +8497,8 @@ async fn no_grilling_makes_a_draft_as_ready_to_start_as_a_grilling_pairing_does(
 /// nothing to interview.
 #[tokio::test]
 async fn starting_with_no_grilling_lands_the_conversation_implementing_inline() {
-    let (watched, _dir, app, repo, repo_id) = workbench().await;
-    let id = ready(&app, watched.path(), repo_id).await;
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
 
     assert_eq!(no_grilling(&app, id).await, ProfileChosen::Chosen);
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
