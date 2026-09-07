@@ -80,6 +80,27 @@ async fn register(app: &Router, path: &Path) -> Registered {
     post(app, "/api/ui/repos", &serde_json::json!({ "path": path })).await
 }
 
+/// The Repo a registration that landed hands back — and the assertion that it
+/// landed, which is the same thing: an outcome that carries a Repo is one that
+/// left a Repo registered.
+#[track_caller]
+fn added(outcome: Registered) -> RepoEntry {
+    match outcome {
+        Registered::Added(repo) => repo,
+        refused => panic!("the registration was refused: {refused:?}"),
+    }
+}
+
+/// And the Repo a path already registered hands back, which is the same Repo the
+/// first registration made.
+#[track_caller]
+fn already(outcome: Registered) -> RepoEntry {
+    match outcome {
+        Registered::AlreadyRegistered(repo) => repo,
+        other => panic!("the path was not already registered: {other:?}"),
+    }
+}
+
 /// The same, for a path that is not one the filesystem can hand back — a string
 /// typed into the form.
 async fn register_text(app: &Router, path: &str) -> Registered {
@@ -161,7 +182,7 @@ async fn a_repository_registers_and_appears_on_the_list() {
     let (_dir, app) = workbench().await;
     let repo = repository(src.path().join("verkstead"));
 
-    assert_eq!(register(&app, &repo).await, Registered::Added);
+    let registered = added(register(&app, &repo).await);
 
     let repos = listed(&app).await;
     assert_eq!(repos.len(), 1);
@@ -171,6 +192,11 @@ async fn a_repository_registers_and_appears_on_the_list() {
         repo.canonicalize().unwrap().to_str().unwrap()
     );
     assert_eq!(repos[0].default_branch, "main");
+
+    // And the registration hands back that same row rather than an outcome the
+    // caller has to go looking for the Repo behind — the path it recorded is
+    // the resolved one, which is not the one that was typed.
+    assert_eq!(registered, repos[0]);
 }
 
 #[tokio::test]
@@ -190,7 +216,7 @@ async fn a_repository_outside_everything_the_server_was_started_with_registers()
 
     let elsewhere = repository(root.path().join("elsewhere"));
 
-    assert_eq!(register(&app, &elsewhere).await, Registered::Added);
+    added(register(&app, &elsewhere).await);
 
     let repos = listed(&app).await;
     assert_eq!(repos.len(), 1);
@@ -218,7 +244,7 @@ async fn a_repository_reached_through_a_symlink_is_stored_where_it_really_is() {
     let link = root.path().join("looks-elsewhere");
     std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
 
-    assert_eq!(register(&app, &link).await, Registered::Added);
+    added(register(&app, &link).await);
 
     assert_eq!(
         listed(&app).await[0].path,
@@ -281,14 +307,15 @@ async fn a_repo_already_registered_is_refused_however_its_path_is_spelled() {
     let (_dir, app) = workbench().await;
     let repo = repository(src.path().join("verkstead"));
 
-    assert_eq!(register(&app, &repo).await, Registered::Added);
+    let first = added(register(&app, &repo).await);
 
     // The same directory, spelled its way out and back again.
     let roundabout = repo.join("..").join("verkstead");
-    assert_eq!(
-        register(&app, &roundabout).await,
-        Registered::AlreadyRegistered
-    );
+
+    // And the same Repo comes back with the refusal, which is what makes it a
+    // repository to land a draft on rather than a dead end: a dropdown that
+    // registered a path somebody had registered already has the Repo it named.
+    assert_eq!(already(register(&app, &roundabout).await), first);
 
     assert_eq!(listed(&app).await.len(), 1);
 }
@@ -302,7 +329,7 @@ async fn a_server_told_nothing_at_all_registers_all_the_same() {
     let (_dir, app) = workbench().await;
     let repo = repository(src.path().join("verkstead"));
 
-    assert_eq!(register(&app, &repo).await, Registered::Added);
+    added(register(&app, &repo).await);
     assert_eq!(listed(&app).await.len(), 1);
 }
 
@@ -329,7 +356,7 @@ async fn the_default_branch_is_what_the_remote_calls_it() {
     );
     git(&repo, &["checkout", "--quiet", "-b", "some-feature"]);
 
-    assert_eq!(register(&app, &repo).await, Registered::Added);
+    added(register(&app, &repo).await);
     assert_eq!(listed(&app).await[0].default_branch, "main");
 }
 
@@ -370,7 +397,7 @@ async fn a_repos_branches_are_the_local_and_remote_tracking_ones() {
         ],
     );
 
-    assert_eq!(register(&app, &repo).await, Registered::Added);
+    added(register(&app, &repo).await);
     let id = listed(&app).await[0].id;
 
     assert_eq!(
@@ -420,7 +447,7 @@ async fn a_repo_opened_carries_its_branches_its_work_and_its_roadmaps() {
     let repo = repository(src.path().join("verkstead"));
     git(&repo, &["branch", "release"]);
 
-    assert_eq!(register(&app, &repo).await, Registered::Added);
+    added(register(&app, &repo).await);
     let id = listed(&app).await[0].id;
 
     // Three Conversations on it: one still going, and two that are over each
@@ -473,7 +500,7 @@ async fn a_repos_resolution_is_said_taken_back_and_read_off_the_pane() {
     let (_dir, app) = workbench().await;
     let repo = repository(src.path().join("verkstead"));
 
-    assert_eq!(register(&app, &repo).await, Registered::Added);
+    added(register(&app, &repo).await);
     let id = listed(&app).await[0].id;
 
     let opened: RepoView = get(&app, &format!("/api/ui/repos/{id}")).await;
@@ -564,7 +591,7 @@ async fn a_repo_that_was_removed_cannot_be_opened() {
     let (_dir, app) = workbench().await;
     let repo = repository(src.path().join("verkstead"));
 
-    assert_eq!(register(&app, &repo).await, Registered::Added);
+    added(register(&app, &repo).await);
     let id = listed(&app).await[0].id;
 
     assert_eq!(remove(&app, id).await, RepoRemoved::Removed);
@@ -590,7 +617,7 @@ async fn a_removed_repo_is_off_the_list() {
     let (_dir, app) = workbench().await;
     let repo = repository(src.path().join("verkstead"));
 
-    assert_eq!(register(&app, &repo).await, Registered::Added);
+    added(register(&app, &repo).await);
     let id = listed(&app).await[0].id;
 
     assert_eq!(remove(&app, id).await, RepoRemoved::Removed);
@@ -610,7 +637,7 @@ async fn a_repo_with_live_work_on_it_is_refused() {
     let (_dir, pool, app) = workbench_and_pool().await;
     let repo = repository(src.path().join("verkstead"));
 
-    assert_eq!(register(&app, &repo).await, Registered::Added);
+    added(register(&app, &repo).await);
     let id = listed(&app).await[0].id;
 
     let going = store::start_conversation(&pool, id, "rate-limiting")
@@ -638,7 +665,7 @@ async fn there_is_nothing_to_remove_twice() {
     let (_dir, app) = workbench().await;
     let repo = repository(src.path().join("verkstead"));
 
-    assert_eq!(register(&app, &repo).await, Registered::Added);
+    added(register(&app, &repo).await);
     let id = listed(&app).await[0].id;
 
     assert_eq!(remove(&app, id).await, RepoRemoved::Removed);
@@ -663,11 +690,11 @@ async fn registering_a_removed_repo_again_brings_it_back() {
     let (_dir, app) = workbench().await;
     let repo = repository(src.path().join("verkstead"));
 
-    assert_eq!(register(&app, &repo).await, Registered::Added);
+    added(register(&app, &repo).await);
     let id = listed(&app).await[0].id;
     assert_eq!(remove(&app, id).await, RepoRemoved::Removed);
 
-    assert_eq!(register(&app, &repo).await, Registered::Added);
+    added(register(&app, &repo).await);
 
     let back = listed(&app).await;
     assert_eq!(back.len(), 1);

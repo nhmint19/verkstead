@@ -343,3 +343,25 @@
     border-color: var(--ink-soft);
   }
 }
+
+/* The same registration asked from the Repo dropdown, on the one modal in the
+   UI — see `Modal.module.css`, which is the card and everything around it. What
+   is here is only what the card holds: a heading, and the form above already
+   drawn. */
+.openRepo h3 {
+  margin: 0 0 0.85rem;
+  font-size: 1rem;
+}
+
+/* The press that undoes rather than does, drawn as the outline of the one beside
+   it — the steer modal's cancel, and the profile form's. */
+.buttons .cancel {
+  color: var(--accent);
+  background: none;
+}
+
+@media (hover: hover) {
+  .buttons .cancel:hover {
+    border-color: var(--accent);
+  }
+}

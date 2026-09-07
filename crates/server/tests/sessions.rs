@@ -2567,7 +2567,7 @@ impl Bench {
             &serde_json::json!({ "path": path }),
         )
         .await;
-        assert_eq!(registered, Registered::Added);
+        assert!(matches!(registered, Registered::Added(_)));
 
         let repos: Vec<verkstead_render::RepoEntry> = get(&self.app, "/api/ui/repos").await;
 
@@ -2682,7 +2682,7 @@ async fn bench_at_pace(
     let repo = repository(elsewhere.path().join("verkstead"));
     let registered: Registered =
         post(&app, "/api/ui/repos", &serde_json::json!({ "path": repo })).await;
-    assert_eq!(registered, Registered::Added);
+    assert!(matches!(registered, Registered::Added(_)));
 
     let repos: Vec<verkstead_render::RepoEntry> = get(&app, "/api/ui/repos").await;
     let repo_id = repos[0].id;

@@ -2529,8 +2529,15 @@ id: number, html: string, };
  * The refusals are the server's and not the form's: a check the browser made
  * is a courtesy, and every request reaching this endpoint is decided here
  * whether or not a form was involved.
+ *
+ * The two outcomes that leave a Repo registered carry it, because whoever
+ * asked is usually about to put something *on* it — the Repo dropdown's **Open
+ * repo** row registers one and lands the draft on it — and the path that was
+ * typed is not the resolved path the Repo is recorded under. A caller left to
+ * match its own spelling against the list afterwards would be guessing at an
+ * answer this endpoint is already holding.
  */
-export type Registered = "Added" | "NotAbsolute" | "Missing" | "NotARepository" | "NoDefaultBranch" | "AlreadyRegistered";
+export type Registered = { "Added": RepoEntry } | "NotAbsolute" | "Missing" | "NotARepository" | "NoDefaultBranch" | { "AlreadyRegistered": RepoEntry };
 
 /**
  * A repository the human is asking Verkstead to take on, named by its absolute

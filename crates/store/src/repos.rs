@@ -320,6 +320,38 @@ pub async fn registered_repo(pool: &SqlitePool, id: i64) -> Result<Option<Repo>>
     }))
 }
 
+/// One Repo that is on the registry, by the path it is recorded under.
+///
+/// The read behind the one registration that changes nothing: a path already
+/// registered is refused by the unique index rather than by looking first, and
+/// the caller is then holding a refusal about a repository it has no id for.
+/// This is that id, and it is asked *after* the write rather than before it, so
+/// two tabs registering the same path still cannot both get past a look.
+///
+/// Registered rather than merely recorded, for [`registered_repo`]'s reason: a
+/// path a flagged row holds is not this refusal at all — the upsert revives that
+/// row — so a Repo found here is one on offer.
+pub async fn registered_repo_at(pool: &SqlitePool, path: &Path) -> Result<Option<Repo>> {
+    let stored = text(path)?;
+
+    let row: Option<(i64, String, String, String)> = sqlx::query_as(
+        "SELECT id, path, name, default_branch
+         FROM repos
+         WHERE path = ? AND id NOT IN (SELECT repo_id FROM unregistered_repos)",
+    )
+    .bind(stored)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| format!("reading the registered Repo at {}", path.display()))?;
+
+    Ok(row.map(|(id, path, name, default_branch)| Repo {
+        id,
+        path: PathBuf::from(path),
+        name,
+        default_branch,
+    }))
+}
+
 /// A path as SQLite can hold it, which is UTF-8 or nothing.
 ///
 /// A path the filesystem holds as bytes that are not UTF-8 cannot be stored

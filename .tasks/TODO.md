@@ -19,7 +19,7 @@ Roadmap stage: [04: The zero-state compose page and the repo modal](docs/roadmap
 ## Tasks
 
 - [x] 01: The zero-state frame — [details](01-zero-state-frame.md)
-- [ ] 02: The action rows, and Open repo — [details](02-action-rows-and-open-repo.md)
+- [x] 02: The action rows, and Open repo — [details](02-action-rows-and-open-repo.md)
 - [ ] 03: Create repo on the server — [details](03-create-repo-on-the-server.md)
 - [ ] 04: The Create repo modal — [details](04-create-repo-modal.md)
 - [ ] 05: Create on GitHub too — [details](05-create-on-github-too.md)

@@ -97,7 +97,7 @@ async fn workbench() -> (tempfile::TempDir, tempfile::TempDir, Router, PathBuf, 
 
     let registered: Registered =
         post(&app, "/api/ui/repos", &serde_json::json!({ "path": repo })).await;
-    assert_eq!(registered, Registered::Added);
+    assert!(matches!(registered, Registered::Added(_)));
 
     let repo_id = listed_repos(&app).await;
 
@@ -118,7 +118,7 @@ async fn workbench_and_pool() -> (
 
     let registered: Registered =
         post(&app, "/api/ui/repos", &serde_json::json!({ "path": repo })).await;
-    assert_eq!(registered, Registered::Added);
+    assert!(matches!(registered, Registered::Added(_)));
 
     let repo_id = listed_repos(&app).await;
 
@@ -166,7 +166,7 @@ async fn workbench_with_origin() -> (
 
     let registered: Registered =
         post(&app, "/api/ui/repos", &serde_json::json!({ "path": repo })).await;
-    assert_eq!(registered, Registered::Added);
+    assert!(matches!(registered, Registered::Added(_)));
 
     let repo_id = listed_repos(&app).await;
 
@@ -653,7 +653,7 @@ async fn second_repo(app: &Router, elsewhere: &Path, name: &str) -> i64 {
 
     let registered: Registered =
         post(app, "/api/ui/repos", &serde_json::json!({ "path": path })).await;
-    assert_eq!(registered, Registered::Added);
+    assert!(matches!(registered, Registered::Added(_)));
 
     let repos: Vec<verkstead_render::RepoEntry> = get(app, "/api/ui/repos").await;
     repos
@@ -7235,7 +7235,7 @@ async fn a_stage_steered_into_a_second_round_is_not_a_stage_to_adopt_again() {
 
     let registered: Registered =
         post(&app, "/api/ui/repos", &serde_json::json!({ "path": repo })).await;
-    assert_eq!(registered, Registered::Added);
+    assert!(matches!(registered, Registered::Added(_)));
 
     let repo_id = listed_repos(&app).await;
     roadmap(

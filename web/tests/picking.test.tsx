@@ -27,11 +27,14 @@ import claudeMarkFile from "../src/marks/claude-color.svg?raw";
 import grokMarkFile from "../src/marks/grok.svg?raw";
 import { art, marked } from "./marking";
 import {
+  actionRows,
+  actions,
   expanded,
   offered,
   opened,
   pick,
   picker,
+  press,
   rows,
   showing,
 } from "./pickers";
@@ -79,6 +82,39 @@ function picking(
   return { chosen };
 }
 
+/// The same control with rows at its foot that press rather than pick, which is
+/// what the Repo dropdown draws: two of them, behind a rule.
+function pressing(at = ""): {
+  chosen: () => string;
+  pressed: () => string[];
+} {
+  const [chosen, setChosen] = createSignal(at);
+  const [pressed, setPressed] = createSignal<string[]>([]);
+
+  const acts = (label: string) => () =>
+    setPressed((was) => [...was, label]);
+
+  render(() => (
+    <>
+      <label for="under">Run it under</label>
+      <Listbox
+        id="under"
+        options={ROWS}
+        value={(row) => row.value}
+        label={(row) => row.label}
+        chosen={chosen()}
+        pick={setChosen}
+        actions={[
+          { label: "Create repo", press: acts("Create repo") },
+          { label: "Open repo", press: acts("Open repo") },
+        ]}
+      />
+    </>
+  ));
+
+  return { chosen, pressed };
+}
+
 /// The one picker every test here drives.
 const UNDER = "Run it under";
 
@@ -88,7 +124,8 @@ const control = () => picker(UNDER);
 describe("what the listbox says it is", () => {
   /// The label reaching the control is why it is a `button` rather than a `div`
   /// with a role: only a labelable element is what a `<label for=…>` names, and
-  /// every one of the five callers labels its picker that way.
+  /// every caller but the composer's Repo row labels its picker that way — that
+  /// one names itself from inside its handle, which is `heading` on the control.
   it("is reached by the label that names it", () => {
     picking();
 
@@ -581,6 +618,96 @@ describe("which way the rows come down", () => {
     laid({ control: 100, rows: 250 });
 
     expect(opened(UNDER).classList.contains(styles.above!)).toBe(false);
+  });
+});
+
+/// The rows at the foot that press rather than pick — the Repo dropdown's, and
+/// no other control's.
+///
+/// What is asked here is the whole of what makes them a row *kind* rather than
+/// another option: they are never picked, never what the closed control shows,
+/// and never mistaken for the choice being gone — while the keyboard walks them
+/// with the rest, because a list somebody is reading down does not stop at the
+/// rule.
+describe("the rows that press rather than pick", () => {
+  it("draws them at the foot of the list, behind a rule", () => {
+    pressing();
+
+    const list = opened(UNDER);
+    const rule = list.querySelector('[role="separator"]')!;
+
+    expect(actionRows(UNDER)).toEqual(["Create repo", "Open repo"]);
+
+    // Behind the rule and after every option: the rule is a break in one list
+    // rather than the edge of a second.
+    for (const row of offered(UNDER)) {
+      expect(
+        rule.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_PRECEDING,
+      ).toBeTruthy();
+    }
+    for (const row of actions(UNDER)) {
+      expect(
+        rule.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+  });
+
+  /// Not a choice, and never one: nothing about it can be selected, and what the
+  /// control offers is the rows above the rule.
+  it("is never the choice, and never what the control shows", () => {
+    const { chosen, pressed } = pressing();
+
+    expect(
+      actions(UNDER).map((row) => row.getAttribute("aria-selected")),
+    ).toEqual(["false", "false"]);
+
+    press(UNDER, "Open repo");
+
+    // The press went out, the rows went with it, and nothing was picked — so
+    // the control is saying exactly what it said before.
+    expect(pressed()).toEqual(["Open repo"]);
+    expect(chosen()).toBe("");
+    expect(showing(UNDER)).toBe("Not chosen");
+    expect(expanded(UNDER)).toBe(false);
+  });
+
+  /// A choice already made is left where it was: pressing one of these is not an
+  /// unpicking, and a control that fell to its placeholder would be saying the
+  /// repository had gone.
+  it("leaves a choice that was already made standing", () => {
+    const { chosen } = pressing("2:grok-4.6");
+
+    press(UNDER, "Create repo");
+
+    expect(chosen()).toBe("2:grok-4.6");
+    expect(showing(UNDER)).toBe("Grok 4.6");
+  });
+
+  /// The walk runs across both lists as one — End goes to the last row of all,
+  /// which is the last of these — and Enter presses rather than picks.
+  it("is walked with the rest, and Enter presses it", () => {
+    const { chosen, pressed } = pressing();
+
+    fireEvent.keyDown(control(), { key: "ArrowDown" });
+    fireEvent.keyDown(control(), { key: "End" });
+
+    expect(control().getAttribute("aria-activedescendant")).toBe(
+      actions(UNDER)[1]!.id,
+    );
+
+    fireEvent.keyDown(control(), { key: "Enter" });
+
+    expect(pressed()).toEqual(["Open repo"]);
+    expect(chosen()).toBe("");
+  });
+
+  /// And every other control goes on holding none of this: a rule and two rows
+  /// under a list of accounts would be a foot with nothing in it.
+  it("is drawn nowhere a caller offers none", () => {
+    picking();
+
+    expect(actions(UNDER)).toEqual([]);
+    expect(opened(UNDER).querySelector('[role="separator"]')).toBeNull();
   });
 });
 

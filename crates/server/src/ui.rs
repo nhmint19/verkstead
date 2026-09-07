@@ -677,17 +677,7 @@ async fn repos(State(state): State<AppState>) -> HttpResponse {
         }
     };
 
-    let rows: Vec<RepoEntry> = repos
-        .into_iter()
-        .map(|repo| RepoEntry {
-            id: repo.id,
-            name: repo.name,
-            // Stored as UTF-8 in the first place — a path that is not cannot be
-            // registered — so nothing is lost putting it back on the wire.
-            path: repo.path.to_string_lossy().into_owned(),
-            default_branch: repo.default_branch,
-        })
-        .collect();
+    let rows: Vec<RepoEntry> = repos.into_iter().map(crate::repos::entry).collect();
 
     Json(rows).into_response()
 }

@@ -24,9 +24,9 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use sqlx::SqlitePool;
-use verkstead_render::{ConflictResolution, Registered, RepoRemoved, RepoView};
+use verkstead_render::{ConflictResolution, Registered, RepoEntry, RepoRemoved, RepoView};
 
 use crate::resolved::{Resolved, resolve};
 use crate::store;
@@ -44,12 +44,49 @@ pub(crate) async fn register(pool: &SqlitePool, asked: &str) -> Result<Registere
         Err(refusal) => return Ok(refusal),
     };
 
+    // The Repo goes back either way, because both of these leave one registered
+    // and whoever asked is usually about to work in it — see [`Registered`]. The
+    // second read is the price of the insert deciding for itself whether the
+    // path was taken: it is asked after the write rather than before it, so
+    // nothing here looks first.
     Ok(
         match store::register_repo(pool, &facts.path, &facts.name, &facts.default_branch).await? {
-            Some(_) => Registered::Added,
-            None => Registered::AlreadyRegistered,
+            Some(repo) => Registered::Added(entry(repo)),
+            None => {
+                let held = store::registered_repo_at(pool, &facts.path)
+                    .await?
+                    // The insert refused because a row that nobody has flagged
+                    // holds this path, and unregistering flags rather than
+                    // deletes — so the row is there. Nothing left to answer with
+                    // if it is not, which is a broken store rather than an
+                    // outcome to put in front of anybody.
+                    .with_context(|| {
+                        format!(
+                            "the Repo at {} is registered but could not be read back",
+                            facts.path.display()
+                        )
+                    })?;
+
+                Registered::AlreadyRegistered(entry(held))
+            }
         },
     )
+}
+
+/// A stored Repo as the viewer's list draws one.
+///
+/// Here rather than in the router, because the registration hands one back now
+/// and the list is not the only place a Repo crosses the wire — two spellings of
+/// the same row would be two things to keep in step.
+pub(crate) fn entry(repo: store::Repo) -> RepoEntry {
+    RepoEntry {
+        id: repo.id,
+        name: repo.name,
+        // Stored as UTF-8 in the first place — a path that is not cannot be
+        // registered — so nothing is lost putting it back on the wire.
+        path: repo.path.to_string_lossy().into_owned(),
+        default_branch: repo.default_branch,
+    }
 }
 
 /// What the store needs to record a Repo, read off the repository itself rather

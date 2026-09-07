@@ -179,7 +179,10 @@ impl Serve {
             "/api/ui/repos",
             &serde_json::json!({ "path": repo.to_str().unwrap() }),
         );
-        assert_eq!(registered, serde_json::json!("Added"));
+        assert!(
+            registered["Added"].is_object(),
+            "the Repo should have registered, and the answer carries it: {registered}"
+        );
 
         let listed: serde_json::Value = serde_json::from_str(&self.read("/api/ui/repos")).unwrap();
         let repo_id = listed[0]["id"]
@@ -363,10 +366,9 @@ fn serving_with_no_flags_at_all_starts_and_registers_anywhere() {
         &serde_json::json!({ "path": repo.to_str().unwrap() }),
     );
 
-    assert_eq!(
-        registered,
-        serde_json::json!("Added"),
-        "a server told nothing should register a repository like any other"
+    assert!(
+        registered["Added"].is_object(),
+        "a server told nothing should register a repository like any other: {registered}"
     );
 
     let logged = uncoloured(&serving.stop());

@@ -20,6 +20,7 @@ import type {
   AbandonedRepo,
   Adopted,
   ProfileEntry,
+  RepoEntry,
   RepoPairingsView,
 } from "../src/api/types";
 import menu from "../src/Menu.module.css";
@@ -30,6 +31,7 @@ import setup from "../src/workbench/Setup.module.css";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
 import { ATTACH_REFUSAL } from "../src/workbench/Composer";
 import { BRANCH_REFUSAL } from "../src/workbench/Setup";
+import { REFUSAL as REPO_REFUSAL } from "../src/repos/RepoList";
 import {
   COMPOSING,
   blank,
@@ -40,7 +42,7 @@ import {
 } from "../src/workbench/composing";
 import { OPEN, PROFILES, REPOS, drawn, mount, theWorkbench } from "./bench";
 import { carrying, drag, dropOn } from "./dragging";
-import { offered, pick, picker, showing } from "./pickers";
+import { actionRows, offered, opened, pick, press, rows, showing } from "./pickers";
 import { json, serving, whenever } from "./serving";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
 
@@ -195,35 +197,22 @@ async function openRepo(container: ParentNode): Promise<HTMLElement> {
 /// Pick a repo, which is the one thing a create cannot do without.
 ///
 /// Two controls wear that name, and which of them is standing is the whole of
-/// what this page does about a repo: a listbox in the row until one is picked,
-/// and the panel's own `<select>` — behind the trigger the listbox became —
-/// every time after. So the first pick walks the rows and the rest change the
-/// field, which is what the human does too.
+/// what this page does about a repo: the dropdown in the row until one is
+/// picked, and the same control behind the trigger it became every time after.
+/// Both are the app's own listbox — the two rows at their foot press rather than
+/// pick, which is nothing a native option can do — so the walk is the same
+/// either way and only the panel has to be opened first.
 async function pickRepo(container: ParentNode, id: number): Promise<void> {
   const listed = container.querySelector(`.${setup.repoSelect}`) !== null;
 
-  if (listed) {
-    // Waited for the rows to have landed, the control being drawn before the
-    // list it offers has arrived.
-    await waitFor(() => expect(offered("Repo").length).toBe(REPOS.length));
-    pick("Repo", REPOS.find((repo) => repo.id === id)!.name);
-    return;
+  if (!listed) {
+    await openRepo(container);
   }
 
-  await openRepo(container);
-
-  const picker = (await waitFor(() =>
-    screen.getByLabelText("Repo"),
-  )) as HTMLSelectElement;
-
-  // Waited for the list to have landed: a repo apiece, plus the placeholder
-  // while nothing is picked — which is gone the second time this is called, a
-  // placeholder being a state there is no way back to.
-  await waitFor(() =>
-    expect(picker.options.length).toBeGreaterThanOrEqual(REPOS.length),
-  );
-
-  fireEvent.change(picker, { target: { value: String(id) } });
+  // Waited for the rows to have landed, the control being drawn before the list
+  // it offers has arrived.
+  await waitFor(() => expect(offered("Repo").length).toBe(REPOS.length));
+  pick("Repo", REPOS.find((repo) => repo.id === id)!.name);
 }
 
 describe("the compose page", () => {
@@ -315,12 +304,7 @@ describe("the compose page", () => {
     // And still saying it once the repos have landed and none of them answers
     // to the id — the panel's own picker being where that is put right.
     await openRepo(container);
-    const choice = (await waitFor(() =>
-      picker("Repo"),
-    )) as unknown as HTMLSelectElement;
-    await waitFor(() =>
-      expect(choice.options.length).toBeGreaterThanOrEqual(REPOS.length),
-    );
+    await waitFor(() => expect(offered("Repo").length).toBe(REPOS.length));
     expect(trigger.textContent).toBe("Select");
   });
 
@@ -737,6 +721,122 @@ describe("the compose page", () => {
     expect(screen.getByLabelText("Implementation")).toBeTruthy();
     expect(screen.getByLabelText("Review")).toBeTruthy();
     expect(PROFILES.length).toBeGreaterThan(0);
+  });
+});
+
+/// The two rows at the foot of the Repo dropdown, and the one this stage wires:
+/// **Open repo**, which registers a repository that already exists and lands the
+/// draft on it.
+///
+/// The rows are the one control's, so the panel behind a picked repo has them
+/// too — that half is `workbench.test.tsx`'s, over a draft where a pick is a
+/// move. What is asked here is the half a compose page owns: the pick lands in
+/// the state this device is holding, and a refusal is answered inside the modal.
+describe("registering a repo from the Repo dropdown", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    leaveRefusals(0, []);
+  });
+
+  /// A repository nothing has registered yet — not one of the fixture's, so
+  /// landing on it is unmistakably the answer's doing rather than the list's.
+  const OPENED: RepoEntry = {
+    id: 4242,
+    name: "widgets",
+    path: "/srv/repos/widgets",
+    default_branch: "main",
+  };
+
+  /// The workbench with the registration answered however the test says.
+  const registering = (answer: () => Promise<Response>) =>
+    theWorkbench(whenever("/api/ui/repos", answer, "POST"));
+
+  /// Open the modal off the dropdown's foot, and hand back the field inside it.
+  async function openRepoModal(): Promise<HTMLInputElement> {
+    await waitFor(() => expect(offered("Repo").length).toBe(REPOS.length));
+    press("Repo", "Open repo");
+
+    return (await waitFor(() =>
+      screen.getByLabelText(/absolute path/i),
+    )) as HTMLInputElement;
+  }
+
+  /// Type a path into it and send it.
+  function register(field: HTMLInputElement, path: string): void {
+    fireEvent.input(field, { target: { value: path } });
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+  }
+
+  it("draws both rows behind a rule, and neither is a repo to pick", async () => {
+    theWorkbench();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await waitFor(() => expect(offered("Repo").length).toBe(REPOS.length));
+
+    expect(actionRows("Repo")).toEqual(["Create repo", "Open repo"]);
+    // Every repo and nothing else: what the control offers is the rows above
+    // the rule, and the two under it are not repositories.
+    expect(rows("Repo")).toEqual(REPOS.map((repo) => repo.name));
+    expect(opened("Repo").querySelector('[role="separator"]')).toBeTruthy();
+  });
+
+  it("puts the draft on the repo it registered", async () => {
+    const fetching = registering(json({ Added: OPENED }));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    register(await openRepoModal(), OPENED.path);
+
+    // The path went out as the settings pane's own registration does.
+    await waitFor(() =>
+      expect(fetching).toHaveBeenCalledWith(
+        "/api/ui/repos",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ path: OPENED.path }),
+        }),
+      ),
+    );
+
+    // And the draft is on it: the id the answer carried is what this device is
+    // holding now, which is the same thing picking a registered one writes.
+    await waitFor(() =>
+      expect(stored().repo).toBe(OPENED.id),
+    );
+    // The modal is spent, and the row it was opened from has become the panel.
+    await waitFor(() =>
+      expect(screen.queryByLabelText(/absolute path/i)).toBeNull(),
+    );
+  });
+
+  /// A path already registered is not a dead end here: this row is a way *onto*
+  /// a repository, and the outcome carries the one it found.
+  it("lands on the repo a path already registered names", async () => {
+    registering(json({ AlreadyRegistered: REPOS[1]! }));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    register(await openRepoModal(), REPOS[1]!.path);
+
+    await waitFor(() => expect(stored().repo).toBe(REPOS[1]!.id));
+  });
+
+  /// And a refusal keeps the modal up with the reason under the field, because a
+  /// refusal is answered by correcting the path — the same rule the settings
+  /// pane draws by, in the same words.
+  it("says why a path was refused, and stays up to say it", async () => {
+    registering(json("NotARepository"));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const field = await openRepoModal();
+    register(field, "/srv/repos/notes");
+
+    await waitFor(() => screen.getByText(REPO_REFUSAL.NotARepository));
+    expect(screen.getByLabelText(/absolute path/i)).toBeTruthy();
+    expect(field.value).toBe("/srv/repos/notes");
+    expect(stored().repo).toBeNull();
   });
 });
 

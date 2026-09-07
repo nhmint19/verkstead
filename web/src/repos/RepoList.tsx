@@ -1,6 +1,13 @@
 //! The Repos Verkstead has been told about, as the cards that read them, each
-//! one opened, and the one way to add another: an absolute path, typed or
-//! browsed to.
+//! one opened, and the registration that adds another: an absolute path, typed
+//! or browsed to.
+//!
+//! That registration is asked in two places now — this page's own pane, and the
+//! **Open repo** modal the Repo dropdown opens over the composer — so the form
+//! is one piece ([`RepoRegistration`]) drawn twice rather than a second form
+//! with a second set of words for the same refusals. What the place changes is
+//! one thing: on the pane a path already registered is a refusal, and in the
+//! modal it is the repository somebody named.
 //!
 //! The path is written into the shared path field — see `PathField.tsx` — which
 //! is the box it always was with a dropdown under it that browses the filesystem
@@ -62,10 +69,19 @@
 
 import { faPlus } from "@fortawesome/free-solid-svg-icons";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
+import {
+  For,
+  Match,
+  Show,
+  Switch,
+  createSignal,
+  createUniqueId,
+  type JSX,
+} from "solid-js";
 
 import { CardButton } from "../CardButton";
 import { IconButton } from "../IconButton";
+import { Modal } from "../Modal";
 import { PaneSticky } from "../Panes";
 import { PathField } from "../PathField";
 import { RESOLUTION, RESOLVES, forcePushed } from "../settings/Conflicts";
@@ -92,13 +108,17 @@ import { RepoBinds } from "./RepoBinds";
 import app from "../App.module.css";
 import styles from "./RepoList.module.css";
 
-/// What each way of being refused says, once, wherever it is met.
+/// The ways a registration is answered with a sentence rather than a Repo.
 ///
-/// `Added` is here for completeness of the mapping and never drawn: nothing is
-/// said about a registration that worked, because the repo appearing on the list
-/// behind the pane is what says it.
-export const REFUSAL: Record<Registered, string> = {
-  Added: "",
+/// Every outcome that left no Repo registered, which is every one that is a bare
+/// word on the wire — and `AlreadyRegistered`, which carries one and is still a
+/// refusal wherever the form is a place to *add* a repo. What is never here is
+/// `Added`: nothing is said about a registration that worked, the repo appearing
+/// on the list being what says it.
+export type RepoRefused = Extract<Registered, string> | "AlreadyRegistered";
+
+/// What each way of being refused says, once, wherever it is met.
+export const REFUSAL: Record<RepoRefused, string> = {
   NotAbsolute: "Give the repo's absolute path, starting with a slash.",
   Missing: "There is nothing at that path.",
   NotARepository:
@@ -553,11 +573,10 @@ function ConflictResolution(props: { repo: RepoView }): JSX.Element {
 /// the way back a narrow window draws, and a button that said the same thing
 /// again would be a second way out of a pane that has one.
 ///
-/// The field browses, and Register is untouched by it: what is sent is whatever
-/// the box holds, tapped together or typed straight in, and every refusal below
-/// is still the server's answer about it. Anywhere the server can read, because
-/// that is where a Repo may be registered from, and looking for a repository,
-/// which is what this form is being filled in with.
+/// The form itself is [`RepoRegistration`], which the Repo dropdown's **Open
+/// repo** modal draws too. What is here is the pane around it, and the one thing
+/// standing here rather than there decides: a path already registered is a
+/// refusal, this being a place to add a repo rather than a way onto one.
 export function RepoPane(props: {
   /// The way back to the settings, which is a change of level rather than a
   /// navigation: what is open stays open, and the URL goes on saying so.
@@ -567,6 +586,58 @@ export function RepoPane(props: {
   /// back to.
   done: () => void;
 }): JSX.Element {
+  return (
+    <>
+      <PaneSticky>
+        <PaneHead back={{ to: "Settings", go: props.back }} title="Add a repo" />
+      </PaneSticky>
+
+      {/* What says a registration landed is the card appearing on the list this
+          pane goes back to, so the Repo it answers with is nothing to this
+          caller. */}
+      <RepoRegistration submit="Register" landed={() => props.done()} />
+    </>
+  );
+}
+
+/// The registration itself: a path, a press, and every refusal said under the
+/// field it was typed into.
+///
+/// Its own piece because it is asked in two places — the settings pane above,
+/// and the **Open repo** modal the Repo dropdown opens — and they are the same
+/// question with the same answers. A second copy would be a second set of words
+/// for the same refusals, which is exactly what [`REFUSAL`] exists to prevent one
+/// row further down.
+///
+/// The field browses, and the press is untouched by it: what is sent is whatever
+/// the box holds, tapped together or typed straight in, and every refusal is
+/// still the server's answer about it. Anywhere the server can read, because
+/// that is where a Repo may be registered from, and looking for a repository,
+/// which is what this form is being filled in with.
+export function RepoRegistration(props: {
+  /// What the button reads, which is what the human came here to do: register
+  /// one on the settings page, open one from the dropdown.
+  submit: string;
+
+  /// What a registration that left a Repo registered does with it.
+  ///
+  /// Handed the Repo rather than told it landed, because the caller that opened
+  /// this to get *onto* a repository has to put a draft on the one it just
+  /// named — and the path that was typed is not the resolved path the Repo is
+  /// recorded under.
+  landed: (repo: RepoEntry) => void;
+
+  /// Whether a path that is registered already is somewhere to land.
+  ///
+  /// It is, on the modal that opens one to work in: the Repo comes back with
+  /// that outcome too, so a path somebody had registered before is the
+  /// repository they named rather than a dead end. It is not on the settings
+  /// pane, where the answer stays the refusal in words it always was.
+  lands?: boolean;
+
+  /// What else the form draws, under the button: the modal's way out.
+  children?: JSX.Element;
+}): JSX.Element {
   const queries = useQueryClient();
 
   // The path typed into the field.
@@ -575,27 +646,39 @@ export function RepoPane(props: {
   // What the server said about the last path offered, or `null` while nothing
   // has been. Cleared as soon as the field is touched: a refusal is about the
   // path that was sent, and it stops being about the one being typed.
-  const [refused, setRefused] = createSignal<Registered | null>(null);
+  const [refused, setRefused] = createSignal<RepoRefused | null>(null);
 
   const register = useMutation(() => ({
     mutationFn: (asked: string) => registerRepo(asked),
     onSuccess: (outcome: Registered) => {
-      if (outcome !== "Added") {
-        // Said inside the pane, which stays up: the path that was refused is
-        // the one about to be corrected.
+      // A refusal, which is a bare word on the wire — the two outcomes that
+      // leave a Repo registered carry it. Said where the path was typed, which
+      // stays up: the path that was refused is the one about to be corrected.
+      if (typeof outcome === "string") {
         setRefused(outcome);
         return;
       }
 
-      // The list behind the pane is now out of date — the repo appearing on it
-      // is the whole of the confirmation. And the roadmaps waiting go with it,
-      // as they do when a repo is removed: they are read off whatever is
-      // registered, so a repository arriving with an unadopted roadmap in it has
-      // something to offer the moment it lands — and registering a path that was
-      // taken away brings a whole repository's worth back at once.
+      // And a path registered already, where this form is a place to add one
+      // rather than a way onto a repository: the same refusal, in the same
+      // words, whatever came back beside it.
+      if (!props.lands && "AlreadyRegistered" in outcome) {
+        setRefused("AlreadyRegistered");
+        return;
+      }
+
+      // The list this was filled in over is now out of date — the repo
+      // appearing on it is the whole of the confirmation. And the roadmaps
+      // waiting go with it, as they do when a repo is removed: they are read off
+      // whatever is registered, so a repository arriving with an unadopted
+      // roadmap in it has something to offer the moment it lands — and
+      // registering a path that was taken away brings a whole repository's worth
+      // back at once.
       void queries.invalidateQueries({ queryKey: ["repos"] });
       void queries.invalidateQueries({ queryKey: ["abandoned-roadmaps"] });
-      props.done();
+      props.landed(
+        "Added" in outcome ? outcome.Added : outcome.AlreadyRegistered,
+      );
     },
   }));
 
@@ -611,48 +694,85 @@ export function RepoPane(props: {
   };
 
   return (
-    <>
-      <PaneSticky>
-        <PaneHead back={{ to: "Settings", go: props.back }} title="Add a repo" />
-      </PaneSticky>
+    /* Every way it can be refused is said inside it, because a refusal is
+       answered by correcting the path. */
+    <form class={styles.form} onSubmit={add}>
+      <label for="repo-path">Absolute path of a git repository</label>
+      <PathField
+        id="repo-path"
+        repositories
+        placeholder="/home/you/src/verkstead"
+        value={path()}
+        write={(asked) => {
+          setPath(asked);
+          setRefused(null);
+        }}
+      />
 
-      {/* Every way it can be refused is said inside it, because a refusal is
-          answered by correcting the path. */}
-      <form class={styles.form} onSubmit={add}>
-        <label for="repo-path">Absolute path of a git repository</label>
-        <PathField
-          id="repo-path"
-          repositories
-          placeholder="/home/you/src/verkstead"
-          value={path()}
-          write={(asked) => {
-            setPath(asked);
-            setRefused(null);
-          }}
-        />
+      <div class={styles.buttons}>
+        <button
+          type="submit"
+          disabled={register.isPending || path().trim() === ""}
+        >
+          {props.submit}
+        </button>
+        {props.children}
+      </div>
 
-        <div class={styles.buttons}>
-          <button
-            type="submit"
-            disabled={register.isPending || path().trim() === ""}
-          >
-            Register
-          </button>
-        </div>
+      <Show when={refused()}>
+        {(outcome) => (
+          <ErrorLine class={styles.failure}>{REFUSAL[outcome()]}</ErrorLine>
+        )}
+      </Show>
+      {/* A server that could not answer at all, which is the one thing here
+          that is an error rather than an outcome. */}
+      <Show when={register.isError}>
+        <ErrorLine class={styles.failure}>
+          The repo could not be registered: {register.error?.message}
+        </ErrorLine>
+      </Show>
+    </form>
+  );
+}
 
-        <Show when={refused()}>
-          {(outcome) => (
-            <ErrorLine class={styles.failure}>{REFUSAL[outcome()]}</ErrorLine>
-          )}
-        </Show>
-        {/* A server that could not answer at all, which is the one thing here
-            that is an error rather than an outcome. */}
-        <Show when={register.isError}>
-          <ErrorLine class={styles.failure}>
-            The repo could not be registered: {register.error?.message}
-          </ErrorLine>
-        </Show>
-      </form>
-    </>
+/// And the same registration asked from the Repo dropdown rather than from the
+/// settings: **Open repo**, on the modal every other card in front of the page
+/// is drawn on.
+///
+/// The form is the pane's own — one question with one set of answers, so a
+/// second copy would be a second set of words for the same refusals — and the
+/// place it stands in makes one difference to what it does with them: a path
+/// registered already is the repository somebody named rather than a dead end,
+/// because this is a way *onto* one. See `lands` on [`RepoRegistration`].
+///
+/// A refusal keeps the modal up, exactly as it keeps the pane up: a refused path
+/// is the one about to be corrected, and taking the card away would take the
+/// field with it.
+export function OpenRepo(props: {
+  /// Said when the modal has closed itself — Escape, a press on the backdrop,
+  /// or the Cancel beside the press.
+  close: () => void;
+  /// And what a registration that landed does with the Repo, which is the
+  /// caller's: the draft goes onto it.
+  landed: (repo: RepoEntry) => void;
+}): JSX.Element {
+  // The heading's own id, for the `aria-labelledby` that names the card by it.
+  // Generated rather than written, the two Repo dropdowns being drawable on one
+  // page and an id being the page's to keep unique.
+  const id = createUniqueId();
+
+  return (
+    <Modal class={styles.openRepo!} open close={props.close} labelledBy={id}>
+      <h3 id={id}>Open a repo</h3>
+
+      <RepoRegistration submit="Open" lands landed={props.landed}>
+        {/* Drawn as well as the ways out the modal already has: Escape and a
+            press on the backdrop are for a keyboard and a cursor, and this is
+            the one a thumb has. */}
+        <button type="button" class={styles.cancel} onClick={props.close}>
+          Cancel
+        </button>
+      </RepoRegistration>
+    </Modal>
   );
 }

@@ -3,11 +3,11 @@
    the browser's, and the field around it is each caller's.
 
    This one is the other way about, and deliberately: the control is the same
-   control in all five places it stands — three on the setup card, one in the
-   steer modal, one on the profile form — so what it looks like is written once
-   here, and a caller is left with where it sits and how much room it has. Five
-   copies of a border and a radius are five things to drift, which is exactly
-   what the five `select` rules this replaces had begun to do. */
+   control in all six places it stands — four on the setup card, the Repo among
+   them, one in the steer modal, one on the profile form — so what it looks like
+   is written once here, and a caller is left with where it sits and how much
+   room it has. Six copies of a border and a radius are six things to drift,
+   which is exactly what the `select` rules this replaces had begun to do. */
 
 /* The anchor the rows hang from. */
 .listbox {
@@ -200,8 +200,8 @@ dialog .backdrop {
    says which of the fields the choice is going into, and it stays said for as
    long as the rows are down.
 
-   Wherever the control is a field, which is four of the five places it stands.
-   Inside the composer box it is not one — there is no border there to paint —
+   Wherever the control is a field, which is everywhere but the composer's own
+   row. Inside that box it is not one — there is no border there to paint —
    and what says the focus instead is the label in the handle lighting up, in
    `workbench/Setup.module.css`, where the rest of that trigger's paint is. */
 .control:focus-visible,
@@ -219,4 +219,22 @@ dialog .backdrop {
   .row:hover {
     background: var(--paper);
   }
+}
+
+/* The rule the rows that press stand behind: what is registered above it, and
+   the ways to register something under it. A hairline the width of the list
+   inside its padding, because it is a break in one list rather than the edge of
+   a second — see `Action` in `picking.tsx`. */
+.rule {
+  height: 1px;
+  margin: 0.3rem 0.2rem;
+  background: var(--edge);
+}
+
+/* And a row under it, which is the same row as every other: the same height for
+   the same finger, and the same surface under the walk. What tells it apart is
+   what it says and where it stands, rather than a paint of its own — it is one
+   of the things the human can do to this list, not a warning. */
+.action .words {
+  color: var(--ink-soft);
 }

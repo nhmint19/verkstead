@@ -294,10 +294,13 @@
 }
 
 /* One of a short list the repository already holds, which is what a native
-   dropdown is for: a branch has nothing to draw beside its name, and neither
-   has a repo — so these stay a `<select>` where the pairings outside have
-   become a listbox of their own. */
-.repoPick select,
+   dropdown is for: a branch has nothing to draw beside its name, so these stay
+   a `<select>` where the pairings outside have become a listbox of their own.
+
+   The Repo above them is no longer one of these. It kept nothing of a `select`
+   the moment the two rows at its foot had to press rather than pick, and what it
+   is painted with now is `picking.module.css` — which draws that control as the
+   field it stands in place of, so the row still lines up with these. */
 .baseBranch select,
 .addCompanion select {
   width: 100%;
@@ -351,7 +354,6 @@
    of them the human is in — the branch, a base, or a companion's own. The
    pairing control says it for itself, in `picking.module.css`. */
 .fieldLine input:focus-visible,
-.repoPick select:focus-visible,
 .baseBranch select:focus-visible,
 .addCompanion select:focus-visible {
   border-color: var(--accent);
@@ -387,7 +389,6 @@
    else. */
 @media (hover: hover) {
   .fieldLine input:hover,
-  .repoPick select:hover,
   .baseBranch select:hover,
   .addCompanion select:hover {
     border-color: var(--ink-soft);

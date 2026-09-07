@@ -45,11 +45,18 @@ pub struct Registration {
 /// The refusals are the server's and not the form's: a check the browser made
 /// is a courtesy, and every request reaching this endpoint is decided here
 /// whether or not a form was involved.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// The two outcomes that leave a Repo registered carry it, because whoever
+/// asked is usually about to put something *on* it — the Repo dropdown's **Open
+/// repo** row registers one and lands the draft on it — and the path that was
+/// typed is not the resolved path the Repo is recorded under. A caller left to
+/// match its own spelling against the list afterwards would be guessing at an
+/// answer this endpoint is already holding.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Registered {
     /// Recorded. It is on the list, and it is there after a restart.
-    Added,
+    Added(RepoEntry),
 
     /// The path was relative. There is nothing to resolve it against that would
     /// mean the same thing twice, so it is refused rather than guessed at.
@@ -72,7 +79,12 @@ pub enum Registered {
     ///
     /// A path a Repo that was taken away still holds is not this: registering it
     /// again revives that Repo, and the answer is [`Registered::Added`].
-    AlreadyRegistered,
+    ///
+    /// It carries the Repo for the reason [`Registered::Added`] does, and it is
+    /// the same Repo either way: a settings pane goes on saying *registered
+    /// already* and nothing else, while a dropdown that was registering one to
+    /// work in has the repository it named rather than a dead end.
+    AlreadyRegistered(RepoEntry),
 }
 
 /// What became of taking one off the registry.

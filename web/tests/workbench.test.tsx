@@ -247,9 +247,11 @@ import {
 } from "./bench";
 import { art, marked } from "./marking";
 import {
+  actionRows,
   offered,
   pick,
   picker,
+  press,
   rows as offers,
   showing,
 } from "./pickers";
@@ -3921,19 +3923,16 @@ describe("a conversation's setup", () => {
 /// is that the press goes out, that the panel reads the record back, and that a
 /// branch already cut settles the picker rather than hiding it.
 describe("switching a draft's repo", () => {
-  /// The picker, waited for: the repos arrive on a read of their own, and a
-  /// `<select>` told to show an option it has not been given yet falls to the
-  /// first one it has.
-  async function repoPicker(container: ParentNode): Promise<HTMLSelectElement> {
+  /// The panel opened and the rows down, waited for: the repos arrive on a read
+  /// of their own, so a control asked about before that read landed is one with
+  /// nothing to offer yet.
+  ///
+  /// The app's own listbox rather than a `<select>` — the two rows at its foot
+  /// press rather than pick, which is nothing a native option can do — so it is
+  /// driven the way every other one is, through `./pickers`.
+  async function repoRows(container: ParentNode): Promise<void> {
     await openRepo(container);
-
-    const picker = (await waitFor(() =>
-      screen.getByLabelText("Repo"),
-    )) as HTMLSelectElement;
-
-    await waitFor(() => expect(picker.options.length).toBe(REPOS.length));
-
-    return picker;
+    await waitFor(() => expect(offered("Repo").length).toBe(REPOS.length));
   }
 
   /// Every registered repo, the conversation's own among them and showing —
@@ -3943,12 +3942,10 @@ describe("switching a draft's repo", () => {
     theWorkbench();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    const picker = await repoPicker(container);
+    await repoRows(container);
 
-    expect([...picker.options].map((option) => option.textContent)).toEqual(
-      REPOS.map((repo) => repo.name),
-    );
-    expect(picker.value).toBe(String(OPEN.repo.id));
+    expect(offers("Repo")).toEqual(REPOS.map((repo) => repo.name));
+    expect(showing("Repo")).toBe(OPEN.repo.name);
 
     // At the top of the panel, which is the order the panel is read in: the
     // repo, and then everything that is a fact about it.
@@ -3965,9 +3962,8 @@ describe("switching a draft's repo", () => {
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const elsewhere = REPOS.find((repo) => repo.id !== OPEN.repo.id)!;
-    fireEvent.change(await repoPicker(container), {
-      target: { value: String(elsewhere.id) },
-    });
+    await repoRows(container);
+    pick("Repo", elsewhere.name);
 
     await waitFor(() =>
       expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/repo`)).toEqual({
@@ -3982,12 +3978,60 @@ describe("switching a draft's repo", () => {
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const elsewhere = REPOS.find((repo) => repo.id !== OPEN.repo.id)!;
-    fireEvent.change(await repoPicker(container), {
-      target: { value: String(elsewhere.id) },
-    });
+    await repoRows(container);
+    pick("Repo", elsewhere.name);
 
     await waitFor(() =>
       expect(screen.getByText(REPO_SWITCH_REFUSAL.NoSuchRepo)).toBeTruthy(),
+    );
+  });
+
+  /// And the two rows at the foot of that dropdown, which are the compose page's
+  /// same two: one control in two places, so a draft's composer gets them too.
+  ///
+  /// What they are is `picking.test.tsx`'s and what the modal behind **Open
+  /// repo** does with a path is `composing.test.tsx`'s. What is asked here is
+  /// the one thing this page adds: a repository registered from the panel is a
+  /// move on the draft, exactly as picking a registered one is.
+  it("offers the two rows at its foot, neither of them a repo", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await repoRows(container);
+
+    expect(actionRows("Repo")).toEqual(["Create repo", "Open repo"]);
+    expect(offers("Repo")).toEqual(REPOS.map((repo) => repo.name));
+  });
+
+  it("moves the work onto a repo registered from Open repo", async () => {
+    const opened = {
+      id: 4242,
+      name: "widgets",
+      path: "/srv/repos/widgets",
+      default_branch: "main",
+    };
+    const fetching = theWorkbench(
+      whenever("/api/ui/repos", json({ Added: opened }), "POST"),
+      json("Switched"),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await repoRows(container);
+    press("Repo", "Open repo");
+
+    fireEvent.input(
+      await waitFor(() => screen.getByLabelText(/absolute path/i)),
+      { target: { value: opened.path } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+
+    // The move carries the id the registration answered with, which is the
+    // whole reason the outcome carries the Repo: the path that was typed is not
+    // what it is recorded under, and there is nothing here to match against.
+    await waitFor(() =>
+      expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/repo`)).toEqual({
+        repo_id: opened.id,
+      }),
     );
   });
 
