@@ -1376,15 +1376,18 @@ async fn force_stop_ends_a_session_where_it_stands() {
 /// Profile named is really there, joined in by the junction and the hard link
 /// the open rendering makes.
 ///
-/// **Four of the five are the value Verkstead composed and one of them is not.**
-/// Windows stamps its own `LOCALAPPDATA` over what a process inside an
-/// AppContainer was handed: a container has a private folder of its own, at
-/// `Packages\<the profile's name>\AC` under whatever local half the process was
-/// started with, and that is the name it is told. Which is still inside this
+/// **Two of the five are the value Verkstead composed and three of them are
+/// not.** Windows stamps its own `LOCALAPPDATA`, `TEMP` and `TMP` over what a
+/// process inside an AppContainer was handed: a container has a private folder
+/// of its own, at `Packages\<the profile's name>\AC` under whatever local half
+/// the process was started with, and it is told that folder for the local half
+/// and the `Temp` inside it for the other two. Which is all still inside this
 /// Conversation's own profile, and so still goes when the profile does — the
-/// fresh profile's whole claim — and it is asserted here rather than allowed
-/// for, because a container whose private folder landed in the human's own
-/// local half would be a different fact entirely.
+/// fresh profile's whole claim, and where what a session throws away really
+/// lands, rather than the temporary directory the description makes beside it.
+/// It is asserted here rather than allowed for, because a container whose
+/// private folder landed in the human's own local half would be a different
+/// fact entirely.
 #[tokio::test]
 async fn a_session_runs_in_a_profile_of_the_conversations_own() {
     let fixture = grilling(
@@ -1410,10 +1413,10 @@ async fn a_session_runs_in_a_profile_of_the_conversations_own() {
     let profile = fixture.profile();
     let roaming = profile.join("AppData").join("Roaming");
     let local = profile.join("AppData").join("Local");
-    let temporary = local.join("Temp");
 
     // And the container's own private folder inside that local half, which is
-    // what Windows tells a session `LOCALAPPDATA` is — see this test's own
+    // what Windows tells a session `LOCALAPPDATA` is, with the temporary
+    // directory it is told about inside that — see this test's own
     // documentation. Named off the same function the rendering makes the
     // container under, because what the folder is called is what the profile is
     // called.
@@ -1421,6 +1424,7 @@ async fn a_session_runs_in_a_profile_of_the_conversations_own() {
         .join("Packages")
         .join(container::profile(fixture.state.path(), fixture.id))
         .join("AC");
+    let temporary = its_own.join("Temp");
 
     // Compared as they are spelled rather than as the filesystem has them,
     // which is the stricter of the two here: every one of these is built out of
@@ -1445,8 +1449,9 @@ async fn a_session_runs_in_a_profile_of_the_conversations_own() {
 
     landed(
         &temporary.join("thrown-away.txt"),
-        "what a session writes to its temporary directory lands under the \
-         profile it was given, which is what makes it thrown away with it",
+        "what a session writes to the temporary directory it was told about \
+         lands under the profile it was given, which is what makes it thrown \
+         away with it",
     )
     .await;
 
