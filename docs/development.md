@@ -27,8 +27,14 @@ Everything below assumes this shell — it carries the Rust toolchain, `sqlite`,
 ```console
 $ (cd web && pnpm install && pnpm build)
 $ cargo run -p verkstead-cli -- serve --data-dir .
-  INFO verkstead_server: verkstead is listening listen=127.0.0.1:8422 data_dir=. home=/home/you sandbox_binds=0 build_cache=Some("/home/you/.cache/verkstead") skills=./skills
+  INFO verkstead_server: verkstead is listening listen=127.0.0.1:8422 workbench=http://127.0.0.1:8422/?key=… data_dir=. home=/home/you sandbox_binds=0 build_cache=Some("/home/you/.cache/verkstead") skills=./skills
 ```
+
+**`workbench=` is how you get in.** Every page of the workbench and the viewer's
+own `/api/ui/` namespace answer 401 without the **Workbench Key**, and that link
+is the address with the key on it: paste it once and the browser holds the
+cookie from then on. The key is `workbench.key` in the Data Directory, made at
+the first start and read back at every one after it.
 
 **That is the whole of it — there is no boundary flag to say.** A repo is
 registered from anywhere the server can read, an **Agent Profile** names an

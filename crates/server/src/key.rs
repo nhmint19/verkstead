@@ -39,6 +39,7 @@
 //! an agent that mistyped an endpoint is still told plainly that it did not get
 //! what it asked for.
 
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
@@ -151,6 +152,49 @@ impl WorkbenchKey {
     /// failure to write one.
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// The login link against `base`: the address with the key on it, which is
+    /// the whole of how a device is let in.
+    ///
+    /// `base` is an origin — `http://127.0.0.1:8422` for a browser on this
+    /// machine, and whatever `tailscale serve` answers on for the phone that
+    /// reaches it from the tailnet — because where Verkstead is reached *from*
+    /// is not something the server can read off its own socket.
+    ///
+    /// Pointed at the root rather than at a path: the workbench opens where it
+    /// always opens, and the handshake redirects there with the parameter
+    /// taken off.
+    ///
+    /// The secret is read at the moment the link is asked for rather than kept
+    /// as a string beside the handle, so a link built from a handle whose key
+    /// has since been re-issued carries the new one.
+    pub fn link(&self, base: &str) -> String {
+        format!("{}/?{QUERY}={}", base.trim_end_matches('/'), self.secret())
+    }
+}
+
+/// The login link for a browser on the machine Verkstead is running on: what
+/// the startup line carries, and what the desktop app opens.
+///
+/// The address as it was given, unless that is the unspecified one — bound to
+/// `0.0.0.0` the server answers on every interface this machine has, and what
+/// a browser *here* is pointed at is the loopback rather than a literal
+/// `0.0.0.0` a URL bar has nothing to do with.
+pub fn login_link(listen: SocketAddr, key: &WorkbenchKey) -> String {
+    key.link(&format!("http://{}", browsable(listen)))
+}
+
+/// `listen` as an address a browser on this machine can be pointed at.
+fn browsable(listen: SocketAddr) -> SocketAddr {
+    match listen.ip() {
+        IpAddr::V4(address) if address.is_unspecified() => {
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen.port())
+        }
+        IpAddr::V6(address) if address.is_unspecified() => {
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen.port())
+        }
+        _ => listen,
     }
 }
 

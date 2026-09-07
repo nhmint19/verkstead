@@ -20,7 +20,9 @@
 //! that has to be *shown* — something already listening on the port — is found
 //! before the server has made anything, while there is still nothing to undo.
 //! That is [`Desktop::settle`], and it is why the server has a
-//! [`verkstead_server::run_on`] to be handed the socket.
+//! [`verkstead_server::run_on_keyed`] to be handed the socket — and the
+//! Workbench Key, which the app has to hold before it can open a browser that
+//! is logged in. See [`Desktop::run`].
 //!
 //! **The main thread is the tray's**, and the server runs beside it. The
 //! platform's own toolkit holds the thread its loop is running on — see
@@ -64,12 +66,13 @@ pub mod toolkit;
 pub mod tray;
 
 use std::fmt;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
+use std::net::{SocketAddr, TcpListener};
 use std::sync::mpsc::sync_channel;
 
 use anyhow::{Context, Result};
 use tray_icon::TrayIcon;
 use verkstead_server::Config;
+use verkstead_server::key::{WorkbenchKey, login_link};
 
 /// What Verkstead is called wherever a platform asks for an identifier rather
 /// than a name (ADR-0012).
@@ -155,13 +158,23 @@ impl Desktop {
         let startup = startup::Startup::here(entered);
         startup.refresh();
 
-        let viewer = viewer_url(self.server.listen);
+        // The Workbench Key, before there is a server to ask one of. The
+        // workbench answers 401 to anything that has not shown it (ADR-0015), so
+        // a browser opened on the bare address would land on a refusal — and the
+        // key has to be the *server's*, which is what handing this handle to it
+        // below makes it. See [`verkstead_server::Config::workbench_key`].
+        let key = self.server.workbench_key()?;
+        let listen = self.server.listen;
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .context("starting the async runtime")?;
 
-        let serving = runtime.spawn(verkstead_server::run_on(listener, self.server));
+        let serving = runtime.spawn(verkstead_server::run_on_keyed(
+            listener,
+            self.server,
+            key.clone(),
+        ));
 
         // After the socket is bound and before the server is up, which is the
         // only moment there is: nothing announces that the router is mounted,
@@ -169,15 +182,17 @@ impl Desktop {
         // waits in the socket's own queue rather than being refused.
         if !self.no_open {
             // Not being able to open a browser is not a reason to stop serving:
-            // the address is in the server's own startup line, a browser
+            // the same link is in the server's own startup line, a browser
             // pointed at it by hand reaches the same viewer, and so does every
             // other device on the tailnet.
+            let viewer = login_link(listen, &key);
+
             if let Err(error) = opener::url(&viewer) {
                 tracing::warn!(%viewer, "{error:#}");
             }
         }
 
-        let Some(tray) = raise(&viewer, &logging, &startup) else {
+        let Some(tray) = raise(listen, &key, &logging, &startup) else {
             // No tray to be in, so this is `verkstead serve` with a browser
             // opened: the main thread waits on the server, and the process is
             // stopped the way that one is.
@@ -232,11 +247,19 @@ impl Desktop {
 /// nobody shows is one this cannot tell from an icon somebody does. macOS has
 /// no such question — the menu bar is the session's own and always there.
 ///
-/// `viewer` is where Open sends the browser: the same URL that was opened at
-/// startup, now on demand. `logging` is what View Logs opens, or what it says
-/// where this machine had nowhere to keep a log file. `startup` is the
-/// registration the Launch on Startup box is drawn from and written to.
-fn raise(viewer: &str, logging: &logs::Kept, startup: &startup::Startup) -> Option<TrayIcon> {
+/// `listen` and `key` are where Open sends the browser: the same login link
+/// that was opened at startup, built again at each press rather than captured
+/// once, so that a key which has been re-issued since is the one the next press
+/// hands over. `logging` is what
+/// View Logs opens, or what it says where this machine had nowhere to keep a log
+/// file. `startup` is the registration the Launch on Startup box is drawn from
+/// and written to.
+fn raise(
+    listen: SocketAddr,
+    key: &WorkbenchKey,
+    logging: &logs::Kept,
+    startup: &startup::Startup,
+) -> Option<TrayIcon> {
     if !screen::there_is_one() {
         tracing::info!("there is no screen here, so Verkstead is running as the server alone");
         return None;
@@ -247,7 +270,7 @@ fn raise(viewer: &str, logging: &logs::Kept, startup: &startup::Startup) -> Opti
         return None;
     }
 
-    let viewer = viewer.to_owned();
+    let key = key.clone();
     let logging = logging.clone();
     let startup = startup.clone();
 
@@ -258,6 +281,12 @@ fn raise(viewer: &str, logging: &logs::Kept, startup: &startup::Startup) -> Opti
 
     let raised = tray::show(ticked, move |chosen| match chosen {
         tray::Chosen::Open => {
+            // The link rather than the bare address, and built here rather than
+            // captured: what makes a browser the human's is the key on it, and a
+            // press months after the browser forgot the cookie has to be as good
+            // as the first one.
+            let viewer = login_link(listen, &key);
+
             // Said and carried on, for the reason the open at startup is: the
             // viewer is reachable from every browser on the tailnet, and a
             // desktop that would not open one is no reason to stop serving them.
@@ -320,26 +349,6 @@ fn raise(viewer: &str, logging: &logs::Kept, startup: &startup::Startup) -> Opti
     }
 }
 
-/// Where the viewer is, for a browser on this machine.
-///
-/// The address as it was given, unless that is the unspecified one: bound to
-/// `0.0.0.0` the server is reachable on every interface this machine has, and
-/// what a browser *here* should be pointed at is the loopback rather than a
-/// literal `0.0.0.0` a URL bar has nothing to do with.
-fn viewer_url(listen: SocketAddr) -> String {
-    let host = match listen.ip() {
-        IpAddr::V4(address) if address.is_unspecified() => {
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen.port())
-        }
-        IpAddr::V6(address) if address.is_unspecified() => {
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen.port())
-        }
-        _ => listen,
-    };
-
-    format!("http://{host}/")
-}
-
 /// The address could not be taken, which is the one failure the app draws
 /// rather than prints.
 ///
@@ -379,29 +388,6 @@ impl std::error::Error for Taken {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_viewer_url_is_the_address_the_server_was_given() {
-        assert_eq!(
-            viewer_url("127.0.0.1:8422".parse().unwrap()),
-            "http://127.0.0.1:8422/"
-        );
-    }
-
-    /// A browser on this machine is pointed at the loopback whatever interfaces
-    /// the server was told to answer on — `http://0.0.0.0:8422/` is not an
-    /// address a browser has anything to do with.
-    #[test]
-    fn a_server_on_every_interface_is_opened_on_the_loopback() {
-        assert_eq!(
-            viewer_url("0.0.0.0:8422".parse().unwrap()),
-            "http://127.0.0.1:8422/"
-        );
-        assert_eq!(
-            viewer_url("[::]:8422".parse().unwrap()),
-            "http://127.0.0.1:8422/"
-        );
-    }
 
     /// The port is the whole of what the human can act on, so it is in the
     /// message rather than in the operating system's own words alone.

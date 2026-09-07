@@ -122,6 +122,19 @@ impl Serve {
             .cookie()
     }
 
+    /// And the login link it logged as it came up: this address with the key on
+    /// it, which is the daemon's whole way of handing one over.
+    fn login_link(&self) -> String {
+        let data_dir = self
+            .data_dir
+            .as_deref()
+            .expect("a test about the login link names a Data Directory");
+
+        verkstead_server::key::WorkbenchKey::issued(data_dir)
+            .expect("the server writes its key as it starts")
+            .link(&self.url)
+    }
+
     /// The plain form: the flags every test but the environment one uses.
     ///
     /// `dir` is the working directory the server is started in, which is all it
@@ -692,6 +705,80 @@ fn startup_logs_the_listen_address_and_the_data_directory() {
         logged.contains(&format!("127.0.0.1:{port}")) && logged.contains("logged"),
         "the operator's one confirmation that the server came up where they \
          asked is this line, got:\n{logged}"
+    );
+}
+
+/// And it carries the login link, which is the daemon's whole way of handing one
+/// over (ADR-0015): a human reading the journal has a link to paste, and pasting
+/// it is what makes a browser theirs.
+///
+/// There is no `verkstead remote` and no wizard step behind this. A machine
+/// started from a unit file has no tray to press **Open** in, so the line it
+/// already writes is where the link goes.
+#[test]
+fn the_startup_line_carries_a_link_that_lands_logged_in() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data_dir = tmp.path().join("linked");
+    let port = free_port();
+    let mut serving = Serve::with_flags(tmp.path(), port, &data_dir);
+    let link = serving.login_link();
+
+    // A browser that has never been here, following what was logged. The
+    // redirect is not followed and the status is not an error: what this test is
+    // about is the handshake itself, which a client that chased the redirect
+    // would land on the far side of holding nothing.
+    let browser = ureq::Agent::config_builder()
+        .max_redirects(0)
+        .http_status_as_error(false)
+        .build()
+        .new_agent();
+
+    let handshake = browser.get(&link).call().unwrap();
+
+    assert_eq!(
+        handshake.status().as_u16(),
+        303,
+        "a link carrying the key is a handshake rather than a page",
+    );
+
+    let cookie = handshake
+        .headers()
+        .get("set-cookie")
+        .expect("the handshake is where the browser is handed the key")
+        .to_str()
+        .unwrap()
+        .to_owned();
+
+    // And the same browser, holding what it was just given, is in: the page it
+    // was redirected to is answered by the viewer rather than by the gate — a
+    // 503 where `pnpm build` has never run, which is the viewer saying it was
+    // not built and so is still the far side of the gate — and the workbench's
+    // own namespace answers it too.
+    let landed = browser
+        .get(&serving.url)
+        .header("Cookie", &cookie)
+        .call()
+        .unwrap();
+
+    assert_ne!(
+        landed.status().as_u16(),
+        401,
+        "the browser followed the link, so the workbench is its to read",
+    );
+
+    let repos = browser
+        .get(format!("{}/api/ui/repos", serving.url))
+        .header("Cookie", &cookie)
+        .call()
+        .unwrap();
+
+    assert_eq!(repos.status().as_u16(), 200);
+
+    let logged = uncoloured(&serving.stop());
+
+    assert!(
+        logged.contains(&link),
+        "the link a human pastes is on the startup line, got:\n{logged}"
     );
 }
 

@@ -22,7 +22,7 @@ use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
-use verkstead_server::key::WorkbenchKey;
+use verkstead_server::key::{WorkbenchKey, login_link};
 use verkstead_server::settings::{Secrets, Settings};
 use verkstead_server::{Embed, open_database, router_keyed_with_viewer, store};
 
@@ -248,6 +248,102 @@ async fn a_wrong_key_is_no_better_than_none() {
     let response = get_with_cookie(&app, "/api/ui/repos", "workbench_key=not-the-key").await;
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+/// The link the daemon logs and the desktop app opens: the address with the key
+/// on it, which is the whole of how a device is first let in (ADR-0015).
+#[tokio::test]
+async fn the_login_link_is_what_a_browser_follows_in_on() {
+    let (_dir, _pool, key, app, _conversation) = keyed().await;
+
+    let link = login_link("127.0.0.1:8422".parse().unwrap(), &key);
+
+    assert_eq!(
+        link,
+        format!("http://127.0.0.1:8422/?key={}", key.secret()),
+        "the workbench's own root, with the key on it",
+    );
+
+    // And what following it does: the handshake, and then the workbench drawn
+    // for the browser that came out of it holding the cookie.
+    let response = get(&app, &format!("/?key={}", key.secret())).await;
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(header_of(&response, LOCATION), "/");
+
+    let landed = get_with_cookie(&app, "/", &header_of(&response, SET_COOKIE)).await;
+
+    assert_eq!(landed.status(), StatusCode::OK);
+    assert!(text(landed).await.contains(r#"<div id="app">"#));
+}
+
+/// A browser on this machine is pointed at the loopback whatever interfaces the
+/// server was told to answer on — `http://0.0.0.0:8422/` is not an address a URL
+/// bar has anything to do with.
+#[test]
+fn a_server_on_every_interface_hands_out_a_loopback_link() {
+    let dir = tempfile::tempdir().unwrap();
+    let key = WorkbenchKey::issued(dir.path()).unwrap();
+    let expected = format!("http://127.0.0.1:8422/?key={}", key.secret());
+
+    for bound in ["0.0.0.0:8422", "[::]:8422"] {
+        assert_eq!(
+            login_link(bound.parse().unwrap(), &key),
+            expected,
+            "{bound}"
+        );
+    }
+}
+
+/// And a device that reaches Verkstead from somewhere else gets the same key
+/// against the address it reaches it at: `tailscale serve` is in front of the
+/// same server, and where a request arrives from is not something the server can
+/// read off its own socket.
+#[test]
+fn the_link_carries_the_key_to_whatever_address_it_is_built_against() {
+    let dir = tempfile::tempdir().unwrap();
+    let key = WorkbenchKey::issued(dir.path()).unwrap();
+    let expected = format!("https://desk.tail0000.ts.net/?key={}", key.secret());
+
+    // With the root on it or without, because an address is written both ways
+    // and a link with two slashes in it is one somebody will not trust.
+    assert_eq!(key.link("https://desk.tail0000.ts.net"), expected);
+    assert_eq!(key.link("https://desk.tail0000.ts.net/"), expected);
+}
+
+/// A page opened from a push notification is a page of the workbench like any
+/// other: the worker navigates to the path the server named, same-origin and
+/// with no key on it — see `assets/sw.js` — so what lets it in is the cookie the
+/// browser is already holding, sent on a navigation because the cookie is
+/// `SameSite=Lax` rather than `Strict`.
+///
+/// Nothing had to be built for that to be true. This is what says it is.
+#[tokio::test]
+async fn a_page_a_push_notification_opens_lands_logged_in() {
+    let (_dir, _pool, key, app, conversation) = keyed().await;
+
+    let handshake = get(&app, &format!("/?key={}", key.secret())).await;
+    let cookie = header_of(&handshake, SET_COOKIE);
+
+    assert!(
+        cookie.contains("SameSite=Lax"),
+        "a `Strict` cookie is one a tapped notification would not carry: got `{cookie}`",
+    );
+
+    // The two shapes the path a push names takes — see `Notice` in
+    // `crates/server/src/push.rs`.
+    for path in ["/sets/1", &format!("/conversations/{conversation}")] {
+        assert_eq!(
+            get(&app, path).await.status(),
+            StatusCode::UNAUTHORIZED,
+            "GET {path} without the cookie",
+        );
+
+        let opened = get_with_cookie(&app, path, &cookie).await;
+
+        assert_eq!(opened.status(), StatusCode::OK, "GET {path}");
+        assert!(text(opened).await.contains(r#"<div id="app">"#));
+    }
 }
 
 #[tokio::test]

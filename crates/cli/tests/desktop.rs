@@ -224,6 +224,19 @@ impl App {
             .cookie()
     }
 
+    /// And the login link it opened a browser on: this address with the key on
+    /// it, which is what makes the browser the human's.
+    fn login_link(&self) -> String {
+        let data_dir = self
+            .data_dir
+            .as_deref()
+            .expect("a test about the login link names a Data Directory");
+
+        verkstead_server::key::WorkbenchKey::issued(data_dir)
+            .expect("the app writes its key as it starts")
+            .link(&self.url)
+    }
+
     fn await_health(&self) {
         let deadline = Instant::now() + PATIENCE;
         while ureq::get(format!("{}/api/v1/health", self.url))
@@ -520,6 +533,10 @@ fn the_verb_serves_the_server_the_same_binary_asks() {
 /// it to the browser: the whole of what double-clicking an icon is for, and the
 /// one thing `--no-open` is the absence of.
 ///
+/// **On the login link rather than on the bare address** (ADR-0015). The
+/// workbench answers 401 to anything that has not shown the Workbench Key, so an
+/// icon that opened the address alone would be an icon that opened a refusal.
+///
 /// A Unix machine's, for the browser: the opener there is a program on the
 /// `PATH` and the stand-in is what says what was handed over. What a Windows
 /// machine has instead is the human who double-clicks the shortcut.
@@ -534,7 +551,7 @@ fn the_app_serves_the_viewer_and_opens_it() {
     let flags = flags(port, &data_dir);
     let mut app = App::start(port, Some(&opener), tmp.path(), &as_args(&flags), &[]);
 
-    opener.await_asked_for(&format!("http://127.0.0.1:{port}/"));
+    opener.await_asked_for(&app.login_link());
 
     let health = ureq::get(format!("{}/api/v1/health", app.url))
         .call()
@@ -552,6 +569,69 @@ fn the_app_serves_the_viewer_and_opens_it() {
     );
 
     app.stop();
+}
+
+/// And a second start over the same Data Directory opens the same link: the key
+/// is the one the first run made rather than a second one, which would have
+/// logged out every device the first run let in (ADR-0015).
+///
+/// Which is the whole of the seam this app has. It resolves the Data Directory
+/// and takes the key out of it before it starts serving — see
+/// `verkstead_server::Config::workbench_key` — so what it hands a browser is
+/// what the server it is about to spawn is gated on, and what the run before it
+/// left behind.
+///
+/// A Unix machine's, for the browser, like the test above it.
+#[cfg(unix)]
+#[test]
+fn a_restart_hands_out_the_key_the_first_run_made() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data_dir = tmp.path().join("data");
+
+    let first = tempfile::tempdir().unwrap();
+    let opener = Opener::in_dir(first.path());
+    let port = free_port();
+    let started = flags(port, &data_dir);
+    let mut app = App::start(port, Some(&opener), tmp.path(), &as_args(&started), &[]);
+    let link = app.login_link();
+
+    opener.await_asked_for(&link);
+    app.stop();
+
+    // The same directory, a new run of the app, and a browser opened on it
+    // again — which is the desktop somebody restarted, or a machine that has
+    // been rebooted since it was last used.
+    let second = tempfile::tempdir().unwrap();
+    let opener = Opener::in_dir(second.path());
+    let again = free_port();
+    let started_again = flags(again, &data_dir);
+    let mut app = App::start(
+        again,
+        Some(&opener),
+        tmp.path(),
+        &as_args(&started_again),
+        &[],
+    );
+
+    opener.await_asked_for(&app.login_link());
+
+    let (before, after) = (key_in(&link), key_in(&app.login_link()));
+
+    assert_eq!(
+        before, after,
+        "the second start should have read the key the first made",
+    );
+
+    app.stop();
+}
+
+/// The key off a login link, which is everything after the parameter's `=`.
+#[cfg(unix)]
+fn key_in(link: &str) -> String {
+    link.split_once("?key=")
+        .unwrap_or_else(|| panic!("a login link carries the key: got {link}"))
+        .1
+        .to_owned()
 }
 
 /// Told nothing about where its work goes, the app keeps it in the platform's

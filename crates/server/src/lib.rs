@@ -457,6 +457,43 @@ impl Config {
     pub fn releases(&self) -> Option<&'static str> {
         (!self.no_update_check).then_some(updates::LATEST_RELEASE)
     }
+
+    /// The Data Directory this configuration comes to, made where it is not
+    /// there yet.
+    ///
+    /// What the flag holds is what was *said*, which may be nothing at all: a
+    /// machine with nowhere to resolve one to is refused here, where a refusal
+    /// still has somewhere to be worded — see [`platform::data_dir`].
+    ///
+    /// Resolving it is what a caller that is not the server itself comes for.
+    /// The desktop app has to reach the Workbench Key before it has started
+    /// serving, and both halves arriving at one directory is what makes it the
+    /// same key rather than two.
+    pub fn data_directory(&self) -> Result<PathBuf> {
+        let data_dir = platform::data_dir(self.data_dir.as_deref())?;
+
+        std::fs::create_dir_all(&data_dir)
+            .with_context(|| format!("creating data directory {}", data_dir.display()))?;
+
+        Ok(data_dir)
+    }
+
+    /// The Workbench Key this configuration's Data Directory holds: whatever is
+    /// in there, or a new one written where a first start finds nothing.
+    ///
+    /// **The one call both halves of a start make.** `verkstead serve` reaches
+    /// it through [`run_on`] and the desktop app reaches it before it spawns
+    /// the server, because the browser it opens has to be opened on the link —
+    /// and a desktop that invented a key of its own would be locked out of the
+    /// Data Directory it restarts against. What comes back is a handle each of
+    /// them holds a clone of, so a key re-issued through one of them is the key
+    /// the other hands out — see [`key::WorkbenchKey`].
+    pub fn workbench_key(&self) -> Result<key::WorkbenchKey> {
+        let data_dir = self.data_directory()?;
+
+        key::WorkbenchKey::issued(&data_dir)
+            .with_context(|| format!("keeping the workbench key in {}", data_dir.display()))
+    }
 }
 
 /// The SQLite file, which is [`DATABASE_NAME`] inside the Data Directory and is
@@ -849,6 +886,26 @@ pub async fn run(config: Config) -> Result<()> {
 /// there is nothing here that has to be said before the server can be reached,
 /// and everything that *was* said is resolved before it is served over.
 pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<()> {
+    // The Data Directory resolved and made, and the key in it read or written,
+    // before anything else this start does — see [`Config::workbench_key`], and
+    // [`run_on_keyed`] for the caller that arrives having already made this call.
+    let key = config.workbench_key()?;
+
+    run_on_keyed(listener, config, key).await
+}
+
+/// The same again, with the Workbench Key already in hand.
+///
+/// Which is the desktop app's way in. The browser it opens is opened on the
+/// login link, so it has to hold the key before there is a server to ask one of
+/// — and what it hands over here is therefore the key the workbench is gated on,
+/// by being the same handle rather than by being read a second time. See
+/// `verkstead_desktop::Desktop::run`.
+pub async fn run_on_keyed(
+    listener: std::net::TcpListener,
+    config: Config,
+    key: key::WorkbenchKey,
+) -> Result<()> {
     // Resolved at startup: a bind that names nothing, and a HOME the unit never
     // said, are misconfigurations to report now rather than sessions that fail
     // to start weeks later with nobody watching. The home is where a sandbox
@@ -856,16 +913,13 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
     // without one can run no session at all.
     let binds = sandbox::SandboxConfig::resolve(&config.sandbox_binds)?;
 
-    // Resolved and then made at startup, for the reason the binds are resolved
-    // at startup: a machine with nowhere to keep a Data Directory, and a
-    // directory Verkstead cannot write to, are misconfigurations to report now
-    // rather than ones to discover as a failed grilling weeks later. Where the
-    // flag said nothing this is the platform's own directory — see
-    // [`platform::data_dir`] — so the startup line below is now the only place a
+    // The same directory the key was kept in, resolved again rather than
+    // threaded through: what it comes to is the flag or the platform's own place
+    // for it, and neither of those changes between two calls a moment apart.
+    // Where the flag said nothing this is the platform's own directory — see
+    // [`platform::data_dir`] — so the startup line below is the only place a
     // human finds out which one that turned out to be.
-    let data_dir = platform::data_dir(config.data_dir.as_deref())?;
-    std::fs::create_dir_all(&data_dir)
-        .with_context(|| format!("creating data directory {}", data_dir.display()))?;
+    let data_dir = config.data_directory()?;
 
     // And where a session's HOME comes from, which wants the Data Directory
     // above on the platform that makes a real one under it — see
@@ -937,16 +991,6 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
     // through the settings page applies without a restart — see [`settings`].
     let settings = settings::Settings::in_data_dir(&data_dir);
 
-    // And the Workbench Key, in a file of its own in the same directory: made
-    // here where the first start finds nothing, and read back on every start
-    // after it, so a phone that was let in once stays let in. Refused where it
-    // cannot be written, the way the binds and the Data Directory are: a server
-    // with no key is one whose workbench nothing could open, and a machine that
-    // cannot write a file into its own Data Directory is a misconfiguration to
-    // report now — see [`key`].
-    let key = key::WorkbenchKey::issued(&data_dir)
-        .with_context(|| format!("keeping the workbench key in {}", data_dir.display()))?;
-
     let pool = open_database(&database(&data_dir)).await?;
 
     listener
@@ -975,8 +1019,19 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
     let pipe = pipe::Listener::open(&data_dir, &pipe::Grants::of_this_process())
         .context("opening the named pipe a Windows session asks through")?;
 
+    // The one line an operator reads as Verkstead comes up, and so the daemon's
+    // whole way of handing the login link over: the address with the key on it,
+    // which is what a browser has to be pointed at to be let in at all
+    // (ADR-0015). A machine started from a unit file has no tray to press Open
+    // in, and this is what somebody reading the journal can paste.
+    //
+    // The secret is in the log, therefore, and that is the point of it. The
+    // journal is read by whoever the machine lets read it, which is where every
+    // other credential this server was started with is too — and re-issuing the
+    // key is what takes a link back off somebody who has read one.
     tracing::info!(
         listen = %config.listen,
+        workbench = %key::login_link(config.listen, &key),
         data_dir = %data_dir.display(),
         update_check = config.releases().is_some(),
         home = %homes.servers().display(),
