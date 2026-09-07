@@ -33,6 +33,7 @@ import type {
   ConversationView,
   DirectoryListing,
   GrillingStarted,
+  OnboardingView,
   ProfileChoice,
   ProfileChosen,
   ProfileDeleted,
@@ -998,6 +999,17 @@ export function dismissRemoteBanner(): Promise<RemoteBanner> {
 /// never waits on GitHub being reachable.
 export function updateNotice(): Promise<UpdateNotice> {
   return get<UpdateNotice>("/api/ui/update");
+}
+
+/// Whether this Verkstead can do anything yet: the mode the server settled at
+/// startup, the machine it is standing on, and what is missing from it.
+///
+/// Everything but the mode is probed at the moment it is asked, so an install
+/// that lands between two reads is ticked on the next one — which is what the
+/// wizard's own interval is for. The mode itself is the startup verdict and
+/// does not move while the server runs.
+export function loadOnboarding(): Promise<OnboardingView> {
+  return get<OnboardingView>("/api/ui/onboarding");
 }
 
 /// What Verkstead has been told: who a session commits as, and that there is a

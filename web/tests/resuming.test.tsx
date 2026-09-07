@@ -16,6 +16,7 @@ import { App } from "../src/App";
 import type {
   ConversationEntry,
   ConversationView,
+  OnboardingView,
   ProfileEntry,
   QuestionSetEvent,
   RepoEntry,
@@ -28,6 +29,7 @@ import standing from "../src/set/Standing.module.css";
 import { askedFor, json, readable, reads, serving, whenever } from "./serving";
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
 import conversations from "./fixtures/conversations.json" with { type: "json" };
+import onboarding from "./fixtures/onboarding-ready.json" with { type: "json" };
 import profiles from "./fixtures/profiles.json" with { type: "json" };
 import repos from "./fixtures/repos.json" with { type: "json" };
 import answered from "./fixtures/set-answered.json" with { type: "json" };
@@ -56,6 +58,9 @@ const BESIDE = [
   whenever("/api/ui/repos", json(repos as RepoEntry[])),
   whenever("/api/ui/profiles", json(profiles as ProfileEntry[])),
   whenever("/api/ui/update", json("Current")),
+  // And the gate around the router, which the app asks about before it draws
+  // anything: a machine with the objective met leaves the workbench standing.
+  whenever("/api/ui/onboarding", json(onboarding as OnboardingView)),
 ];
 
 /// One Set twice over: waiting when the app went away, answered from another

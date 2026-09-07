@@ -1,0 +1,99 @@
+/* The wizard — see `SetupPage.tsx`.
+
+   Read down as one column at the measure `styles/base.css` sets for prose: it
+   is the one page in the app that is a sequence rather than a workbench, and
+   somebody is walking it once. No panes and no sidebar, because there is
+   nothing yet for either of them to hold. */
+
+.setup {
+  padding: 1.5rem 0 3rem;
+}
+
+.setup h1 {
+  margin: 0 0 0.5rem;
+  font-size: 1.4rem;
+}
+
+/* The line under the title, in the quiet every other page says how things
+   stand in. */
+.standing {
+  margin: 0 0 1.5rem;
+  color: var(--ink-soft);
+  line-height: 1.5;
+}
+
+.steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One step: a card of the same paper the settings' sections are drawn on, with
+   the ones that are not open sitting quieter than the one that is. */
+.step {
+  margin-bottom: 0.75rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--edge);
+  border-radius: 0.75rem;
+  background: var(--card);
+}
+
+.open {
+  border-color: var(--accent);
+}
+
+.head {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+/* A met step's heading is the press that opens it again, and it is a heading
+   first: no button chrome, the line it was already on, and the pointer to say
+   it can be pressed. */
+.reopen {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+/* Behind the query, like every other hover state in the viewer: a rule a phone
+   can reach is one it paints on whatever was last tapped and leaves there. */
+@media (hover: hover) {
+  .reopen:hover {
+    color: var(--accent);
+  }
+}
+
+/* The two marks. The tick is the accent's own green rather than the ember: it
+   is an outcome, and it is the same green a Diff's additions are drawn in. */
+.done {
+  flex: none;
+  width: 1em;
+  color: var(--added);
+}
+
+/* And a step still to do, as the empty ring a tick is cut into. */
+.waiting {
+  flex: none;
+  box-sizing: border-box;
+  width: 0.85em;
+  height: 0.85em;
+  border: 2px solid var(--edge);
+  border-radius: 50%;
+}
+
+/* What the open step is about, under its heading. Empty until the step's own
+   component lands — see the three tasks after the frame's. */
+.body:not(:empty) {
+  margin-top: 0.9rem;
+}

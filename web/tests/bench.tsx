@@ -14,6 +14,7 @@ import { expect } from "vitest";
 import type {
   ConversationEntry,
   ConversationView,
+  OnboardingView,
   ProfileEntry,
   RepoEntry,
   RepoPairingsView,
@@ -26,6 +27,7 @@ import { Workbench } from "../src/workbench/Workbench";
 import { json, serving, whenever } from "./serving";
 import conversation from "./fixtures/conversation.json" with { type: "json" };
 import conversations from "./fixtures/conversations.json" with { type: "json" };
+import onboarding from "./fixtures/onboarding-ready.json" with { type: "json" };
 import profiles from "./fixtures/profiles.json" with { type: "json" };
 import repos from "./fixtures/repos.json" with { type: "json" };
 
@@ -71,6 +73,11 @@ export const NO_PAIRINGS: RepoPairingsView = {
 /// for the reason the branches are: one boolean is not a shape a golden file
 /// could hold true.
 export const HIDING_ARCHIVED: ShowingArchived = { showing: false };
+
+/// And how this machine stands, which the app asks about before it draws
+/// anything at all: a Verkstead with the objective met, which is the only
+/// reading the workbench is a page under — see `Gate` in `src/App.tsx`.
+export const SET_UP = onboarding as OnboardingView;
 
 /// The conversations pane alone, standing wherever the URL says.
 ///
@@ -160,6 +167,9 @@ export function theWorkbench(...answers: Parameters<typeof serving>) {
     whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
+    // The gate around the router, for the tests here that drive the whole app:
+    // a machine with the objective met is what leaves the workbench standing.
+    whenever("/api/ui/onboarding", json(SET_UP)),
     whenever(`/api/ui/repos/${OPEN.repo.id}/branches`, json(BRANCHES)),
     // Every companion the fixture carries has a base dropdown of its own, over
     // its own repository's branches.

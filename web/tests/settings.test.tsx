@@ -69,7 +69,7 @@ import {
   repoOpened,
 } from "../src/settings/openings";
 import head from "../src/workbench/PaneHead.module.css";
-import { drawn } from "./bench";
+import { SET_UP, drawn } from "./bench";
 import { json, serving, whenever } from "./serving";
 import conversations from "./fixtures/conversations.json" with { type: "json" };
 import profiles from "./fixtures/profiles.json" with { type: "json" };
@@ -1721,7 +1721,10 @@ describe("the routes the fold retired", () => {
   for (const path of ["/repos", "/profiles"]) {
     it(`answers with the no-such-page fallback at ${path}`, async () => {
       window.history.pushState({}, "", path);
-      serving(json([]));
+      // Through `App`, so the gate around the router is asked about first: a
+      // machine with the objective met is what leaves these paths falling to
+      // the catch-all rather than to the wizard.
+      serving(whenever("/api/ui/onboarding", json(SET_UP)), json([]));
 
       render(() => <App />);
 

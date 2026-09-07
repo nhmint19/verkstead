@@ -1,0 +1,61 @@
+{
+  "mode": true,
+  "platform": "Linux",
+  "distro": "Ubuntu",
+  "dependencies": [
+    {
+      "dependency": "Sandbox",
+      "state": {
+        "state": "Absent",
+        "trouble": null
+      }
+    },
+    {
+      "dependency": "Git",
+      "state": {
+        "state": "Absent",
+        "trouble": null
+      }
+    },
+    {
+      "dependency": "Claude",
+      "state": {
+        "state": "Absent",
+        "trouble": null
+      }
+    },
+    {
+      "dependency": "Codex",
+      "state": {
+        "state": "Absent",
+        "trouble": null
+      }
+    },
+    {
+      "dependency": "Grok",
+      "state": {
+        "state": "Absent",
+        "trouble": null
+      }
+    },
+    {
+      "dependency": "OpenCode",
+      "state": {
+        "state": "Absent",
+        "trouble": null
+      }
+    },
+    {
+      "dependency": "Gh",
+      "state": {
+        "state": "Absent",
+        "trouble": null
+      }
+    }
+  ],
+  "steps": {
+    "dependencies": false,
+    "accounts": false,
+    "git": false
+  }
+}

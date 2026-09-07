@@ -379,3 +379,57 @@ async fn deleting_the_last_profile_mid_run_leaves_the_mode_where_it_was() {
         "and the step says what is true now: there is no Profile left to launch under"
     );
 }
+
+/// Where the golden fixtures are written, relative to this crate — the same
+/// directory `ui_content` and `nudges` write the other endpoints' payloads to.
+const FIXTURES: &str = "../../web/tests/fixtures";
+
+/// Leave the viewer's own tests a reading of each shape the wizard is drawn
+/// over, exactly as this server writes one.
+///
+/// Committed, and rewritten by every run of this test: the diff is the review.
+/// The wizard's component tests are fed from these rather than from a payload
+/// somebody typed out, so a field added on this side that nobody carried across
+/// shows up as a failing fixture rather than as a page drawing the wrong thing.
+///
+/// Three of them, because three states are what the frame has to draw: a start
+/// with nothing at all, one part way through, and one whose objective is met —
+/// which is the only one of the three the wizard is not the page for.
+///
+/// Nothing here is read off the machine the suite is on. The `PATH`, the
+/// `bwrap` and `/etc/os-release` are all [`served`]'s own, so a run today and a
+/// run on another box write the same bytes.
+#[tokio::test]
+async fn the_viewers_own_tests_are_fed_from_here() {
+    // A machine with nothing on it and a Data Directory with nothing in it:
+    // every row absent and all three steps unmet, which is a first start on a
+    // box somebody has just installed Verkstead on.
+    let (dir, pool) = ready().await;
+    let app = served(dir.path(), &pool, &[]);
+    write("onboarding-fresh.json", &reading(&app).await);
+
+    // The dependencies settled and nothing else: the step that is met, the two
+    // that are not, and the mode still on.
+    let (dir, pool) = ready().await;
+    let app = served(dir.path(), &pool, EVERYTHING);
+    write("onboarding-part-way.json", &reading(&app).await);
+
+    // And the objective met, which is the reading that says the wizard is no
+    // page at all.
+    let (dir, pool) = ready().await;
+    a_profile(&pool, dir.path()).await;
+    an_author(dir.path());
+    let app = served(dir.path(), &pool, EVERYTHING);
+    write("onboarding-ready.json", &reading(&app).await);
+}
+
+/// One fixture, as the server would have written it.
+fn write(name: &str, reading: &OnboardingView) {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(FIXTURES);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let mut pretty = serde_json::to_string_pretty(reading).unwrap();
+    pretty.push('\n');
+
+    std::fs::write(dir.join(name), pretty).unwrap();
+}
