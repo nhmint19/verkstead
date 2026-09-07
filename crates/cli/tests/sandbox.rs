@@ -146,7 +146,7 @@ impl Grilling {
             let profile = store::create_profile(
                 &pool,
                 &store::ProfileFacts {
-                    name: "codex".to_owned(),
+                    name: Some("codex".to_owned()),
                     account: store::Account::Codex { home },
                     models: vec!["gpt-5-codex".to_owned()],
                 },
@@ -285,7 +285,7 @@ fn grilling() -> Grilling {
         let profile = store::create_profile(
             &pool,
             &store::ProfileFacts {
-                name: "work".to_owned(),
+                name: Some("work".to_owned()),
                 account: store::Account::Claude {
                     claude_dir,
                     config_file,

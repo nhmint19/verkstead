@@ -124,7 +124,7 @@ async fn a_profile(pool: &SqlitePool, dir: &Path) -> i64 {
     let profile = store::create_profile(
         pool,
         &ProfileFacts {
-            name: "Mine".to_owned(),
+            name: Some("Mine".to_owned()),
             account: Account::Claude {
                 claude_dir: account.clone(),
                 config_file: account.join("claude.json"),

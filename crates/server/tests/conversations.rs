@@ -1212,7 +1212,7 @@ async fn profile(app: &Router, elsewhere: &Path, name: &str) -> i64 {
     let profiles: Vec<verkstead_render::ProfileEntry> = get(app, "/api/ui/profiles").await;
     profiles
         .into_iter()
-        .find(|profile| profile.name == name)
+        .find(|profile| profile.name.as_deref() == Some(name))
         .expect("the Profile just saved should be on the list")
         .id
 }
@@ -5086,7 +5086,7 @@ async fn codex_profile(app: &Router, elsewhere: &Path, name: &str) -> i64 {
     let profiles: Vec<verkstead_render::ProfileEntry> = get(app, "/api/ui/profiles").await;
     profiles
         .into_iter()
-        .find(|profile| profile.name == name)
+        .find(|profile| profile.name.as_deref() == Some(name))
         .expect("the Profile just saved should be on the list")
         .id
 }

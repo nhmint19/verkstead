@@ -93,7 +93,7 @@ pub use pairings::{RepoPairings, remembered_pairings};
 pub use pauses::Pause;
 pub use placements::place_conversations;
 pub use profiles::{
-    Account, AgentType, Channel, Deleting, Pairing, Picked, Profile, ProfileFacts, Saving,
+    Account, AgentType, Channel, Clash, Deleting, Pairing, Picked, Profile, ProfileFacts, Saving,
     create_profile, delete_profile, load_profile, profiles, update_profile,
 };
 pub use pull_requests::{

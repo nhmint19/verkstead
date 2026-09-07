@@ -56,7 +56,7 @@ import {
 import { Icon } from "../Icon";
 import { Menu } from "../Menu";
 import { Switch as Toggle } from "../Switch";
-import type { AgentType } from "../agents";
+import { DEFAULT_PROFILE, type AgentType } from "../agents";
 import {
   addCompanion,
   chooseGrillingPairing,
@@ -758,8 +758,8 @@ function PairingPicker(props: {
           bare placeholder, because the conversation does have a profile. */}
       <Show when={props.pairing && !props.pairing.model}>
         <Note class={styles.unpaired}>
-          {props.pairing?.profile.name} was chosen before models were picked
-          beside them. Pick one to pair.
+          {props.pairing?.profile.name ?? DEFAULT_PROFILE} was chosen before
+          models were picked beside them. Pick one to pair.
         </Note>
       </Show>
 

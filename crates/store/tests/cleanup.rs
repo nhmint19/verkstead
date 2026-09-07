@@ -156,7 +156,7 @@ async fn printed(pool: &SqlitePool, id: i64, session: &str, said: &str) -> i64 {
     let profile = create_profile(
         pool,
         &ProfileFacts {
-            name: session.to_owned(),
+            name: Some(session.to_owned()),
             account: Account::Codex {
                 home: PathBuf::from("/watched/accounts/work/.codex"),
             },
@@ -525,7 +525,7 @@ async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
     let profile = create_profile(
         pool,
         &ProfileFacts {
-            name: format!("{branch}-grilling"),
+            name: Some(format!("{branch}-grilling")),
             account: Account::Codex {
                 home: PathBuf::from("/watched/accounts/work/.codex"),
             },

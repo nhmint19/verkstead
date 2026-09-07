@@ -12,6 +12,11 @@
 //! about, and which pull request a comment somebody was sent to deal with was
 //! left on, are all a pull request's rather than a Conversation's now.
 //!
+//! Two of them are a `NOT NULL` going away, which SQLite cannot do in place at
+//! all: an Agent Profile may go unnamed now, and so may the record of what a
+//! session ran under, so each table is rebuilt beside itself with the rows
+//! copied across.
+//!
 //! Six of them are a column arriving rather than rows moving between tables —
 //! the Review role's Profile, the branch name somebody settled on, whether a
 //! branch is still waiting to be named, whether a session is idling on a stored
@@ -26,7 +31,7 @@
 //! twice is rewritten once, and one made from scratch this morning has nothing
 //! here to do at all.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use sqlx::SqlitePool;
 
 use super::{Lifecycle, stops::Decision};
@@ -45,7 +50,224 @@ pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
     conversations_whose_branch_nobody_was_naming(pool).await?;
     stored_asks_nobody_was_idling_on(pool).await?;
     conversations_that_recorded_no_base_branch(pool).await?;
-    commits_that_never_said_they_were_merges(pool).await
+    commits_that_never_said_they_were_merges(pool).await?;
+    profiles_that_had_to_be_named(pool).await?;
+    sessions_that_had_to_name_a_profile(pool).await
+}
+
+/// Let a Profile go unnamed: rebuild `profiles` with a nullable name, and put
+/// back the index that keeps one unnamed row per harness.
+///
+/// A name is what tells two accounts of one harness apart, and a harness with
+/// one account has nothing to tell apart — so the column that was `NOT NULL
+/// UNIQUE` becomes a nullable unique one, and a partial index over `agent_type`
+/// carries the second rule beside it. SQLite cannot drop a `NOT NULL` in place
+/// and `profiles` is STRICT, so this is the rewrite the tables above it are: a
+/// table beside the old one, the rows copied across, the old one dropped and the
+/// new one renamed.
+///
+/// **Every saved Profile keeps its name.** Nothing here writes a null: the rows
+/// come across as they stand, and what changes is only what a row is allowed to
+/// hold from now on.
+///
+/// `profile_models`, `profile_homes`, `conversations` and `repo_pairings` name
+/// `profiles(id)`, and dropping a table its children still point at is a
+/// violation the moment it happens — deferring the check does not help, because
+/// what clears a deferred violation is the parent row arriving and the parent
+/// rows are already in the table beside it. So this is SQLite's own recipe for
+/// the shape change it cannot do in place: **foreign keys off on this one
+/// connection**, the rebuild in a transaction, `foreign_key_check` before the
+/// commit to prove nothing was left dangling, and the pragma back on however it
+/// went.
+///
+/// One connection rather than the pool, because that pragma is a connection's
+/// own — and nothing else is running against this database, a migration being
+/// the last thing an open does before the server has started.
+///
+/// What makes the check pass is the ids: they are copied rather than
+/// reassigned, so every row that named a Profile still names the same one.
+///
+/// Safe to run twice: what says whether there is anything to do is the column
+/// still being `NOT NULL`, and after the first run it is not.
+async fn profiles_that_had_to_be_named(pool: &SqlitePool) -> Result<()> {
+    let required: Option<(i64,)> =
+        sqlx::query_as("SELECT \"notnull\" FROM pragma_table_info('profiles') WHERE name = 'name'")
+            .fetch_optional(pool)
+            .await
+            .context("looking at whether a Profile still has to be named")?;
+
+    if required != Some((1,)) {
+        return Ok(());
+    }
+
+    let mut conn = pool
+        .acquire()
+        .await
+        .context("letting a Profile go unnamed")?;
+
+    sqlx::query("PRAGMA foreign_keys = OFF")
+        .execute(&mut *conn)
+        .await
+        .context("holding the foreign keys off while the profiles table is rebuilt")?;
+
+    let rebuilt = rebuild_profiles(&mut conn).await;
+
+    // However that went. A connection handed back to the pool with its foreign
+    // keys off would enforce nothing for the rest of the run, which is a worse
+    // thing to leave behind than a migration that failed.
+    let restored = sqlx::query("PRAGMA foreign_keys = ON")
+        .execute(&mut *conn)
+        .await
+        .context("putting the foreign keys back on");
+
+    rebuilt?;
+    restored?;
+
+    Ok(())
+}
+
+/// The rebuild itself, in one transaction on the connection whose foreign keys
+/// are off.
+async fn rebuild_profiles(conn: &mut sqlx::SqliteConnection) -> Result<()> {
+    use sqlx::Connection;
+
+    let mut tx = conn
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .context("letting a Profile go unnamed")?;
+
+    // The shape is written out rather than borrowed from [`super::profiles`],
+    // for the reason the rewrites above say: this is a shape rows are put into
+    // once and never again, and a rewrite that moved with the declaration would
+    // make a database opened after the next column is added come out a different
+    // shape from one opened today.
+    sqlx::query(
+        "CREATE TABLE profiles_named_or_not (
+             id          INTEGER PRIMARY KEY AUTOINCREMENT,
+             name        TEXT UNIQUE,
+             claude_dir  TEXT NOT NULL,
+             config_file TEXT NOT NULL,
+             model       TEXT NOT NULL,
+             agent_type  TEXT NOT NULL
+         ) STRICT",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("making the profiles table over with a name a Profile may go without")?;
+
+    sqlx::query(
+        "INSERT INTO profiles_named_or_not
+             (id, name, claude_dir, config_file, model, agent_type)
+         SELECT id, name, claude_dir, config_file, model, agent_type FROM profiles",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("carrying the saved Profiles across")?;
+
+    sqlx::query("DROP TABLE profiles")
+        .execute(&mut *tx)
+        .await
+        .context("taking away the profiles table as it was")?;
+
+    sqlx::query("ALTER TABLE profiles_named_or_not RENAME TO profiles")
+        .execute(&mut *tx)
+        .await
+        .context("putting the rebuilt profiles table where the old one was")?;
+
+    // The drop took the old table's indexes with it, and the rename brought the
+    // unique name along inside the new one. What is left is the second rule,
+    // which is an index of its own and so is made here — the same statement
+    // [`super::profiles::apply_schema`] runs, which had nothing to do on the
+    // table this replaced.
+    sqlx::query(
+        "CREATE UNIQUE INDEX profiles_one_unnamed_per_agent
+         ON profiles (agent_type) WHERE name IS NULL",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("creating the index that keeps one unnamed Profile per harness")?;
+
+    // Nothing was left pointing at a Profile that is not there, which is what
+    // the pragma above stopped SQLite from checking as it went. The ids were
+    // copied, so there is nothing to find — and a rewrite that had lost one
+    // would otherwise be a database that opened fine and refused to remove a
+    // Profile months later.
+    let dangling: (i64,) = sqlx::query_as("SELECT count(*) FROM pragma_foreign_key_check")
+        .fetch_one(&mut *tx)
+        .await
+        .context("checking that nothing was left naming a Profile that is not there")?;
+
+    if dangling.0 != 0 {
+        bail!(
+            "the rebuilt profiles table left {} rows naming a Profile that is not there",
+            dangling.0
+        );
+    }
+
+    tx.commit().await.context("letting a Profile go unnamed")
+}
+
+/// And let the record of a session name no Profile: rebuild `session_pairings`
+/// with a nullable name.
+///
+/// The record copies the Profile's name at launch, so that a Profile renamed or
+/// deleted afterwards does not take the answer with it — and a Profile nobody
+/// named has no name to copy. The wire field was already nullable, where null
+/// meant *recorded before Verkstead wrote it down*; it means an unnamed Profile
+/// as well now, and both draw as nothing, so no reader changes shape.
+///
+/// The same rewrite as the one above it and simpler: nothing names
+/// `session_pairings`, so the drop is the rows' own foreign key to the Timeline
+/// Events and nothing else's.
+///
+/// Safe to run twice: what says whether there is anything to do is the column
+/// still being `NOT NULL`, and after the first run it is not.
+async fn sessions_that_had_to_name_a_profile(pool: &SqlitePool) -> Result<()> {
+    let required: Option<(i64,)> = sqlx::query_as(
+        "SELECT \"notnull\" FROM pragma_table_info('session_pairings') WHERE name = 'profile'",
+    )
+    .fetch_optional(pool)
+    .await
+    .context("looking at whether a session's record still has to name a Profile")?;
+
+    if required != Some((1,)) {
+        return Ok(());
+    }
+
+    let mut tx = super::writing(pool, "letting a session's record name no Agent Profile").await?;
+
+    sqlx::query(
+        "CREATE TABLE session_pairings_named_or_not (
+             event_id INTEGER PRIMARY KEY REFERENCES timeline_events(id),
+             profile  TEXT,
+             model    TEXT
+         ) STRICT",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("making the session_pairings table over with a name it may go without")?;
+
+    sqlx::query(
+        "INSERT INTO session_pairings_named_or_not (event_id, profile, model)
+         SELECT event_id, profile, model FROM session_pairings",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("carrying across what the recorded sessions ran under")?;
+
+    sqlx::query("DROP TABLE session_pairings")
+        .execute(&mut *tx)
+        .await
+        .context("taking away the session_pairings table as it was")?;
+
+    sqlx::query("ALTER TABLE session_pairings_named_or_not RENAME TO session_pairings")
+        .execute(&mut *tx)
+        .await
+        .context("putting the rebuilt session_pairings table where the old one was")?;
+
+    tx.commit()
+        .await
+        .context("letting a session's record name no Agent Profile")
 }
 
 /// Give every commit recorded before a merge was told apart from an ordinary

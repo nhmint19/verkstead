@@ -26,6 +26,12 @@
 //! rather than what somebody typed. Whether they are of the shape their harness
 //! wants is decided above the store, where the reading lives.
 //!
+//! A Profile's name is optional. A name is what tells two accounts of one
+//! harness apart, and a harness with one account has nothing to tell apart — so
+//! the column is nullable and uniqueness is two rules rather than one: at most
+//! one unnamed Profile per harness, and no two named alike. Both are indexes,
+//! so both refuse a write rather than being looked up in front of one.
+//!
 //! The agent type is a column, and it is what says which shape a row's account
 //! is written in — the launch line's flags and the asking channel are keyed on
 //! it. A second backend slots in beside `claude` rather than having to be
@@ -191,9 +197,14 @@ impl Account {
 pub struct Profile {
     pub id: i64,
 
-    /// What the human calls this account. Unique: a picker with two `work` rows
-    /// in it is a picker nobody can use.
-    pub name: String,
+    /// What the human calls this account, where they have called it anything.
+    ///
+    /// Unique among the named: a picker with two `work` rows in it is a picker
+    /// nobody can use. `None` is a Profile nobody typed a word for — the one
+    /// account on its harness, where the harness and the model say the whole of
+    /// what it is — and a harness has at most one of those, for the reason a
+    /// name is unique.
+    pub name: Option<String>,
 
     /// The account a session under this Profile is run as, in its type's shape.
     pub account: Account,
@@ -313,7 +324,7 @@ impl Picked {
 /// store's.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProfileFacts {
-    pub name: String,
+    pub name: Option<String>,
     pub account: Account,
     pub models: Vec<String>,
 }
@@ -329,6 +340,23 @@ pub enum Saving {
 
     /// Another Profile is called that already.
     NameTaken,
+
+    /// That harness already has a Profile nobody named.
+    DefaultTaken,
+}
+
+/// Which of the two uniqueness rules turned a new Profile away.
+///
+/// Two words rather than [`Saving`]'s four, because there is no rewriting a
+/// Profile that is not there to rewrite: what saving a new one comes to is the
+/// row or one of these.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Clash {
+    /// Another Profile is called that already.
+    NameTaken,
+
+    /// That harness already has a Profile nobody named.
+    DefaultTaken,
 }
 
 /// What became of removing one.
@@ -344,14 +372,16 @@ pub enum Deleting {
 
 /// The tables the Profiles live in.
 ///
-/// `name` is unique, and the insert lets the index refuse a repeat rather than
-/// looking first: two tabs saving the same name would otherwise both get past
-/// the look.
+/// `name` is unique among the rows that have one, which SQLite's own `UNIQUE`
+/// already is: a nullable unique column takes as many nulls as it is given. The
+/// second rule — one unnamed Profile per harness — is the partial index beside
+/// it, and both are indexes rather than looks, because two tabs saving the same
+/// thing would otherwise both get past a look.
 pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS profiles (
              id          INTEGER PRIMARY KEY AUTOINCREMENT,
-             name        TEXT NOT NULL UNIQUE,
+             name        TEXT UNIQUE,
              claude_dir  TEXT NOT NULL,
              config_file TEXT NOT NULL,
              model       TEXT NOT NULL,
@@ -361,6 +391,22 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await
     .context("creating the profiles table")?;
+
+    // At most one unnamed Profile per harness. A name is what tells two accounts
+    // of one harness apart, so a harness may have one account nobody named — and
+    // a second would be two rows a picker draws the same way, which is what the
+    // unique name was always for.
+    //
+    // Written here rather than only where the old table is made over, so that a
+    // database made this morning carries it too. The rewrite recreates it,
+    // dropping the old table taking this with it — see the migrations module.
+    sqlx::query(
+        "CREATE UNIQUE INDEX IF NOT EXISTS profiles_one_unnamed_per_agent
+         ON profiles (agent_type) WHERE name IS NULL",
+    )
+    .execute(pool)
+    .await
+    .context("creating the index that keeps one unnamed Profile per harness")?;
 
     // The models each Profile can run, one row apiece. A table of its own for
     // the reason the directions are one: `profiles` is STRICT and there is no
@@ -404,8 +450,20 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 /// Record a Profile, which is expected to have been checked already: that its
 /// pair exists and is of its harness's shape is decided above the store.
 ///
-/// `None` means another Profile is called that.
-pub async fn create_profile(pool: &SqlitePool, facts: &ProfileFacts) -> Result<Option<Profile>> {
+/// The [`Clash`] is which of the two uniqueness rules turned it away, and it is
+/// read off what was being saved rather than out of the index: a row with a name
+/// can only have hit the unique name, and a row without one can only have hit
+/// the partial index over the harnesses, which is the only index a null name is
+/// in. So the index is still what refuses — nothing is looked up in front of the
+/// write — and the sentence to say about it needs no second query.
+///
+/// Those two are the whole of what an insert here can conflict on. The id is the
+/// store's own and comes off `AUTOINCREMENT`, so the primary key is not one, and
+/// there is no third index.
+pub async fn create_profile(
+    pool: &SqlitePool,
+    facts: &ProfileFacts,
+) -> Result<Result<Profile, Clash>> {
     let mut tx = super::writing(pool, "saving a Profile").await?;
 
     let (claude_dir, config_file) = pair(&facts.account)?;
@@ -413,7 +471,7 @@ pub async fn create_profile(pool: &SqlitePool, facts: &ProfileFacts) -> Result<O
     let row: Option<(i64,)> = sqlx::query_as(
         "INSERT INTO profiles (name, claude_dir, config_file, model, agent_type)
          VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT (name) DO NOTHING
+         ON CONFLICT DO NOTHING
          RETURNING id",
     )
     .bind(&facts.name)
@@ -426,7 +484,10 @@ pub async fn create_profile(pool: &SqlitePool, facts: &ProfileFacts) -> Result<O
     .with_context(|| format!("saving the Profile {:?}", facts.name))?;
 
     let Some((id,)) = row else {
-        return Ok(None);
+        return Ok(Err(match facts.name {
+            Some(_) => Clash::NameTaken,
+            None => Clash::DefaultTaken,
+        }));
     };
 
     write_models(&mut tx, id, &facts.models).await?;
@@ -436,7 +497,7 @@ pub async fn create_profile(pool: &SqlitePool, facts: &ProfileFacts) -> Result<O
         .await
         .with_context(|| format!("saving the Profile {:?}", facts.name))?;
 
-    Ok(Some(Profile {
+    Ok(Ok(Profile {
         id,
         name: facts.name.clone(),
         account: facts.account.clone(),
@@ -449,20 +510,38 @@ pub async fn create_profile(pool: &SqlitePool, facts: &ProfileFacts) -> Result<O
 pub async fn update_profile(pool: &SqlitePool, id: i64, facts: &ProfileFacts) -> Result<Saving> {
     let mut tx = super::writing(pool, "rewriting a Profile").await?;
 
-    // The name it is being given may be another Profile's. Asked as its own
-    // statement rather than caught off the update, because an update that
-    // changed nothing and an update that hit the index are two different
-    // sentences and `rows_affected` cannot tell them apart.
-    let clash: Option<(i64,)> =
-        sqlx::query_as("SELECT id FROM profiles WHERE name = ? AND id <> ?")
-            .bind(&facts.name)
+    // What it is being made may be another Profile's already — its name, or the
+    // one unnamed row its harness is allowed. Asked as its own statement rather
+    // than caught off the update, because an update that changed nothing and an
+    // update that hit an index are two different sentences and `rows_affected`
+    // cannot tell them apart.
+    //
+    // One query per rule, because only one of them is ever asked: a rewrite with
+    // a name is in the unique name and nowhere else, and one without is in the
+    // partial index over the harnesses and nowhere else.
+    let clash: Option<(i64,)> = match &facts.name {
+        Some(name) => sqlx::query_as("SELECT id FROM profiles WHERE name = ? AND id <> ?")
+            .bind(name)
             .bind(id)
             .fetch_optional(&mut *tx)
             .await
-            .with_context(|| format!("looking for another Profile called {:?}", facts.name))?;
+            .with_context(|| format!("looking for another Profile called {name:?}"))?,
+
+        None => sqlx::query_as(
+            "SELECT id FROM profiles WHERE name IS NULL AND agent_type = ? AND id <> ?",
+        )
+        .bind(facts.account.agent_type().word())
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .context("looking for another Profile of that harness that nobody named")?,
+    };
 
     if clash.is_some() {
-        return Ok(Saving::NameTaken);
+        return Ok(match facts.name {
+            Some(_) => Saving::NameTaken,
+            None => Saving::DefaultTaken,
+        });
     }
 
     let (claude_dir, config_file) = pair(&facts.account)?;
@@ -557,7 +636,9 @@ pub async fn delete_profile(pool: &SqlitePool, id: i64) -> Result<Deleting> {
 ///
 /// Alphabetical like the Repos, and for the same reason: a Profile is not news,
 /// it is something to pick out of a short list, and the name is what it is
-/// looked for by.
+/// looked for by. The one nobody named sorts first, SQLite ordering a null
+/// before every string — which is where a harness's default belongs on a list
+/// its named accounts are the exceptions on.
 pub async fn profiles(pool: &SqlitePool) -> Result<Vec<Profile>> {
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT id, name, claude_dir, config_file, model, agent_type
@@ -641,7 +722,7 @@ pub async fn load_profile(pool: &SqlitePool, id: i64) -> Result<Option<Profile>>
 }
 
 /// A row of the profiles table as a [`Profile`].
-type Row = (i64, String, String, String, String, String);
+type Row = (i64, Option<String>, String, String, String, String);
 
 /// One row, whatever `profile_models` holds for it, and the home in
 /// `profile_homes` where its type keeps one.

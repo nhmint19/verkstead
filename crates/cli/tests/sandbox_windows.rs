@@ -362,7 +362,7 @@ fn standing(granting: &Grants) -> Grilling {
         let profile = store::create_profile(
             &pool,
             &store::ProfileFacts {
-                name: "work".to_owned(),
+                name: Some("work".to_owned()),
                 account: store::Account::Claude {
                     claude_dir,
                     config_file,

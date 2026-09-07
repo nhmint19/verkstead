@@ -325,6 +325,11 @@ pub(crate) struct Watch {
 
     /// What the Agent Profile this session runs under is called, kept because
     /// that is what the stop names — see [`crate::stopping::Decided`].
+    ///
+    /// A name to show rather than the Profile's own, which may be nothing: the
+    /// stop is prose about the account that ran out, and a sentence with a hole
+    /// where the account should be says nothing. See
+    /// [`crate::profiles::shown`].
     profile: String,
 
     /// The sentence this session is read against, off the agent its Profile runs

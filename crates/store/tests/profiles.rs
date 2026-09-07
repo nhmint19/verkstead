@@ -11,11 +11,11 @@ use std::path::{Path, PathBuf};
 use sqlx::SqlitePool;
 use verkstead_schema::Direction;
 use verkstead_store::{
-    Account, AgentType, Chosen, Deleting, Event, Lifecycle, Pairing, Picked, Profile, ProfileFacts,
-    Saving, create_profile, delete_profile, load_conversation, load_profile, open_database,
-    profiles, register_repo, set_grilling_pairing, set_implementation_pairing, set_review_pairing,
-    skip_grilling, skip_review, start_building, start_capture, start_conversation, start_grilling,
-    timeline, update_profile,
+    Account, AgentType, Chosen, Clash, Deleting, Event, Lifecycle, Pairing, Picked, Profile,
+    ProfileFacts, Saving, create_profile, delete_profile, load_conversation, load_profile,
+    open_database, profiles, register_repo, set_grilling_pairing, set_implementation_pairing,
+    set_review_pairing, skip_grilling, skip_review, start_building, start_capture,
+    start_conversation, start_grilling, timeline, update_profile,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -37,7 +37,7 @@ fn facts(name: &str) -> ProfileFacts {
 /// about the shape rather than about the name.
 fn facts_for(name: &str, account: Account) -> ProfileFacts {
     ProfileFacts {
-        name: name.to_owned(),
+        name: Some(name.to_owned()),
         account,
         models: vec!["claude-opus-5".to_owned()],
     }
@@ -81,6 +81,16 @@ async fn saved(pool: &SqlitePool, name: &str) -> Profile {
         .expect("nothing is called that yet")
 }
 
+/// A Profile nobody named, of whichever harness the account is — which is what
+/// the wizard's accounts step saves, there being nothing to tell apart.
+fn unnamed(account: Account) -> ProfileFacts {
+    ProfileFacts {
+        name: None,
+        account,
+        models: vec!["claude-opus-5".to_owned()],
+    }
+}
+
 /// The model every made-up Profile here lists, which is the one a Pairing is
 /// made of unless a test says otherwise.
 const MODEL: &str = "claude-opus-5";
@@ -104,7 +114,7 @@ async fn a_saved_profile_holds_its_account_and_its_models() {
 
     let profile = saved(&pool, "work").await;
 
-    assert_eq!(profile.name, "work");
+    assert_eq!(profile.name.as_deref(), Some("work"));
     assert_eq!(
         profile.account,
         Account::Claude {
@@ -498,14 +508,99 @@ async fn profiles_are_listed_by_name() {
     saved(&pool, "anthropic").await;
     saved(&pool, "personal").await;
 
-    let listed: Vec<String> = profiles(&pool)
+    let listed: Vec<Option<String>> = profiles(&pool)
         .await
         .unwrap()
         .into_iter()
         .map(|profile| profile.name)
         .collect();
 
-    assert_eq!(listed, ["anthropic", "personal", "work"]);
+    assert_eq!(
+        listed,
+        [
+            Some("anthropic".to_owned()),
+            Some("personal".to_owned()),
+            Some("work".to_owned())
+        ]
+    );
+}
+
+/// A harness takes one Profile nobody named, and the rule is the index's
+/// rather than a look taken in front of the write.
+///
+/// Per harness rather than outright: the harness's own mark is what tells two
+/// unnamed rows apart, so an unnamed Claude Code account beside an unnamed Codex
+/// one is two rows nobody could confuse — and a second unnamed Claude is two
+/// rows that draw exactly alike.
+#[tokio::test]
+async fn a_harness_takes_one_profile_nobody_named() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let first = create_profile(&pool, &unnamed(claude("work")))
+        .await
+        .unwrap()
+        .expect("nothing of this harness is unnamed yet");
+    assert_eq!(first.name, None);
+
+    assert_eq!(
+        create_profile(&pool, &unnamed(claude("second")))
+            .await
+            .unwrap(),
+        Err(Clash::DefaultTaken),
+    );
+
+    assert!(
+        create_profile(&pool, &unnamed(codex("codex")))
+            .await
+            .unwrap()
+            .is_ok(),
+        "another harness's unnamed account is not this one's",
+    );
+
+    // And the named rows go on beside them, under the rule they always had.
+    saved(&pool, "work").await;
+    assert_eq!(
+        create_profile(&pool, &facts("work")).await.unwrap(),
+        Err(Clash::NameTaken),
+    );
+
+    assert_eq!(profiles(&pool).await.unwrap().len(), 3);
+}
+
+/// And a rewrite is held to both rules the same way: the one unnamed row a
+/// harness has is not a row a second Profile can be turned into, and taking the
+/// name off the only one there is clashes with nothing.
+#[tokio::test]
+async fn taking_the_name_off_a_second_profile_is_refused() {
+    let (_dir, pool) = fresh_pool().await;
+
+    create_profile(&pool, &unnamed(claude("work")))
+        .await
+        .unwrap()
+        .expect("nothing of this harness is unnamed yet");
+
+    let named = saved(&pool, "anthropic").await;
+
+    assert_eq!(
+        update_profile(&pool, named.id, &unnamed(claude("anthropic")))
+            .await
+            .unwrap(),
+        Saving::DefaultTaken,
+    );
+
+    let alone = profiles(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|profile| profile.name.is_none())
+        .expect("the unnamed one is on the list");
+
+    assert_eq!(
+        update_profile(&pool, alone.id, &unnamed(claude("work")))
+            .await
+            .unwrap(),
+        Saving::Saved,
+    );
 }
 
 /// A picker with two `work` rows in it is a picker nobody can use.
@@ -514,11 +609,9 @@ async fn a_name_another_profile_already_has_is_refused() {
     let (_dir, pool) = fresh_pool().await;
     saved(&pool, "work").await;
 
-    assert!(
-        create_profile(&pool, &facts("work"))
-            .await
-            .unwrap()
-            .is_none()
+    assert_eq!(
+        create_profile(&pool, &facts("work")).await.unwrap(),
+        Err(Clash::NameTaken)
     );
     assert_eq!(profiles(&pool).await.unwrap().len(), 1);
 }
@@ -537,7 +630,7 @@ async fn everything_about_a_profile_is_the_humans_to_rewrite() {
     );
 
     let read = load_profile(&pool, profile.id).await.unwrap().unwrap();
-    assert_eq!(read.name, "anthropic");
+    assert_eq!(read.name.as_deref(), Some("anthropic"));
     assert_eq!(read.models, ["claude-fable-5"]);
     assert_eq!(read.account, claude("anthropic"));
 }
@@ -582,8 +675,9 @@ async fn renaming_a_profile_to_another_ones_name_is_refused() {
             .await
             .unwrap()
             .unwrap()
-            .name,
-        "personal"
+            .name
+            .as_deref(),
+        Some("personal")
     );
 }
 
@@ -879,10 +973,69 @@ async fn removing_a_profile_leaves_what_ran_under_it_on_the_record() {
         .expect("the session it ran is on the Timeline");
 
     assert_eq!(
-        ran.expect("and it says what it ran under").profile,
-        "work",
+        ran.expect("and it says what it ran under")
+            .profile
+            .as_deref(),
+        Some("work"),
         "a name written down is a name a removal cannot take",
     );
+}
+
+/// And a session launched under a Profile nobody named records no name, which is
+/// the honest copy: there was no name to take.
+///
+/// The same null a session from before Verkstead wrote a name down carries, and
+/// every reader draws both as the harness and the model alone.
+#[tokio::test]
+async fn a_session_under_a_profile_nobody_named_records_no_name() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+
+    let profile = create_profile(&pool, &unnamed(claude("work")))
+        .await
+        .unwrap()
+        .expect("nothing of this harness is unnamed yet");
+
+    set_grilling_pairing(&pool, id, profile.id, Some(MODEL))
+        .await
+        .unwrap();
+
+    start_grilling(
+        &pool,
+        id,
+        "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+        Path::new("/var/lib/verkstead/worktrees/verkstead-amber-kestrel"),
+        &[],
+    )
+    .await
+    .unwrap();
+
+    start_capture(
+        &pool,
+        id,
+        Some("a-session"),
+        Some(&Pairing {
+            profile,
+            model: Some(MODEL.to_owned()),
+        }),
+    )
+    .await
+    .unwrap();
+
+    let ran = timeline(&pool, id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find_map(|on| match on.event {
+            Event::AgentOutput(_, ran) => Some(ran),
+            _ => None,
+        })
+        .expect("the session it ran is on the Timeline");
+
+    let ran = ran.expect("and it says what it ran under");
+    assert_eq!(ran.profile, None);
+    assert_eq!(ran.model.as_deref(), Some(MODEL));
+    assert_eq!(ran.agent_type, Some(AgentType::Claude));
 }
 
 /// Nothing anywhere still names a removed Profile, and the schema is what says
@@ -1037,11 +1190,11 @@ async fn a_conversation_chooses_its_two_pairings_independently() {
     assert_eq!(
         both.grilling_pairing
             .pairing()
-            .map(|p| p.profile.name.clone()),
+            .and_then(|p| p.profile.name.clone()),
         Some("fable".to_owned())
     );
     assert_eq!(
-        both.implementation_pairing.map(|p| p.profile.name),
+        both.implementation_pairing.and_then(|p| p.profile.name),
         Some("opus".to_owned())
     );
 }
@@ -1167,11 +1320,13 @@ async fn a_pairing_cannot_be_chosen_once_grilling_has_started() {
         conversation
             .grilling_pairing
             .pairing()
-            .map(|p| p.profile.name.clone()),
+            .and_then(|p| p.profile.name.clone()),
         Some("fable".to_owned())
     );
     assert_eq!(
-        conversation.implementation_pairing.map(|p| p.profile.name),
+        conversation
+            .implementation_pairing
+            .and_then(|p| p.profile.name),
         Some("fable".to_owned())
     );
 }
@@ -1288,7 +1443,7 @@ async fn profiles_and_the_choices_made_of_them_survive_a_restart() {
         conversation
             .grilling_pairing
             .pairing()
-            .map(|p| p.profile.name.clone()),
+            .and_then(|p| p.profile.name.clone()),
         Some("fable".to_owned())
     );
     assert_eq!(

@@ -104,7 +104,15 @@ pub enum Broken {
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ProfileEntry {
     pub id: i64,
-    pub name: String,
+
+    /// What the human calls this account, and `null` where they have called it
+    /// nothing.
+    ///
+    /// A name tells two accounts of one harness apart, which is the rare case;
+    /// the ordinary one is an account the harness's mark and the model already
+    /// say the whole of. So the viewer says nothing where nothing has to be
+    /// said, and *Default* where a name has to be shown.
+    pub name: Option<String>,
 
     /// Which agent this Profile runs, and the account it runs as — one field,
     /// because the type is what says which fields the account has.
@@ -129,7 +137,9 @@ pub struct ProfileEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ProfileEdit {
-    pub name: String,
+    /// What to call it, or `null` to leave it unnamed — which is what the form
+    /// sends for an empty box. A harness takes one unnamed Profile.
+    pub name: Option<String>,
 
     /// The absolute paths this Profile's account is, in its type's shape.
     pub account: ProfileAccount,
@@ -155,16 +165,16 @@ pub enum ProfileSaved {
     /// There is no Profile with that id to rewrite.
     NoSuchProfile,
 
-    /// It was given no name. A Profile is picked out of a list by its name, so
-    /// one without a name is one nobody can choose.
-    Nameless,
-
     /// It was given no models. A session has to know what it runs on, and a
     /// Profile naming none is one nothing could be launched under.
     Modelless,
 
     /// Another Profile is called that already.
     NameTaken,
+
+    /// That harness already has a Profile nobody named. A name is what tells two
+    /// accounts of one harness apart, so the second of them has to have one.
+    DefaultTaken,
 
     /// The claude directory was named relatively. There is nothing to resolve it
     /// against that would mean the same thing twice.

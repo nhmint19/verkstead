@@ -102,7 +102,7 @@ import {
   editProfile,
   listProfiles,
 } from "../api/client";
-import { AGENT_NAME, type AgentType } from "../agents";
+import { AGENT_NAME, DEFAULT_PROFILE, type AgentType } from "../agents";
 import type {
   Broken,
   ProfileAccount,
@@ -127,10 +127,11 @@ import styles from "./ProfileList.module.css";
 export const PROFILE_REFUSAL: Record<ProfileSaved, string> = {
   Saved: "",
   NoSuchProfile: "That profile is gone.",
-  Nameless: "Give the profile a name — it is what you pick it by.",
   Modelless:
     "Give the profile at least one model — a session has to know what it runs on.",
   NameTaken: "Another profile is called that already.",
+  DefaultTaken:
+    "That agent already has a profile with no name. Name this one — a name is what tells two accounts of one agent apart.",
   DirNotAbsolute:
     "Give the claude directory's absolute path, starting with a slash.",
   DirMissing: "There is nothing at the claude directory's path.",
@@ -269,7 +270,7 @@ const BLANK_ACCOUNT: Record<AgentType, ProfileAccount> = {
 /// because it is the only one. What this is not is a hard-coded pair: the
 /// fields drawn under it come off the type this names.
 const BLANK: ProfileEdit = {
-  name: "",
+  name: null,
   account: BLANK_ACCOUNT.Claude,
   models: [],
 };
@@ -412,7 +413,12 @@ function ProfileCard(props: {
         open={props.open}
         press={props.press}
       >
-        <span class={styles.title}>{props.profile.name}</span>
+        {/* A card is a list read down by name, so the one nobody named still
+            needs a word to be read by — see [`DEFAULT_PROFILE`](../agents.ts),
+            which is that word wherever a name has to be shown. */}
+        <span class={styles.title}>
+          {props.profile.name ?? DEFAULT_PROFILE}
+        </span>
         <span class={styles.meta}>
           {/* Every model, because the list is the whole of what a profile says
               it can run and a card showing one of them would be picking. */}
@@ -536,8 +542,11 @@ export function ProfilePane(props: {
   }));
 
   /// The name, typed into.
+  ///
+  /// An empty box is the null rather than the empty string: a profile may go
+  /// unnamed, and *no name* is a thing to send rather than a name of no letters.
   const typedName = (value: string) => {
-    setEdited({ ...form(), name: value });
+    setEdited({ ...form(), name: value === "" ? null : value });
     setRefused(null);
   };
 
@@ -653,7 +662,13 @@ export function ProfilePane(props: {
       <Switch fallback={<Empty>That profile is gone.</Empty>}>
         <Match when={adding() || saved() !== undefined}>
           <form class={styles.form} onSubmit={submit}>
-            <label for="profile-name">Name</label>
+            {/* Left empty where there is nothing to tell apart, which is the
+                ordinary case: one account per agent, read by the agent's own
+                mark and the model beside it. An agent takes one such profile,
+                and the second of them is refused until it is named. */}
+            <label for="profile-name">
+              Name, where two accounts of one agent need telling apart
+            </label>
             <input
               id="profile-name"
               type="text"
@@ -661,7 +676,7 @@ export function ProfilePane(props: {
               autocorrect="off"
               spellcheck={false}
               placeholder="work"
-              value={form().name}
+              value={form().name ?? ""}
               onInput={(ev) => typedName(ev.currentTarget.value)}
             />
 

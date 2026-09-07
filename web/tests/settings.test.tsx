@@ -1468,7 +1468,7 @@ describe("the path a details pane stands at", () => {
     const { container } = thePage(`/settings/profiles/${PROFILES[0]!.id}`);
 
     await waitFor(() =>
-      expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
+      expect((screen.getByLabelText(/^Name/) as HTMLInputElement).value).toBe(
         PROFILES[0]!.name,
       ),
     );
@@ -1503,7 +1503,7 @@ describe("the path a details pane stands at", () => {
     const { container } = thePage("/settings/profiles/new");
 
     await waitFor(() =>
-      expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(""),
+      expect((screen.getByLabelText(/^Name/) as HTMLInputElement).value).toBe(""),
     );
 
     const plus = await drawn<HTMLButtonElement>(
@@ -1628,7 +1628,7 @@ describe("the path a details pane stands at", () => {
   it("opens on the details when the path names a profile", async () => {
     const { container } = thePage(`/settings/profiles/${PROFILES[0]!.id}`);
 
-    await waitFor(() => screen.getByLabelText("Name"));
+    await waitFor(() => screen.getByLabelText(/^Name/));
     expect(container.querySelector(`.${shell.panes}`)!.getAttribute("data-pane")).toBe(
       "details",
     );

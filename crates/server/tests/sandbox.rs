@@ -390,7 +390,7 @@ fi
         store::create_profile(
             &self.pool,
             &store::ProfileFacts {
-                name: "codex".to_owned(),
+                name: Some("codex".to_owned()),
                 account: store::Account::Codex { home },
                 models: vec!["gpt-5-codex".to_owned()],
             },
@@ -418,7 +418,7 @@ fi
         store::create_profile(
             &self.pool,
             &store::ProfileFacts {
-                name: "grok".to_owned(),
+                name: Some("grok".to_owned()),
                 account: store::Account::Grok { home },
                 models: vec!["grok-4.6".to_owned()],
             },
@@ -455,7 +455,7 @@ fi
         store::create_profile(
             &self.pool,
             &store::ProfileFacts {
-                name: "opencode".to_owned(),
+                name: Some("opencode".to_owned()),
                 account: store::Account::OpenCode { home },
                 models: vec!["opencode/big-pickle".to_owned()],
             },
@@ -576,7 +576,7 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
     let profile = store::create_profile(
         &pool,
         &store::ProfileFacts {
-            name: "work".to_owned(),
+            name: Some("work".to_owned()),
             account: store::Account::Claude {
                 claude_dir,
                 config_file,
@@ -1553,7 +1553,7 @@ async fn an_account_on_another_volume_is_a_session_that_is_not_started() {
     let elsewhere = store::create_profile(
         &fixture.pool,
         &store::ProfileFacts {
-            name: "on-the-other-drive".to_owned(),
+            name: Some("on-the-other-drive".to_owned()),
             // The directory half where the fixture's own is, so that what is
             // being refused is the one path a hard link is asked for rather
             // than the whole account being somewhere odd.

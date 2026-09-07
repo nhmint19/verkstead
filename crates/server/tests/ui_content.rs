@@ -1895,7 +1895,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             store::create_profile(
                 &pool,
                 &store::ProfileFacts {
-                    name: name.to_owned(),
+                    name: Some(name.to_owned()),
                     account: store::Account::Claude {
                         claude_dir: std::path::PathBuf::from(format!("{home}/.claude")),
                         config_file: std::path::PathBuf::from(format!("{home}/.claude.json")),
@@ -2595,7 +2595,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
              Git had nothing pending, or the repository would not answer.\n\n\
              ### What the last session said\n\n\
              It said nothing at all.\n",
-            profiles[1].name,
+            profiles[1].name.as_deref().unwrap(),
         ),
         // The words the display drew, which is what a stop carries: `3pm` stays
         // `3pm`, and the page draws it beside Resume rather than counting down

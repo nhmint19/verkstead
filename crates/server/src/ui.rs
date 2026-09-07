@@ -3659,7 +3659,7 @@ fn session(
 ) -> verkstead_render::AgentSession {
     let (profile, model, agent_type) = match ran_under {
         Some(ran_under) => (
-            Some(ran_under.profile),
+            ran_under.profile,
             ran_under.model,
             ran_under.agent_type.map(crate::profiles::agent_type),
         ),

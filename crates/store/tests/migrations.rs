@@ -46,19 +46,28 @@
 //! Conversation from before takes the name it is carrying as settled, because
 //! that is the name the human has been reading it by.
 //!
+//! And two `NOT NULL`s dropped, which SQLite cannot do in place at all: an
+//! Agent Profile may go unnamed now, and so may the record of what a session ran
+//! under. Each table is rebuilt beside itself with the rows copied across, so
+//! every Profile saved before this keeps the name it has — and both uniqueness
+//! rules hold over the rebuilt table afterwards.
+//!
 //! Both old shapes are written here by hand rather than by the code that used to
 //! write them: that code has gone, and what has to keep working is a database
 //! rather than a function.
 
 use std::path::Path;
 
+use std::path::PathBuf;
+
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Commit, Decision, Event, Finished, Lifecycle, PullRequest, WaitingOn, asked_to_stop,
-    clear_stop, commit_repo, conversations, finish_wrap_up, fix_attempts, load_conversation,
-    open_database, pull_request, pull_request_repo, record_another_pull_request, record_commit,
-    record_fix_attempt, recorded_commits, register_repo, settle_wrap_up, start_conversation,
-    start_grilling, start_unnamed_conversation, stop, stopped, timeline, wrap_up_settled,
+    Account, Clash, Commit, Decision, Event, Finished, Lifecycle, ProfileFacts, PullRequest,
+    WaitingOn, asked_to_stop, clear_stop, commit_repo, conversations, create_profile,
+    finish_wrap_up, fix_attempts, load_conversation, open_database, profiles, pull_request,
+    pull_request_repo, record_another_pull_request, record_commit, record_fix_attempt,
+    recorded_commits, register_repo, settle_wrap_up, start_conversation, start_grilling,
+    start_unnamed_conversation, stop, stopped, timeline, wrap_up_settled,
 };
 
 /// A database with the old table in it, and a Conversation to hang stops off.
@@ -1778,4 +1787,142 @@ async fn a_conversation_from_before_the_naming_instruction_is_waiting_on_nobody(
 
         pool.close().await;
     }
+}
+
+/// A database whose Profiles all had to be named, which is every Verkstead
+/// before an account nobody typed a word for could be saved.
+///
+/// The table is written out as the Verkstead that made it declared it — the
+/// migration finds a database rather than a call — with two Profiles in it and
+/// the models of one of them hung off it, so that what is copied across is the
+/// row and what points at the row alike.
+async fn profiles_of_before(dir: &Path) {
+    let pool = open_database(&dir.join("verkstead.db")).await.unwrap();
+
+    sqlx::query("DROP TABLE profiles")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query(
+        "CREATE TABLE profiles (
+             id          INTEGER PRIMARY KEY AUTOINCREMENT,
+             name        TEXT NOT NULL UNIQUE,
+             claude_dir  TEXT NOT NULL,
+             config_file TEXT NOT NULL,
+             model       TEXT NOT NULL,
+             agent_type  TEXT NOT NULL
+         ) STRICT",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    for (id, name) in [(1, "work"), (2, "personal")] {
+        sqlx::query(
+            "INSERT INTO profiles (id, name, claude_dir, config_file, model, agent_type)
+             VALUES (?, ?, ?, ?, 'claude-opus-5', 'claude')",
+        )
+        .bind(id)
+        .bind(name)
+        .bind(format!("/watched/accounts/{name}/.claude"))
+        .bind(format!("/watched/accounts/{name}/.claude.json"))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO profile_models (profile_id, position, model)
+             VALUES (?, 0, 'claude-opus-5')",
+        )
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    pool.close().await;
+}
+
+/// A Claude account under `name`, which is the shape every Profile in this file
+/// has.
+fn claude(name: &str) -> Account {
+    Account::Claude {
+        claude_dir: PathBuf::from(format!("/watched/accounts/{name}/.claude")),
+        config_file: PathBuf::from(format!("/watched/accounts/{name}/.claude.json")),
+    }
+}
+
+/// Every saved Profile keeps its name, its account and its models — nothing here
+/// writes a null over what somebody typed — and both uniqueness rules hold over
+/// the rebuilt table afterwards.
+#[tokio::test]
+async fn the_profiles_of_before_keep_their_names_and_both_rules_hold() {
+    let dir = tempfile::tempdir().unwrap();
+    profiles_of_before(dir.path()).await;
+
+    for opening in [
+        "it opens, which is most of what this is about",
+        "it opens again",
+    ] {
+        let pool = open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        let saved = profiles(&pool).await.unwrap();
+        assert_eq!(saved.len(), 2, "{opening}");
+        assert_eq!(saved[0].name.as_deref(), Some("personal"));
+        assert_eq!(saved[1].name.as_deref(), Some("work"));
+        assert_eq!(
+            saved[1].id, 1,
+            "the ids come across, being what points here"
+        );
+        assert_eq!(saved[1].account, claude("work"));
+        assert_eq!(saved[1].models, ["claude-opus-5"]);
+
+        pool.close().await;
+    }
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    // The rule the old table carried, over the new one.
+    assert_eq!(
+        create_profile(
+            &pool,
+            &ProfileFacts {
+                name: Some("work".to_owned()),
+                account: claude("second"),
+                models: vec!["claude-opus-5".to_owned()],
+            }
+        )
+        .await
+        .unwrap(),
+        Err(Clash::NameTaken),
+    );
+
+    // And the rule the rewrite brought with it, which the old table had no index
+    // for at all.
+    let unnamed = |account| ProfileFacts {
+        name: None,
+        account,
+        models: vec!["claude-opus-5".to_owned()],
+    };
+
+    assert_eq!(
+        create_profile(&pool, &unnamed(claude("default")))
+            .await
+            .unwrap()
+            .expect("a harness with no unnamed Profile takes one")
+            .id,
+        3,
+        "the rebuilt table goes on counting from where the old one left off",
+    );
+    assert_eq!(
+        create_profile(&pool, &unnamed(claude("second")))
+            .await
+            .unwrap(),
+        Err(Clash::DefaultTaken),
+    );
 }

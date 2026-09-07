@@ -217,8 +217,11 @@ idle: boolean,
  * Off the record rather than off what is running: it is written down as
  * the session starts and stays true afterwards, so a Profile renamed or
  * deleted since — and a Verkstead restarted since — leaves this saying
- * what actually ran. `null` for a session started before Verkstead wrote
- * it down.
+ * what actually ran.
+ *
+ * `null` twice over: a session started before Verkstead wrote it down, and
+ * one launched under a Profile nobody named. Neither is a name to show, so
+ * both draw as the harness and the model alone.
  */
 profile: string | null, 
 /**
@@ -2107,7 +2110,12 @@ export type ProfileDeleted = "Removed" | "NoSuchProfile";
  * that cannot launch the real binary yet would be a lie in a picker — so a
  * type this knows about may still be one nothing arrives as.
  */
-export type ProfileEdit = { name: string, 
+export type ProfileEdit = { 
+/**
+ * What to call it, or `null` to leave it unnamed — which is what the form
+ * sends for an empty box. A harness takes one unnamed Profile.
+ */
+name: string | null, 
 /**
  * The absolute paths this Profile's account is, in its type's shape.
  */
@@ -2127,7 +2135,17 @@ models: Array<string>, };
  * whatever was typed to save them: those are what will be bind-mounted, so
  * those are what is worth showing.
  */
-export type ProfileEntry = { id: number, name: string, 
+export type ProfileEntry = { id: number, 
+/**
+ * What the human calls this account, and `null` where they have called it
+ * nothing.
+ *
+ * A name tells two accounts of one harness apart, which is the rare case;
+ * the ordinary one is an account the harness's mark and the model already
+ * say the whole of. So the viewer says nothing where nothing has to be
+ * said, and *Default* where a name has to be shown.
+ */
+name: string | null, 
 /**
  * Which agent this Profile runs, and the account it runs as — one field,
  * because the type is what says which fields the account has.
@@ -2152,7 +2170,7 @@ broken: Broken | null, };
  * is a courtesy, and every request reaching the endpoint is decided there
  * whether or not a form was involved.
  */
-export type ProfileSaved = "Saved" | "NoSuchProfile" | "Nameless" | "Modelless" | "NameTaken" | "DirNotAbsolute" | "DirMissing" | "NotADirectory" | "ConfigNotAbsolute" | "ConfigMissing" | "NotAFile" | "HomeNotAbsolute" | "HomeMissing" | "HomeNotADirectory";
+export type ProfileSaved = "Saved" | "NoSuchProfile" | "Modelless" | "NameTaken" | "DefaultTaken" | "DirNotAbsolute" | "DirMissing" | "NotADirectory" | "ConfigNotAbsolute" | "ConfigMissing" | "NotAFile" | "HomeNotAbsolute" | "HomeMissing" | "HomeNotADirectory";
 
 /**
  * The grilling's closing proposal as the Set it rides draws it: which direction

@@ -136,7 +136,7 @@ async fn profile(pool: &SqlitePool, name: &str, models: &[&str]) -> i64 {
     create_profile(
         pool,
         &ProfileFacts {
-            name: name.to_owned(),
+            name: Some(name.to_owned()),
             account: Account::Claude {
                 claude_dir: PathBuf::from(format!("/state/profiles/{name}")),
                 config_file: PathBuf::from(format!("/state/profiles/{name}.json")),

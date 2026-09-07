@@ -34,8 +34,9 @@ pub(crate) async fn create(pool: &SqlitePool, edit: &ProfileEdit) -> Result<Prof
     };
 
     Ok(match store::create_profile(pool, &facts).await? {
-        Some(_) => ProfileSaved::Saved,
-        None => ProfileSaved::NameTaken,
+        Ok(_) => ProfileSaved::Saved,
+        Err(store::Clash::NameTaken) => ProfileSaved::NameTaken,
+        Err(store::Clash::DefaultTaken) => ProfileSaved::DefaultTaken,
     })
 }
 
@@ -51,6 +52,7 @@ pub(crate) async fn edit(pool: &SqlitePool, id: i64, edit: &ProfileEdit) -> Resu
         store::Saving::Saved => ProfileSaved::Saved,
         store::Saving::NoSuchProfile => ProfileSaved::NoSuchProfile,
         store::Saving::NameTaken => ProfileSaved::NameTaken,
+        store::Saving::DefaultTaken => ProfileSaved::DefaultTaken,
     })
 }
 
@@ -215,7 +217,15 @@ fn broken(profile: &store::Profile) -> Option<Broken> {
 /// does: resolving a path is blocking, and a save is rare enough that the thread
 /// it borrows costs nothing.
 async fn checked(edit: &ProfileEdit) -> Result<Result<store::ProfileFacts, ProfileSaved>> {
-    let name = edit.name.trim().to_owned();
+    // Trimmed, and a box with nothing but space in it is no name at all: a
+    // Profile may go unnamed, and one called `" "` would be a name nobody could
+    // tell from none.
+    let name = edit
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned);
 
     // Trimmed and the blanks dropped: the form hands these over a line apiece,
     // and a trailing newline is not a model. Their order is kept, because it is
@@ -226,10 +236,6 @@ async fn checked(edit: &ProfileEdit) -> Result<Result<store::ProfileFacts, Profi
         .map(|model| model.trim().to_owned())
         .filter(|model| !model.is_empty())
         .collect();
-
-    if name.is_empty() {
-        return Ok(Err(ProfileSaved::Nameless));
-    }
 
     if models.is_empty() {
         return Ok(Err(ProfileSaved::Modelless));
@@ -493,6 +499,18 @@ fn account(account: &store::Account) -> ProfileAccount {
             home: home.to_string_lossy().into_owned(),
         },
     }
+}
+
+/// What a Profile is called where a name has to be said and it has none.
+///
+/// A Profile may go unnamed, and most readings of one say nothing at all where
+/// the harness's mark and the model already say the whole of what it is. This is
+/// for the readings that cannot: prose about the account a run was spending has
+/// a hole in it where a name was supposed to be, and *the account **Default***
+/// is the sentence that is left. The viewer says the same word in the same
+/// places — see `web/src/agents.ts`.
+pub(crate) fn shown(name: Option<&str>) -> &str {
+    name.unwrap_or("Default")
 }
 
 /// And the agent type on its own, for the Timeline: what a session ran under is

@@ -576,7 +576,7 @@ async fn a_share_says_nothing_about_the_machine_it_was_taken_on() {
     let profile = store::create_profile(
         &pool,
         &store::ProfileFacts {
-            name: "fable".to_owned(),
+            name: Some("fable".to_owned()),
             account: store::Account::Claude {
                 claude_dir: PathBuf::from("/srv/accounts/fable/.claude"),
                 config_file: PathBuf::from("/srv/accounts/fable/.claude.json"),

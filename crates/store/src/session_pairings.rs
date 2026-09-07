@@ -23,9 +23,11 @@
 //! An Event with no row is a session started before any of this was written
 //! down, and it is not an error anywhere: what it means is a session whose
 //! pairing was never recorded, which every reader shows as nothing rather than
-//! as a guess. An Event with a pairing and no agent type is that one table
-//! later — a session from after the pairing was written down and before the
-//! agent was — and it reads the same way.
+//! as a guess. A row whose name is null reads the same way, and is either a
+//! session from before the name was written down or one launched under a
+//! Profile nobody named — see [`RanUnder::profile`]. An Event with a pairing
+//! and no agent type is that one table later — a session from after the pairing
+//! was written down and before the agent was — and it reads the same way.
 
 use std::collections::HashMap;
 
@@ -39,7 +41,12 @@ pub struct RanUnder {
     /// rather than the Profile's id: what the record is for is saying what ran,
     /// and a Profile that has since been renamed or deleted would take the
     /// answer with it.
-    pub profile: String,
+    ///
+    /// `None` twice over: a session started before Verkstead wrote this down,
+    /// and one launched under a Profile nobody named. Both are a record with no
+    /// name to say, and every reader shows them the same way — as the harness
+    /// and the model alone.
+    pub profile: Option<String>,
 
     /// The model id it was launched on, raw — `claude-opus-5` rather than
     /// "Opus 5". Prettifying is the viewer's, so an id nothing here has heard
@@ -66,7 +73,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS session_pairings (
              event_id INTEGER PRIMARY KEY REFERENCES timeline_events(id),
-             profile  TEXT NOT NULL,
+             profile  TEXT,
              model    TEXT
          ) STRICT",
     )
@@ -121,6 +128,11 @@ pub(crate) async fn pair_session(
     Ok(())
 }
 
+/// One row of the join below: the Event, the Profile's name, the model, and the
+/// word the agent was written down as — every one of them nullable but the
+/// Event, each for a reason [`RanUnder`]'s own fields give.
+type Row = (i64, Option<String>, Option<String>, Option<String>);
+
 /// What every session on a Conversation's Timeline ran under, by the Event each
 /// one printed into.
 ///
@@ -132,7 +144,7 @@ pub(crate) async fn on_timeline(
     pool: &SqlitePool,
     conversation_id: i64,
 ) -> Result<HashMap<i64, RanUnder>> {
-    let rows: Vec<(i64, String, Option<String>, Option<String>)> = sqlx::query_as(
+    let rows: Vec<Row> = sqlx::query_as(
         "SELECT p.event_id, p.profile, p.model, a.agent_type
          FROM session_pairings p
          JOIN timeline_events e ON e.id = p.event_id

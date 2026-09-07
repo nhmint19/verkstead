@@ -75,6 +75,20 @@ fn edit(name: &str, claude_dir: &Path, config_file: &Path, models: &[&str]) -> s
     })
 }
 
+/// And the same body with no name in it at all, which is what the form sends
+/// for an empty box: the null rather than the empty string.
+fn unnamed(claude_dir: &Path, config_file: &Path) -> serde_json::Value {
+    serde_json::json!({
+        "name": null,
+        "account": {
+            "agent_type": "Claude",
+            "claude_dir": claude_dir,
+            "config_file": config_file,
+        },
+        "models": ["claude-opus-5"],
+    })
+}
+
 /// A home at `root`, which is the whole of what a Codex account is.
 fn home(root: &Path, account: &str) -> PathBuf {
     made(root.join(account).join(".codex"))
@@ -133,6 +147,12 @@ async fn save(app: &Router, body: &serde_json::Value) -> ProfileSaved {
     post(app, "/api/ui/profiles", body).await
 }
 
+/// And the same body sent at a Profile that is already there, which is the one
+/// form doing the other half of what it does.
+async fn rewrite(app: &Router, id: i64, body: &serde_json::Value) -> ProfileSaved {
+    post(app, &format!("/api/ui/profiles/{id}"), body).await
+}
+
 /// Two models apiece, so that a Pairing below can name one that is not the
 /// first of the list — which is the whole of what a Pairing adds to a Profile.
 const MODELS: [&str; 2] = ["claude-opus-5", "claude-fable-5"];
@@ -152,7 +172,7 @@ async fn saved(app: &Router, root: &Path, name: &str) -> ProfileEntry {
     listed(app)
         .await
         .into_iter()
-        .find(|profile| profile.name == name)
+        .find(|profile| profile.name.as_deref() == Some(name))
         .expect("the Profile just saved should be on the list")
 }
 
@@ -334,7 +354,7 @@ async fn a_saved_profile_appears_on_the_list_with_everything_it_was_given() {
 
     let profile = saved(&app, accounts.path(), "work").await;
 
-    assert_eq!(profile.name, "work");
+    assert_eq!(profile.name.as_deref(), Some("work"));
     assert_eq!(profile.models, MODELS);
 
     // The account, in the shape its agent type keeps one — and the resolved
@@ -372,7 +392,7 @@ async fn a_profile_is_rewritten_whole_and_removed_when_nobody_is_running_under_i
 
     let rows = listed(&app).await;
     assert_eq!(rows.len(), 1, "rewriting one does not add another");
-    assert_eq!(rows[0].name, "anthropic");
+    assert_eq!(rows[0].name.as_deref(), Some("anthropic"));
     assert_eq!(rows[0].models, &["claude-fable-5"]);
 
     assert_eq!(remove(&app, profile.id).await, ProfileDeleted::Removed);
@@ -386,13 +406,20 @@ async fn profiles_come_back_by_name() {
     saved(&app, accounts.path(), "anthropic").await;
     saved(&app, accounts.path(), "personal").await;
 
-    let names: Vec<String> = listed(&app)
+    let names: Vec<Option<String>> = listed(&app)
         .await
         .into_iter()
         .map(|profile| profile.name)
         .collect();
 
-    assert_eq!(names, ["anthropic", "personal", "work"]);
+    assert_eq!(
+        names,
+        [
+            Some("anthropic".to_owned()),
+            Some("personal".to_owned()),
+            Some("work".to_owned())
+        ]
+    );
 }
 
 /// Both halves have to be there, and each is refused by its own name: pointing
@@ -583,21 +610,17 @@ async fn a_profile_lists_every_model_its_account_can_run() {
     assert_eq!(rows[0].models, ["claude-opus-5", "claude-fable-5"]);
 }
 
-/// A Profile is picked out of a list by its name and run on one of its models.
-/// Neither is a field to leave empty.
+/// A Profile is run on one of its models, and a Profile naming none is one
+/// nothing could be launched under.
+///
+/// A name is not the same kind of field. It tells two accounts of one harness
+/// apart, and a harness with one account has nothing to tell apart — see
+/// [`a_profile_nobody_named_is_saved_as_one`].
 #[tokio::test]
-async fn a_profile_with_no_name_or_no_models_is_refused() {
+async fn a_profile_with_no_models_is_refused() {
     let (accounts, _dir, app) = workbench().await;
     let (claude_dir, config_file) = pair(accounts.path(), "work");
 
-    assert_eq!(
-        save(
-            &app,
-            &edit("   ", &claude_dir, &config_file, &["claude-opus-5"])
-        )
-        .await,
-        ProfileSaved::Nameless
-    );
     assert_eq!(
         save(&app, &edit("work", &claude_dir, &config_file, &["  "])).await,
         ProfileSaved::Modelless
@@ -624,6 +647,115 @@ async fn a_name_another_profile_already_has_is_refused() {
         ProfileSaved::NameTaken
     );
     assert_eq!(listed(&app).await.len(), 1);
+}
+
+/// A name tells two accounts of one harness apart. A fresh Verkstead has one
+/// account per harness and nobody has typed a word for it, so a Profile may go
+/// without: the null goes down as the null and the row comes back with no name.
+///
+/// A box with nothing but spaces in it is the same thing said by a human — the
+/// form's empty box either way — so it is saved as no name rather than as a name
+/// nobody could tell from none.
+#[tokio::test]
+async fn a_profile_nobody_named_is_saved_as_one() {
+    let (accounts, _dir, app) = workbench().await;
+    let (claude_dir, config_file) = pair(accounts.path(), "work");
+
+    assert_eq!(
+        save(&app, &unnamed(&claude_dir, &config_file)).await,
+        ProfileSaved::Saved
+    );
+
+    let rows = listed(&app).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].name, None);
+    assert_eq!(rows[0].models, ["claude-opus-5"]);
+
+    let (spaced_dir, spaced_config) = pair(accounts.path(), "spaced");
+    assert_eq!(
+        save(
+            &app,
+            &edit("   ", &spaced_dir, &spaced_config, &["gpt-5.2-codex"])
+        )
+        .await,
+        ProfileSaved::DefaultTaken,
+        "a box of spaces is an empty box, so this is the second unnamed Claude",
+    );
+}
+
+/// One unnamed Profile per harness, which is the rule the unique name always
+/// was: a second row nobody named would draw exactly as the first one does.
+///
+/// Per harness rather than outright, because the harness's own mark is what
+/// tells them apart on the page — an unnamed Claude Code account beside an
+/// unnamed Codex one is two rows nobody could confuse.
+#[tokio::test]
+async fn a_harness_takes_one_profile_nobody_named() {
+    let (accounts, _dir, app) = workbench().await;
+    let (claude_dir, config_file) = pair(accounts.path(), "work");
+
+    assert_eq!(
+        save(&app, &unnamed(&claude_dir, &config_file)).await,
+        ProfileSaved::Saved
+    );
+
+    let (second_dir, second_config) = pair(accounts.path(), "second");
+    assert_eq!(
+        save(&app, &unnamed(&second_dir, &second_config)).await,
+        ProfileSaved::DefaultTaken
+    );
+
+    assert_eq!(
+        save(
+            &app,
+            &serde_json::json!({
+                "name": null,
+                "account": {
+                    "agent_type": "Codex",
+                    "home": home(accounts.path(), "codex"),
+                },
+                "models": ["gpt-5.2-codex"],
+            })
+        )
+        .await,
+        ProfileSaved::Saved,
+        "another harness's unnamed account is not this one's",
+    );
+
+    assert_eq!(listed(&app).await.len(), 2);
+}
+
+/// And the rule holds on a rewrite as it does on a save: the one unnamed row a
+/// harness has is not a row a second Profile can be turned into.
+#[tokio::test]
+async fn taking_the_name_off_a_second_profile_is_refused() {
+    let (accounts, _dir, app) = workbench().await;
+    let (claude_dir, config_file) = pair(accounts.path(), "work");
+    assert_eq!(
+        save(&app, &unnamed(&claude_dir, &config_file)).await,
+        ProfileSaved::Saved
+    );
+
+    let named = saved(&app, accounts.path(), "anthropic").await;
+    let (second_dir, second_config) = pair(accounts.path(), "anthropic");
+
+    assert_eq!(
+        rewrite(&app, named.id, &unnamed(&second_dir, &second_config)).await,
+        ProfileSaved::DefaultTaken
+    );
+
+    // And off the only one there is, which is nobody's clash but its own.
+    let alone = listed(&app).await;
+    let unnamed_id = alone
+        .iter()
+        .find(|profile| profile.name.is_none())
+        .expect("the unnamed one is on the list")
+        .id;
+
+    assert_eq!(
+        rewrite(&app, unnamed_id, &unnamed(&claude_dir, &config_file)).await,
+        ProfileSaved::Saved
+    );
 }
 
 /// The pair was there when it was saved; a directory can be moved afterwards.
@@ -667,7 +799,7 @@ async fn a_profile_whose_account_is_one_home_saves_and_reads_back_with_it() {
     let profile = &listed(&app).await[0];
     let resolved = accounts.path().canonicalize().unwrap();
 
-    assert_eq!(profile.name, "codex");
+    assert_eq!(profile.name.as_deref(), Some("codex"));
     assert_eq!(profile.models, MODELS);
     assert_eq!(
         profile.account,
@@ -879,7 +1011,7 @@ async fn a_conversation_chooses_its_two_pairings_independently() {
     assert_eq!(
         half.grilling_pairing
             .pairing()
-            .map(|p| p.profile.name.as_str()),
+            .and_then(|p| p.profile.name.as_deref()),
         Some("fable")
     );
     assert_eq!(half.implementation_pairing, None);
@@ -893,11 +1025,11 @@ async fn a_conversation_chooses_its_two_pairings_independently() {
     assert_eq!(
         both.grilling_pairing
             .pairing()
-            .map(|p| p.profile.name.clone()),
+            .and_then(|p| p.profile.name.clone()),
         Some("fable".to_owned())
     );
     assert_eq!(
-        both.implementation_pairing.map(|p| p.profile.name),
+        both.implementation_pairing.and_then(|p| p.profile.name),
         Some("opus".to_owned())
     );
 }

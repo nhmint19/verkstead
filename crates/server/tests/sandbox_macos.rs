@@ -394,7 +394,7 @@ fi
         store::create_profile(
             &self.pool,
             &store::ProfileFacts {
-                name: name.to_owned(),
+                name: Some(name.to_owned()),
                 account,
                 models: vec![model.to_owned()],
             },
@@ -486,7 +486,7 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
     let profile = store::create_profile(
         &pool,
         &store::ProfileFacts {
-            name: "work".to_owned(),
+            name: Some("work".to_owned()),
             account: store::Account::Claude {
                 claude_dir,
                 config_file,

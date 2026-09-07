@@ -864,7 +864,7 @@ impl Grilling {
 
         profiles
             .into_iter()
-            .find(|profile| profile.name == name)
+            .find(|profile| profile.name.as_deref() == Some(name))
             .expect("the fixture saved a Profile per role")
             .id
     }
@@ -2496,7 +2496,7 @@ impl Bench {
             get(&self.app, "/api/ui/profiles").await;
         let profile_id = profiles
             .into_iter()
-            .find(|profile| profile.name == name)
+            .find(|profile| profile.name.as_deref() == Some(name))
             .expect("the Profile just saved should be on the list")
             .id;
 
@@ -2881,7 +2881,7 @@ async fn profile(app: &Router, root: &Path, name: &str) -> i64 {
     let profiles: Vec<verkstead_render::ProfileEntry> = get(app, "/api/ui/profiles").await;
     profiles
         .into_iter()
-        .find(|profile| profile.name == name)
+        .find(|profile| profile.name.as_deref() == Some(name))
         .expect("the Profile just saved should be on the list")
         .id
 }
@@ -15895,7 +15895,7 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
         stage
             .implementation_pairing
             .as_ref()
-            .map(|pairing| pairing.profile.name.clone()),
+            .and_then(|pairing| pairing.profile.name.clone()),
         Some("implementation".to_owned()),
         "under the same Profiles, there being nobody to choose them again",
     );
@@ -25611,7 +25611,7 @@ async fn a_stage_inherits_the_no_review_its_roadmap_was_grilled_with() {
         stage
             .implementation_pairing
             .as_ref()
-            .map(|pairing| pairing.profile.name.clone()),
+            .and_then(|pairing| pairing.profile.name.clone()),
         Some("implementation".to_owned()),
         "with the roles beside it inherited as they always were",
     );
