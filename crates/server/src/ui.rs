@@ -37,11 +37,11 @@ use verkstead_render::{
     ConversationStopped, ConversationUnarchived, ConversationView, Cursor, GrillingStarted,
     IgnoreRule, IgnoredCommentsEdit, Lifecycle, Locked, Merging, MissedOut, NewAdoption,
     NewCompanion, NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
-    Registration, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField,
-    RuleRefused, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
-    SharePublished, SharedCommit, SharedConversation, ShowingArchived, Standing, SteerOpened,
-    SteerSubmission, Submitted, Subscribed, Subscription, TerminalOpened, TimelineEvent, TokenEdit,
-    TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    Registration, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice,
+    RuleField, RuleRefused, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
+    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowingArchived, Standing,
+    SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TerminalOpened,
+    TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -386,6 +386,12 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // asking.
         .route("/api/ui/directories", get(directories))
         .route("/api/ui/update", get(update))
+        // And whether a phone can reach this workbench: what the machine's own
+        // Tailscale is doing, read at the moment the pane is opened. Not under
+        // the settings above, and deliberately: nothing here is configured, and
+        // a read that answered off the settings files would be a page saying
+        // what somebody once typed rather than what the machine is doing now.
+        .route("/api/ui/remote", get(remote))
 }
 
 /// `GET /api/ui/sets/{id}` — one Set, rendered, with where it stands.
@@ -4154,6 +4160,24 @@ async fn directories(Query(browsing): Query<Browsing>) -> HttpResponse {
             unavailable("the directory could not be listed")
         }
     }
+}
+
+/// `GET /api/ui/remote` — what this machine's Tailscale is doing, and whether
+/// the tailnet name is in front of the workbench.
+///
+/// Read off the machine on every request rather than held: what it answers
+/// changes whenever somebody runs `tailscale up` or `tailscale serve` in a
+/// terminal, and a cached reading would be a pane that had to be loaded twice
+/// to tell the truth. Two short commands, and the pane is opened rarely.
+///
+/// Never a refusal. Every way the reading can fail is one of the states it
+/// answers with — no `tailscale` at all, a daemon that would not answer, an
+/// answer this build cannot read — because each of them is a different sentence
+/// the pane has to put in front of the human. See [`crate::remote`].
+async fn remote(State(state): State<AppState>) -> HttpResponse {
+    let view: RemoteView = state.remote.reading().await;
+
+    Json(view).into_response()
 }
 
 /// `GET /api/ui/update` — whether a newer Verkstead has been released than

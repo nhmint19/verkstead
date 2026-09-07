@@ -2370,6 +2370,29 @@ export type Registered = "Added" | "NotAbsolute" | "Missing" | "NotARepository" 
 export type Registration = { path: string, };
 
 /**
+ * What this machine's Tailscale is doing.
+ *
+ * Flat on the wire — `{"tailscale": "Up", "node": "…", "serve": {…}}` — so the
+ * viewer narrows on a field rather than unwrapping a variant name.
+ */
+export type RemoteView = { "tailscale": "Absent" } | { "tailscale": "Down", 
+/**
+ * What `tailscale` said about it — its own line where it printed one,
+ * because that is what names the service to start.
+ */
+trouble: string, } | { "tailscale": "Unreadable", trouble: string, } | { "tailscale": "Up", 
+/**
+ * The node's own name, as the tailnet knows it —
+ * `workbench.tailnet-name.ts.net`, with the trailing dot a DNS name
+ * carries taken off.
+ */
+node: string, 
+/**
+ * And whether anything on that name is proxied to the workbench.
+ */
+serve: ServeView, };
+
+/**
  * Which registered Repo a drafting Conversation is to be moved onto.
  *
  * The id and nothing else, the way [`NewCompanion`] is: everything that
@@ -2714,6 +2737,15 @@ why: string, };
  * different width.
  */
 export type Screen = { repaint: string, columns: number, rows: number, };
+
+/**
+ * Whether `tailscale serve` is putting this machine's tailnet name in front of
+ * the port the workbench is served on.
+ *
+ * The port matters: a serve of somebody else's port is not this one, and would
+ * read as an address that answers with something that is not the workbench.
+ */
+export type ServeView = { "serve": "Off" } | { "serve": "On", address: string, } | { "serve": "Unreadable", trouble: string, };
 
 /**
  * One stored Question Set as the browser receives it: the document where this

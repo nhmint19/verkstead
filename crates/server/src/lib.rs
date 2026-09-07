@@ -1,7 +1,7 @@
 //! The Verkstead server: the agents' HTTP API and the human's web UI, over one
 //! SQLite store and out of one binary.
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -116,6 +116,9 @@ mod publishing;
 mod push;
 /// The store an OpenCode session keeps of itself, followed while it runs.
 mod records;
+/// Whether this machine can be reached from a phone: what its Tailscale is
+/// doing, and whether the tailnet name is in front of the workbench.
+pub mod remote;
 /// Following a Conversation's branch to the name a session renamed it to,
 /// rather than repairing a checkout that has not come adrift after all.
 mod renames;
@@ -290,6 +293,13 @@ pub(crate) struct AppState {
     /// authenticating as the configured token.
     github: Gh,
 
+    /// And how it asks this machine whether a phone can reach the workbench —
+    /// the host's `tailscale`, in front of the port this server is listening
+    /// on. A handle rather than a reading: what it answers is read at the moment
+    /// the Remote access pane asks, so a `tailscale up` run in a terminal shows
+    /// on the next load rather than on the next restart — see [`remote`].
+    remote: remote::Tailscale,
+
     /// The two files the human tells Verkstead their credentials and their
     /// identity in. A handle rather than what is in them: the files are read at
     /// the moment they are wanted, so the settings page and the next session to
@@ -331,6 +341,14 @@ pub(crate) struct AppState {
     /// already names, so the keep-set holds it whenever the sweep looks.
     checkouts: Arc<tokio::sync::Mutex<()>>,
 }
+
+/// The port Verkstead is served on when nobody has said otherwise, and so the
+/// port `tailscale serve` is put in front of — see the Remote access pane in
+/// [`remote`], and the `tailscale serve --bg 8422` in the adoption docs.
+///
+/// Written once and read twice: it is the `--listen` default below, and what a
+/// router stood up without a listening socket reads a serve against.
+const WORKBENCH_PORT: u16 = 8422;
 
 /// The one name the database is ever kept under, inside the Data Directory.
 /// Fixed rather than configurable: the directory is what an operator points
@@ -384,7 +402,11 @@ pub struct Config {
 
     /// Address and port to bind. Bind a tailnet address to reach the server
     /// from other devices.
-    #[arg(long, env = "VERKSTEAD_LISTEN", default_value = "127.0.0.1:8422")]
+    #[arg(
+        long,
+        env = "VERKSTEAD_LISTEN",
+        default_value_t = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), WORKBENCH_PORT),
+    )]
     pub listen: SocketAddr,
 
     /// An extra read-write bind every sandbox gets, or `name=DIR` for one only
@@ -523,6 +545,7 @@ pub fn router(pool: SqlitePool) -> Router {
         nowhere(),
         sessions::Sessions::none(),
         Gh::on_path(),
+        tailnet(),
         key::Gate::open(),
     )
 }
@@ -540,6 +563,7 @@ pub fn router_keeping(pool: SqlitePool, data_dir: PathBuf) -> Router {
         data_dir,
         sessions::Sessions::none(),
         Gh::on_path(),
+        tailnet(),
         key::Gate::open(),
     )
 }
@@ -564,6 +588,7 @@ pub fn router_installed(
         data_dir,
         sessions::Sessions::none(),
         gh,
+        tailnet(),
         key::Gate::open(),
     )
 }
@@ -593,6 +618,7 @@ pub fn router_running_sessions(
         data_dir,
         sessions::Sessions::under(agents),
         gh,
+        tailnet(),
         key::Gate::open(),
     )
 }
@@ -612,6 +638,7 @@ pub fn router_asking_github(pool: SqlitePool, data_dir: PathBuf, gh: Gh) -> Rout
         data_dir,
         sessions::Sessions::none(),
         gh,
+        tailnet(),
         key::Gate::open(),
     )
 }
@@ -621,6 +648,38 @@ pub fn router_asking_github(pool: SqlitePool, data_dir: PathBuf, gh: Gh) -> Rout
 /// what an installation said.
 fn nothing_bound() -> sandbox::SandboxConfig {
     sandbox::SandboxConfig::default()
+}
+
+/// A router reading this machine's Tailscale through `remote`, over a database
+/// with nothing in it.
+///
+/// What the Remote access pane's own suite is stood up over, and a parameter for
+/// the reason the `gh` above is one: what it answers is a fact about the machine
+/// running the tests, and a pane that has to say four different things about
+/// four different machines cannot be asked about any of them on the one machine
+/// it happens to be running on. See [`remote::Tailscale::running`].
+pub fn router_reading_tailscale(pool: SqlitePool, remote: remote::Tailscale) -> Router {
+    routed(
+        pool,
+        updates::Updates::nothing_learned(),
+        nothing_bound(),
+        nowhere(),
+        sessions::Sessions::none(),
+        Gh::on_path(),
+        remote,
+        key::Gate::open(),
+    )
+}
+
+/// The Tailscale of a router that was not stood up to be reached from a phone:
+/// the host's own binary, in front of the port the workbench takes when nobody
+/// has said otherwise.
+///
+/// Never asked anything, in practice — nothing but the served router answers the
+/// Remote access pane — and honest where it is: what a suite that wants a
+/// stated answer stands up is [`router_reading_tailscale`].
+fn tailnet() -> remote::Tailscale {
+    remote::Tailscale::on_path(WORKBENCH_PORT)
 }
 
 /// The data directory of a router that has no use for one.
@@ -648,10 +707,15 @@ pub fn router_checking_updates(pool: SqlitePool, releases: Option<&str>) -> Rout
         nowhere(),
         sessions::Sessions::none(),
         Gh::on_path(),
+        tailnet(),
         key::Gate::open(),
     )
 }
 
+/// Eight, because the state a router holds is what a router is built out of:
+/// each of these is one thing the served router was given and every other one
+/// stands in for. A struct of them would be this list with a name on it.
+#[allow(clippy::too_many_arguments)]
 fn routed(
     pool: SqlitePool,
     updates: updates::Updates,
@@ -659,6 +723,7 @@ fn routed(
     data_dir: PathBuf,
     sessions: sessions::Sessions,
     github: Gh,
+    remote: remote::Tailscale,
     gate: key::Gate,
 ) -> Router {
     let state = AppState {
@@ -683,6 +748,11 @@ fn routed(
         binds,
 
         github,
+
+        // And the host's `tailscale`, which is the whole of what the Remote access
+        // pane reads — see [`remote`].
+        remote,
+
         data_dir,
         checkouts: Arc::new(tokio::sync::Mutex::new(())),
     };
@@ -787,12 +857,18 @@ async fn health() -> &'static str {
 /// by: `key` is the Workbench Key this Data Directory holds, and the gate over
 /// the viewer's namespace and over the fallback is what a session reaching the
 /// loopback finds instead of the workbench — see [`key`].
+///
+/// `remote` is the host's `tailscale` in front of the port this router is being
+/// served on, which is the one thing here that has to be told where the server
+/// is listening: a serve is this workbench's when it proxies to that port — see
+/// [`remote`].
 pub fn router_with_ui(
     pool: SqlitePool,
     releases: Option<&str>,
     data_dir: PathBuf,
     agents: Agents,
     gh: Gh,
+    remote: remote::Tailscale,
     key: key::WorkbenchKey,
 ) -> Router {
     // Off the agents, for the reason [`router_running_sessions`] takes it off
@@ -807,6 +883,7 @@ pub fn router_with_ui(
         data_dir,
         sessions::Sessions::under(agents),
         gh,
+        remote,
         gate.clone(),
     )
     .fallback_service(guarded_viewer::<viewer::Built>(&gate))
@@ -831,6 +908,7 @@ pub fn router_keyed(pool: SqlitePool, key: key::WorkbenchKey) -> Router {
         nowhere(),
         sessions::Sessions::none(),
         Gh::on_path(),
+        tailnet(),
         key::Gate::keyed(key),
     )
 }
@@ -1080,6 +1158,11 @@ pub async fn run_on_keyed(
         // token — the same one the sessions get, so one token is the whole
         // of Verkstead's GitHub auth.
         Gh::on_path().authenticated_by(settings),
+        // And whatever `tailscale` it has, asked about the port this server just
+        // bound: a serve is this workbench's when it proxies there, and an
+        // install told to listen somewhere else is one whose serve has to point
+        // somewhere else too — see [`remote`].
+        remote::Tailscale::on_path(config.listen.port()),
         // And the key this Data Directory holds, which is what the workbench
         // and the viewer's own namespace are behind.
         key,

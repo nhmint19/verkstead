@@ -42,6 +42,7 @@ import type {
   PullRequestDetails,
   PushKey,
   Registered,
+  RemoteView,
   RepoEntry,
   RepoPairingsView,
   RepoRemoved,
@@ -929,6 +930,18 @@ export function chooseReviewPairing(
     `/api/ui/conversations/${id}/review-pairing`,
     choice,
   );
+}
+
+/// What this machine's Tailscale is doing: whether there is one at all, whether
+/// it is up, what this node is called on the tailnet and whether the tailnet
+/// name is already in front of the workbench.
+///
+/// Read off the machine on every ask rather than out of anything saved — a
+/// `tailscale up` run in a terminal shows on the next load. Never a refusal:
+/// every way the reading can fail is one of the states it answers with, because
+/// each of them is a different thing to say to the human.
+export function loadRemote(): Promise<RemoteView> {
+  return get<RemoteView>("/api/ui/remote");
 }
 
 /// Whether a newer Verkstead has been released than the one serving this page.

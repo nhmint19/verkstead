@@ -36,7 +36,10 @@ use verkstead_schema::{
     Answer, Liveness, Question, QuestionOption, QuestionSet, RepoDiff, Response, SetCreated,
     Subquestion,
 };
-use verkstead_server::{Gh, open_database, router, router_asking_github, store};
+use verkstead_server::remote::Tailscale;
+use verkstead_server::{
+    Gh, open_database, router, router_asking_github, router_reading_tailscale, store,
+};
 
 /// The Conversation every Set in this file is asked from.
 ///
@@ -3049,6 +3052,95 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             "/home/ada",
         ),
     );
+
+    // And what the Remote access section reads: what this machine's Tailscale
+    // is doing. One fixture per state the pane draws differently, because each
+    // of them is a different sentence in front of the human — a machine with
+    // nothing installed, one whose daemon is not answering, one that is up and
+    // serving the workbench, and one that is up and serving nothing.
+    //
+    // Read through a `tailscale` that is a shell script, for the reason the
+    // settings above go through a `gh` that is one: what the real command would
+    // say here is a fact about the machine writing the fixture, and the pane has
+    // four machines to describe. See `tests/remote.rs`, whose subject these
+    // shapes are.
+    let (_dir, absent) = tailscale_app(NO_TAILSCALE).await;
+    write("remote-absent.json", &get(&absent, "/api/ui/remote").await);
+
+    let (_dir, down) = tailscale_app(NO_DAEMON).await;
+    write("remote-down.json", &get(&down, "/api/ui/remote").await);
+
+    let (_dir, serving) = tailscale_app(SERVING).await;
+    write(
+        "remote-serving.json",
+        &get(&serving, "/api/ui/remote").await,
+    );
+
+    let (_dir, off) = tailscale_app(NOT_SERVING).await;
+    write("remote-off.json", &get(&off, "/api/ui/remote").await);
+}
+
+/// A machine on a tailnet with the workbench served on its tailnet name.
+#[cfg(unix)]
+const SERVING: &str = r#"
+case "$1" in
+  status) printf '%s' '{"BackendState":"Running","Self":{"DNSName":"workbench.tailnet-name.ts.net."}}' ;;
+  serve) printf '%s' '{"TCP":{"443":{"HTTPS":true}},"Web":{"workbench.tailnet-name.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:8422"}}}}}' ;;
+esac
+"#;
+
+/// The same machine with no serve on it at all.
+#[cfg(unix)]
+const NOT_SERVING: &str = r#"
+case "$1" in
+  status) printf '%s' '{"BackendState":"Running","Self":{"DNSName":"workbench.tailnet-name.ts.net."}}' ;;
+  serve) printf '%s' 'null' ;;
+esac
+"#;
+
+/// And one whose daemon is not running, which is what `tailscale` says about it.
+#[cfg(unix)]
+const NO_DAEMON: &str = r#"
+echo "failed to connect to local tailscaled; it doesn't appear to be running (sudo systemctl start tailscaled ?)" >&2
+exit 1
+"#;
+
+/// And the machine with no `tailscale` on it, which is a program that is not
+/// there rather than a script that says anything.
+#[cfg(unix)]
+const NO_TAILSCALE: &str = "";
+
+/// The port the fixtures' workbench is served on, which is the one the serve
+/// above proxies to.
+#[cfg(unix)]
+const WORKBENCH: u16 = 8422;
+
+/// A server reading a machine whose `tailscale` is `script` — or one with no
+/// `tailscale` at all, which is what the empty script stands for: there is
+/// nothing a script could print that would say *this program does not exist*.
+#[cfg(unix)]
+async fn tailscale_app(script: &str) -> (tempfile::TempDir, Router) {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let tailscale = match script.is_empty() {
+        true => Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], WORKBENCH),
+        false => Tailscale::running(
+            vec![
+                "/bin/sh".to_owned(),
+                "-c".to_owned(),
+                script.to_owned(),
+                // `sh -c` gives `$0` the script's own name, so what Verkstead
+                // passes lands in `$1` onwards.
+                "tailscale".to_owned(),
+            ],
+            WORKBENCH,
+        ),
+    };
+
+    (dir, router_reading_tailscale(pool, tailscale))
 }
 
 /// A router, and the directory holding its database alive.

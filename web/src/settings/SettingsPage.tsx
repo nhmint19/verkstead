@@ -11,8 +11,9 @@
 //! session does with a Repo can be pushed, then the shared Rust build cache
 //! every session builds into, then where the share viewer is hosted, then how a
 //! conflicted pull request is resolved, then what becomes of a Conversation
-//! once it is archived, then the Agent Profiles and the Repos a Conversation is
-//! settled against, and last the extra directories a sandbox is given.
+//! once it is archived, then whether this machine can be reached from a phone,
+//! then the Agent Profiles and the Repos a Conversation is settled against, and
+//! last the extra directories a sandbox is given.
 //!
 //! The conversations pane rides along because it is the app's navigation rather
 //! than the workbench's furniture: configuring a machine is something done
@@ -57,6 +58,7 @@ import { CleanupCard, CleanupPane } from "./Cleanup";
 import { ConflictsCard, ConflictsPane } from "./Conflicts";
 import { GithubCard, GithubPane } from "./Credentials";
 import { PathsCard, PathsPane } from "./Paths";
+import { RemoteCard, RemotePane } from "./Remote";
 import {
   SETTINGS,
   WORDS,
@@ -241,6 +243,16 @@ function Settings(props: {
           open={props.opening === "cleanup"}
           press={() => props.select("cleanup")}
         />
+        {/* And the one section here that is about what this machine is doing
+            rather than about anything Verkstead was told: whether a phone can
+            reach the workbench at all. Under the settings and above the lists,
+            because it belongs with what is true of the machine rather than with
+            what a Conversation is settled against — and because this is where
+            the banner on the first grilling sends somebody. */}
+        <RemoteCard
+          open={props.opening === "remote"}
+          press={() => props.select("remote")}
+        />
         {/* Told which of its own things is open rather than the whole opening:
             where a Profile's pane stands is this page's arithmetic, and a
             section that knew the settings' paths would be a second opinion
@@ -322,6 +334,9 @@ function Details(props: {
       </Match>
       <Match when={props.opening === "cleanup"}>
         <CleanupPane back={props.back} />
+      </Match>
+      <Match when={props.opening === "remote"}>
+        <RemotePane back={props.back} />
       </Match>
       {/* The Repos' two panes are two components rather than one asked about a
           Repo that does not exist yet, the way the Profiles' one form is: what

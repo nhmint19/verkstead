@@ -24,6 +24,7 @@ mod browsing;
 mod conversations;
 mod profiles;
 mod push;
+mod remote;
 mod repos;
 mod settings;
 mod sharing;
@@ -62,6 +63,7 @@ pub use profiles::{
     ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, RepoPairingsView, RoleChoice,
 };
 pub use push::{PushKey, Subscribed, Subscription, Unsubscribe};
+pub use remote::{RemoteView, ServeView};
 pub use repos::{
     ConflictResolutionEdit, Registered, Registration, RepoEntry, RepoRemoved, RepoView,
 };
