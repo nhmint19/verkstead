@@ -74,26 +74,8 @@
   }
 }
 
-/* The two marks. The tick is the accent's own green rather than the ember: it
-   is an outcome, and it is the same green a Diff's additions are drawn in. */
-.done {
-  flex: none;
-  width: 1em;
-  color: var(--added);
-}
-
-/* And a step still to do, as the empty ring a tick is cut into. */
-.waiting {
-  flex: none;
-  box-sizing: border-box;
-  width: 0.85em;
-  height: 0.85em;
-  border: 2px solid var(--edge);
-  border-radius: 50%;
-}
-
-/* What the open step is about, under its heading. Empty until the step's own
-   component lands — see the three tasks after the frame's. */
+/* What the open step is about, under its heading. Empty until that step's
+   own component lands — two of the three still arrive with their own tasks. */
 .body:not(:empty) {
   margin-top: 0.9rem;
 }

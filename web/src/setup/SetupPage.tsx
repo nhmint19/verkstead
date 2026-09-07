@@ -21,14 +21,22 @@
 //! moving *forward* is each step's own Continue, and a step nobody has met yet
 //! is not one to skip into.
 
-import { faCheck } from "@fortawesome/free-solid-svg-icons";
 import { For, Show, createSignal, type JSX } from "solid-js";
 
-import { Icon } from "../Icon";
 import { loadOnboarding } from "../api/client";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
-import { STEPS, TITLES, keepStep, met, openStep, type Step } from "./steps";
+import { Dependencies } from "./Dependencies";
+import { Mark } from "./Mark";
+import {
+  STEPS,
+  TITLES,
+  after,
+  keepStep,
+  met,
+  openStep,
+  type Step,
+} from "./steps";
 import styles from "./SetupPage.module.css";
 
 /// How often the page asks again while the open step is unmet, in milliseconds.
@@ -47,6 +55,19 @@ export function SetupPage(): JSX.Element {
   const show = (step: Step): void => {
     setOpen(step);
     keepStep(step);
+  };
+
+  /// What a step's own Continue does: open the one after it.
+  ///
+  /// The last step's Continue is the wizard *finishing* rather than a step
+  /// opening, and that — the mode going off and the app landing on `/compose` —
+  /// arrives with the git step's own task.
+  const onwards = (step: Step): void => {
+    const next = after(step);
+
+    if (next !== null) {
+      show(next);
+    }
   };
 
   const onboarding = useReading(() => ({
@@ -99,10 +120,17 @@ export function SetupPage(): JSX.Element {
                     open={open() === step}
                     show={show}
                   />
-                  {/* And under the open one, what that step is about — which is
-                      the three tasks after this frame's. */}
+                  {/* And under the open one, what that step is about. Two of
+                      the three arrive with the two tasks after this one. */}
                   <Show when={open() === step}>
-                    <div class={styles.body} />
+                    <div class={styles.body}>
+                      <Show when={step === "dependencies"}>
+                        <Dependencies
+                          reading={view()}
+                          onwards={() => onwards(step)}
+                        />
+                      </Show>
+                    </div>
                   </Show>
                 </li>
               )}
@@ -129,7 +157,7 @@ function StepHead(props: {
   /// The mark and the name, which is the heading either way round.
   const named = (): JSX.Element => (
     <>
-      <Mark met={props.met} />
+      <Mark standing={props.met ? "met" : "waiting"} />
       {TITLES[props.step]}
     </>
   );
@@ -149,18 +177,3 @@ function StepHead(props: {
   );
 }
 
-/// Whether a step stands met, as a mark beside its name.
-///
-/// A tick where it is and an empty ring where it is not — the shapes the pull
-/// request's checks are drawn with, for the same reason: the ring is what a
-/// tick is cut into once something has happened.
-function Mark(props: { met: boolean }): JSX.Element {
-  return (
-    <Show
-      when={props.met}
-      fallback={<span class={styles.waiting} aria-label="not yet" role="img" />}
-    >
-      <Icon of={faCheck} label="done" class={styles.done} />
-    </Show>
-  );
-}

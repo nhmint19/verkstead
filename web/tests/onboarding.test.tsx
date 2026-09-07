@@ -59,6 +59,11 @@ function rows(container: ParentNode): HTMLElement[] {
   return [...container.querySelectorAll<HTMLElement>("[data-step]")];
 }
 
+/// What the three steps are called, as the frame drew them.
+function headings(container: ParentNode): Array<string | null> {
+  return rows(container).map((row) => row.querySelector("h2")!.textContent);
+}
+
 /// And which step is the open one.
 function opened(container: ParentNode): string | undefined {
   return rows(container).find((row) => row.classList.contains(styles.open!))
@@ -94,9 +99,9 @@ describe("the wizard's frame", () => {
 
     await waitFor(() => expect(rows(container)).toHaveLength(3));
     expect(rows(container).map((row) => row.dataset.step)).toEqual([...STEPS]);
-    expect(rows(container).map((row) => row.textContent)).toEqual(
-      STEPS.map((step) => TITLES[step]),
-    );
+    // The headings rather than the rows: the open step has its own step drawn
+    // under its heading, and what the frame is about is the three names.
+    expect(headings(container)).toEqual(STEPS.map((step) => TITLES[step]));
   });
 
   it("marks the steps that stand met and the ones that do not", async () => {
