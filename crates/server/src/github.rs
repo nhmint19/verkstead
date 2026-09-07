@@ -349,6 +349,26 @@ impl Trouble {
 /// line that ends the headers. See [`Scopes`] for what the absence of that
 /// header means, which is not *none*.
 ///
+/// The token the host's own `gh` is logged in with, where it has one.
+///
+/// What the onboarding wizard prefills its token field from when the server's
+/// environment holds none — see [`crate::onboarding`]. Asked *as nobody*: the
+/// token argument is `None`, so `GH_TOKEN` is left unset and what answers is
+/// the login on this machine rather than whatever Verkstead was already
+/// configured with, which would be a prefill of a value the page already has.
+///
+/// Nothing at all where there is no `gh`, where nobody is logged in, or where
+/// it printed nothing — all three being the same thing to the field this fills:
+/// there is no token to offer.
+///
+/// Blocking, like everything else here — see [`Gh::run`].
+pub(crate) fn host_token(gh: &Gh) -> Option<String> {
+    let said = gh.run(None, None, &["auth", "token"]).ok()?;
+    let said = said.trim();
+
+    (!said.is_empty()).then(|| said.to_owned())
+}
+
 /// Blocking, like everything else here — see [`Gh::run`].
 pub(crate) fn authenticates_as(gh: &Gh, token: &str) -> Result<Account, Trouble> {
     /// The one field of `gh api user` this asks for.

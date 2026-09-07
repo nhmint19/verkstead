@@ -28,6 +28,12 @@
 //! home — offered as the Profile it would be saved as, with whether that
 //! harness is on the machine carried beside it. See [`AccountView`].
 //!
+//! **The git step's prefills are a read of their own.** What `git config
+//! --global` and the environment can tell a Verkstead that has been told
+//! nothing is [`PrefillView`], asked for by the step that has those fields
+//! rather than carried on every reading above — see that type, where the
+//! reasoning is.
+//!
 //! **A row is present, absent or neither.** Neither is the Windows sandbox
 //! row, which is not a thing to install there — see [`DependencyState`] — and
 //! an absent one carries whatever the machine said about it, which on Linux is
@@ -202,4 +208,70 @@ pub struct StepsView {
     /// And a git author: both halves of one, because that is what git asks for.
     /// The GitHub token is not in this — see ADR-0016.
     pub git: bool,
+}
+
+/// What this machine can offer the git step, for each field Verkstead has not
+/// been told yet.
+///
+/// **Its own read, beside [`OnboardingView`] rather than in it.** The reading
+/// above is probed every ten seconds while a step is unmet and again by the
+/// workbench's own gate on every start, and neither of those has any business
+/// running `git config` — or handing a GitHub token to a page that is drawing
+/// a sidebar. This is asked for once, by the step that has the fields, and
+/// only while they are still empty.
+///
+/// **Found rather than configured, and only where nothing is configured.** A
+/// value Verkstead already holds is what the field shows, so it is not
+/// prefilled over: what is here is what the machine could tell a Verkstead
+/// that has been told nothing. A field nothing answered for is absent, which
+/// is a field that stays empty until somebody types in it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PrefillView {
+    /// Who the machine's own git commits are by.
+    pub name: Option<Prefilled>,
+
+    /// And what address they carry.
+    pub email: Option<Prefilled>,
+
+    /// And a GitHub token this machine is already holding somewhere — which is
+    /// the one optional field of the three, GitHub being a choice.
+    pub token: Option<Prefilled>,
+}
+
+/// One field's prefill: what was found, and where.
+///
+/// The source travels with the value because the human is being asked to
+/// confirm something they did not type: a name off a `git config` and a token
+/// out of an environment variable are two different things to be sure about,
+/// and a field that only showed the value would be asking them to trust it
+/// blind.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct Prefilled {
+    pub value: String,
+    pub source: Source,
+}
+
+/// And where a prefill came from.
+///
+/// Four values rather than a variable name carried as a string: the wording
+/// around each of them is the viewer's, the way the install commands are, and
+/// which environment variable answered is part of what there is to say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Source {
+    /// `git config --global`, run by the server as whoever it is.
+    GitConfig,
+
+    /// `GH_TOKEN` in the server's own environment, which is where a token
+    /// meant for everything on this machine is usually put.
+    GhToken,
+
+    /// And `GITHUB_TOKEN`, where `GH_TOKEN` said nothing.
+    GithubToken,
+
+    /// And the login the host's own `gh` is holding — `gh auth token`, asked
+    /// last because it is the one of the three that is a process.
+    HostGh,
 }

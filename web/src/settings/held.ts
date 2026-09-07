@@ -23,6 +23,38 @@ import type {
   SettingsView,
 } from "../api/types";
 
+/// Everything in `config.yaml` a form about the credentials is not about, as it
+/// stands — ready to be spread into that form's save.
+///
+/// The whole file goes back in one request, so a save leaving one of these out
+/// would be a save emptying it. Two forms send them: the settings page's own
+/// credentials pane, and the onboarding wizard's git step, which asks for the
+/// same three fields on a machine nobody has set up yet.
+///
+/// The defaults are what the server would write for a Verkstead nobody has told
+/// anything, which is what the moment before the read has landed is.
+export function heldConfig(told: SettingsView | undefined) {
+  return {
+    rust_build_cache: {
+      enabled: told?.rust_build_cache.enabled ?? true,
+      // A size nobody typed goes back as the empty string rather than as the
+      // default it is being shown as — see [`heldCleanup`], which says the same
+      // about a duration.
+      size: told?.rust_build_cache.size_configured
+        ? (told?.rust_build_cache.size ?? "")
+        : "",
+    },
+    // And what becomes of an archived Conversation, likewise.
+    cleanup: heldCleanup(told),
+    // And how a conflicted pull request is resolved, which is one of two words
+    // and never absent: there is no third state for a form to send.
+    conflict_resolution: told?.conflict_resolution ?? "Merge",
+    // And the binds the settings hold, again for that reason — a list a form
+    // left out would be a list it emptied. See [`heldPaths`].
+    ...heldPaths(told),
+  };
+}
+
 /// The binds as they stand, ready to be spread into a save.
 ///
 /// An empty list where the read has not landed, which is the same thing the

@@ -24,5 +24,5 @@ Roadmap stage: [03: The onboarding wizard](docs/roadmaps/onboarding/03-onboardin
 - [x] 03: The unnamed Profile — [details](03-unnamed-profile.md)
 - [x] 04: The dependencies step — [details](04-dependencies-step.md)
 - [x] 05: The accounts step — [details](05-accounts-step.md)
-- [ ] 06: The git step and the finish — [details](06-git-step-and-finish.md)
+- [x] 06: The git step and the finish — [details](06-git-step-and-finish.md)
 - [ ] 07: Docs and vocabulary — [details](07-docs-and-vocabulary.md)

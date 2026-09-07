@@ -45,12 +45,14 @@ use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
-    Dependency, DependencyState, DependencyView, Distro, OnboardingView, ProfileAccount,
+    Dependency, DependencyState, DependencyView, Distro, OnboardingView, PrefillView,
+    ProfileAccount, Source,
 };
+use verkstead_server::github::Gh;
 use verkstead_server::onboarding::Machine;
 use verkstead_server::platform::{Environment, Platform};
 use verkstead_server::store::{Account, AgentType, ProfileFacts};
-use verkstead_server::{open_database, router_onboarding, store};
+use verkstead_server::{open_database, router_onboarding_asking_github, store};
 
 /// A program that is there and does nothing, which is the whole of what a row
 /// probed by a `PATH` walk asks of one.
@@ -72,6 +74,20 @@ const REFUSED: &str = "#!/bin/sh\n\
 /// And what that machine said, as the row carries it.
 const REFUSAL: &str = "bwrap: No permissions to creating new namespace, likely because \
                        the kernel does not allow non-privileged user namespaces";
+
+/// And a `git` that is configured: one that answers `git config --global --get`
+/// for the two keys the git step is prefilled from.
+///
+/// A script rather than the machine's own `git`, for the reason the `bwrap` is
+/// one: what the step offers is whatever this box's `~/.gitconfig` happens to
+/// say, and a suite that read it would assert something different on every box.
+const CONFIGURED: &str = "#!/bin/sh\n\
+                          test \"$1 $2 $3\" = 'config --global --get' || exit 2\n\
+                          case \"$4\" in\n\
+                          user.name) echo 'Ada Lovelace';;\n\
+                          user.email) echo 'ada@example.com';;\n\
+                          *) exit 1;;\n\
+                          esac\n";
 
 /// What this machine says it is, which is the tab the wizard opens on.
 const OS_RELEASE: &str = "NAME=\"Ubuntu\"\nID=ubuntu\nID_LIKE=debian\n";
@@ -103,13 +119,21 @@ async fn ready() -> (tempfile::TempDir, SqlitePool) {
 /// called and nothing is written into it afterwards but the one delete the last
 /// test makes.
 fn served(dir: &Path, pool: &SqlitePool, programs: &[(&str, &str)]) -> Router {
+    served_holding(dir, pool, programs, Held::default())
+}
+
+/// The same, over a server whose environment holds what `held` says and whose
+/// host `gh` is logged in as `held` says.
+///
+/// The other half of what the git step is drawn from: its token comes out of
+/// the server's own environment or out of the login the machine's `gh` has, and
+/// neither of those is a thing to ask the box the suite is running on.
+fn served_holding(dir: &Path, pool: &SqlitePool, programs: &[(&str, &str)], held: Held) -> Router {
     let bin = dir.join("bin");
     std::fs::create_dir_all(&bin).unwrap();
 
     for (name, script) in programs {
-        let path = bin.join(name);
-        std::fs::write(&path, script).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        program(&bin.join(name), script);
     }
 
     let machine = Machine::stated(
@@ -119,11 +143,51 @@ fn served(dir: &Path, pool: &SqlitePool, programs: &[(&str, &str)]) -> Router {
         Some(OS_RELEASE.to_owned()),
         &Environment {
             home: Some(home(dir)),
+            gh_token: held.gh_token.map(str::to_owned),
+            github_token: held.github_token.map(str::to_owned),
             ..Environment::default()
         },
     );
 
-    router_onboarding(pool.clone(), dir.to_owned(), machine)
+    router_onboarding_asking_github(pool.clone(), dir.to_owned(), machine, host_gh(dir, held))
+}
+
+/// What a start is holding that is neither on its `PATH` nor in its Data
+/// Directory: the two token variables in its own environment, and whatever the
+/// machine's own `gh` is logged in as.
+#[derive(Debug, Default, Clone, Copy)]
+struct Held {
+    gh_token: Option<&'static str>,
+    github_token: Option<&'static str>,
+    host_login: Option<&'static str>,
+}
+
+/// The `gh` this server reaches GitHub through: one that answers `gh auth
+/// token` with the login it is holding, or one that is logged into nothing.
+///
+/// Written outside the `PATH` the probes walk, because it is not that question:
+/// whether this machine has a `gh` is a row on the dependencies step, and this
+/// is the `gh` the server itself runs.
+fn host_gh(dir: &Path, held: Held) -> Gh {
+    let path = dir.join("host-gh");
+
+    program(
+        &path,
+        &match held.host_login {
+            Some(token) => {
+                format!("#!/bin/sh\ntest \"$*\" = 'auth token' || exit 2\necho {token}\n")
+            }
+            None => "#!/bin/sh\nexit 1\n".to_owned(),
+        },
+    );
+
+    Gh::running(vec![path.to_string_lossy().into_owned()])
+}
+
+/// A script at `path`, executable.
+fn program(path: &Path, script: &str) {
+    std::fs::write(path, script).unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
 /// The home this start was given, which is where its accounts are looked for.
@@ -206,6 +270,48 @@ async fn reading(app: &Router) -> OnboardingView {
         .oneshot(
             Request::builder()
                 .uri("/api/ui/onboarding")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+
+    serde_json::from_slice(&body).expect("the reading the wizard is drawn from")
+}
+
+/// And what the git step could be prefilled with, which is the read of its own
+/// that step makes.
+async fn prefill(app: &Router) -> PrefillView {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/ui/onboarding/git")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+
+    serde_json::from_slice(&body).expect("what the git step's fields are filled with")
+}
+
+/// And the wizard's last Continue, which answers with the reading made again.
+async fn finished(app: &Router) -> OnboardingView {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/ui/onboarding/finished")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -497,6 +603,146 @@ async fn a_home_with_no_account_in_it_offers_none() {
     );
 }
 
+/// The git step's fields are prefilled from the machine and the server's own
+/// environment, each labelled with where its value was found.
+#[tokio::test]
+async fn the_git_step_is_prefilled_with_what_the_machine_could_say() {
+    let (dir, pool) = ready().await;
+
+    let app = served_holding(
+        dir.path(),
+        &pool,
+        &[("bwrap", MAKES_A_NAMESPACE), ("git", CONFIGURED)],
+        Held {
+            github_token: Some("ghp_intheenvironment"),
+            host_login: Some("ghp_thehostslogin"),
+            ..Held::default()
+        },
+    );
+
+    let prefill = prefill(&app).await;
+
+    assert_eq!(
+        prefill.name.as_ref().map(|found| found.value.as_str()),
+        Some("Ada Lovelace"),
+        "the author this machine's own commits are by",
+    );
+    assert_eq!(
+        prefill.name.map(|found| found.source),
+        Some(Source::GitConfig),
+        "labelled with where the human can go and check it",
+    );
+    assert_eq!(
+        prefill.email.map(|found| (found.value, found.source)),
+        Some(("ada@example.com".to_owned(), Source::GitConfig)),
+    );
+    assert_eq!(
+        prefill.token.map(|found| (found.value, found.source)),
+        Some(("ghp_intheenvironment".to_owned(), Source::GithubToken)),
+        "the environment before the host's own login, and named as the \
+         variable that held it",
+    );
+}
+
+/// And a field Verkstead has already been told is not prefilled at all: what is
+/// in front of the human is then what is written down, and a token already
+/// configured is one this endpoint has no business handing back.
+#[tokio::test]
+async fn a_field_verkstead_already_holds_is_left_alone() {
+    let (dir, pool) = ready().await;
+
+    an_author(dir.path());
+
+    let app = served_holding(
+        dir.path(),
+        &pool,
+        &[("git", CONFIGURED)],
+        Held {
+            gh_token: Some("ghp_intheenvironment"),
+            ..Held::default()
+        },
+    );
+
+    let prefill = prefill(&app).await;
+
+    assert_eq!(prefill.name, None, "config.yaml already names the author");
+    assert_eq!(prefill.email, None);
+    assert_eq!(
+        prefill.token.map(|found| found.source),
+        Some(Source::GhToken),
+        "and the one field nothing has been said about is the one offered",
+    );
+}
+
+/// The wizard's last Continue takes the mode off for the rest of the run, and
+/// says so in the reading it answers with.
+///
+/// Nothing is written by it: the steps under it stand exactly as they stood,
+/// and what would make them met is what the presses before this one saved. See
+/// ADR-0016 — the verdict is a fact about the start, and this is what has
+/// happened since.
+#[tokio::test]
+async fn finishing_the_wizard_takes_the_mode_off_for_the_rest_of_the_run() {
+    let (dir, pool) = ready().await;
+
+    let app = served(dir.path(), &pool, &[]);
+
+    assert!(
+        reading(&app).await.mode,
+        "a machine with nothing on it came up in onboarding mode"
+    );
+
+    let answered = finished(&app).await;
+
+    assert!(!answered.mode, "the press answers with the mode off");
+    assert!(
+        !answered.steps.dependencies && !answered.steps.accounts && !answered.steps.git,
+        "and with the steps as they are, which is what the next start will judge"
+    );
+
+    assert!(
+        !reading(&app).await.mode,
+        "and every reading afterwards says the same: there is no way back into \
+         the wizard until the next start",
+    );
+}
+
+/// And the next start reaches the verdict afresh: the wizard finishing was a
+/// fact about that process and nothing was written down.
+///
+/// Which is the whole of what *once, at startup* is worth: a machine that is
+/// still short of the objective is a start in the mode again, and one that has
+/// what it was missing is the workbench opening as it always did.
+#[tokio::test]
+async fn the_next_start_reaches_the_verdict_afresh() {
+    let (dir, pool) = ready().await;
+
+    let app = served(dir.path(), &pool, &[]);
+    finished(&app).await;
+
+    // A second router over the same Data Directory, which is what a restart is
+    // to everything below the process.
+    let restarted = served(dir.path(), &pool, &[]);
+
+    assert!(
+        reading(&restarted).await.mode,
+        "the machine is still missing what it was missing, so this start is the \
+         wizard again",
+    );
+
+    // And the same machine with the objective met, which is the start that
+    // opens the workbench.
+    a_profile(&pool, dir.path()).await;
+    an_author(dir.path());
+
+    let met = served(dir.path(), &pool, EVERYTHING);
+
+    assert!(
+        !reading(&met).await.mode,
+        "what the wizard saved is what the next start reads",
+    );
+}
+
 /// Where the golden fixtures are written, relative to this crate — the same
 /// directory `ui_content` and `nudges` write the other endpoints' payloads to.
 const FIXTURES: &str = "../../web/tests/fixtures";
@@ -542,6 +788,41 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     an_author(dir.path());
     let app = served(dir.path(), &pool, EVERYTHING);
     write("onboarding-ready.json", &reading(&app).await, dir.path());
+
+    // And the git step's own read, in the two shapes it comes in: a machine
+    // that can answer every field, and one that can answer none. Both are
+    // written from a stated machine for the reason the readings above are —
+    // this box's own `~/.gitconfig` and `gh` are nothing a committed fixture
+    // could hold true.
+    let (dir, pool) = ready().await;
+    let app = served_holding(
+        dir.path(),
+        &pool,
+        &[("git", CONFIGURED)],
+        Held {
+            gh_token: Some("ghp_intheenvironment"),
+            ..Held::default()
+        },
+    );
+    written("onboarding-git.json", &prefill(&app).await);
+
+    let (dir, pool) = ready().await;
+    let app = served(dir.path(), &pool, &[]);
+    written("onboarding-git-nothing.json", &prefill(&app).await);
+}
+
+/// One fixture that has no path in it, written as it stands.
+///
+/// The git step's read is three values off a `git config` and an environment
+/// variable — nothing about it is this box's — so there is nothing to write
+/// back out the way [`write`] writes a home.
+fn written<T: serde::Serialize>(name: &str, payload: &T) {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(FIXTURES);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let pretty = serde_json::to_string_pretty(payload).unwrap() + "\n";
+
+    std::fs::write(dir.join(name), pretty).unwrap();
 }
 
 /// What a home reads as in a fixture, whoever ran the suite.

@@ -700,13 +700,28 @@ pub fn router_onboarding(
     data_dir: PathBuf,
     machine: onboarding::Machine,
 ) -> Router {
+    router_onboarding_asking_github(pool, data_dir, machine, Gh::on_path())
+}
+
+/// The same, reaching GitHub through `gh`.
+///
+/// What the wizard's last step is stood up over: its token field is prefilled
+/// from the host `gh`'s own login where the environment holds nothing, and
+/// asking the real one would be a test that answered differently on every box
+/// — see [`router_asking_github`], which is a parameter for the same reason.
+pub fn router_onboarding_asking_github(
+    pool: SqlitePool,
+    data_dir: PathBuf,
+    machine: onboarding::Machine,
+    gh: Gh,
+) -> Router {
     routed(
         pool,
         updates::Updates::nothing_learned(),
         nothing_bound(),
         data_dir,
         sessions::Sessions::none(),
-        Gh::on_path(),
+        gh,
         tailnet(),
         key::Gate::open(),
         machine,

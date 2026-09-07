@@ -34,6 +34,7 @@ import type {
   DirectoryListing,
   GrillingStarted,
   OnboardingView,
+  PrefillView,
   ProfileChoice,
   ProfileChosen,
   ProfileDeleted,
@@ -1010,6 +1011,29 @@ export function updateNotice(): Promise<UpdateNotice> {
 /// does not move while the server runs.
 export function loadOnboarding(): Promise<OnboardingView> {
   return get<OnboardingView>("/api/ui/onboarding");
+}
+
+/// What the wizard's git step can fill its fields with, for whatever Verkstead
+/// has not been told.
+///
+/// A read of its own rather than a part of the one above, and made by the step
+/// that has the fields: the probes behind it are two `git config` runs and a
+/// `gh`, and one of the three values is a GitHub token — none of which belongs
+/// in a payload the wizard re-reads every ten seconds and the workbench asks
+/// for at every start. A field Verkstead already holds a value for is absent
+/// here, because the value in front of the human is then the one written down.
+export function loadGitPrefill(): Promise<PrefillView> {
+  return get<PrefillView>("/api/ui/onboarding/git");
+}
+
+/// The wizard's last Continue: onboarding mode is off for the rest of this run.
+///
+/// It writes nothing — the author and the token went through the settings save
+/// a moment before — and what comes back is the machine read again with the
+/// mode off, which is what says the workbench is a page again. The next start
+/// reaches its own verdict, off a machine that now has what it was missing.
+export function finishOnboarding(): Promise<OnboardingView> {
+  return post<OnboardingView>("/api/ui/onboarding/finished");
 }
 
 /// What Verkstead has been told: who a session commits as, and that there is a

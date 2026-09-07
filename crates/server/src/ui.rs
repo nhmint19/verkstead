@@ -395,6 +395,19 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // configured, and a wizard drawn off the settings page's payload would
         // be a wizard saying what somebody typed rather than what is there.
         .route("/api/ui/onboarding", get(onboarding))
+        // And what that machine can offer the wizard's last step, which is a
+        // read of its own for what it costs and what it carries: two `git
+        // config` runs and a `gh`, and a GitHub token found on the machine. The
+        // reading above is made every ten seconds while a step is unmet and by
+        // the workbench's gate at every start, and neither wants any of that —
+        // see [`crate::onboarding::Onboarding::prefill`].
+        .route("/api/ui/onboarding/git", get(onboarding_git))
+        // And the wizard finishing, which is the one thing inside a run that
+        // takes the mode off. A press rather than a save: what it writes is
+        // nothing at all — the author and the token went through the settings
+        // save a moment before — and what it changes is which app the browser
+        // is holding, so it answers with the reading made again.
+        .route("/api/ui/onboarding/finished", post(onboarding_finished))
         // And whether a phone can reach this workbench: what the machine's own
         // Tailscale is doing, read at the moment the pane is opened. Not under
         // the settings above, and deliberately: nothing here is configured, and
@@ -4211,6 +4224,48 @@ async fn onboarding(State(state): State<AppState>) -> HttpResponse {
             unavailable("what this machine is missing could not be read")
         }
     }
+}
+
+/// `GET /api/ui/onboarding/git` — what this machine can offer the wizard's last
+/// step, for whatever Verkstead has not been told.
+///
+/// Its own read rather than a part of the one above, and asked for by the step
+/// that has the fields: the probes are two `git config` runs and a `gh`, and
+/// one of the three values is a GitHub token — none of which belongs in a
+/// payload the page re-reads every ten seconds and the workbench asks for at
+/// every start. A field Verkstead already holds a value for is not prefilled at
+/// all, which is what keeps a configured token out of this entirely.
+async fn onboarding_git(State(state): State<AppState>) -> HttpResponse {
+    match state
+        .onboarding
+        .prefill(&state.settings, &state.github)
+        .await
+    {
+        Ok(prefill) => Json(prefill).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "reading what the git step could be prefilled with failed");
+            unavailable("this machine could not be asked what to fill the fields with")
+        }
+    }
+}
+
+/// `POST /api/ui/onboarding/finished` — the wizard's last Continue: onboarding
+/// mode is off for the rest of this run.
+///
+/// **It writes nothing.** The author and the token were saved through the
+/// settings save a moment before, and the Profile through the profile create
+/// before that; what this changes is a flag beside the startup verdict — see
+/// [`crate::onboarding`], where why it is not written down is set out. The next
+/// start reaches its own verdict off a machine that now has what it was
+/// missing.
+///
+/// Answered with the reading made again — the mode now off — because that
+/// reading is what says which app the browser is holding: the page that pressed
+/// this has the answer without a second ask, and its next URL is a page again.
+async fn onboarding_finished(State(state): State<AppState>) -> HttpResponse {
+    state.onboarding.finished();
+
+    onboarding(State(state)).await
 }
 
 /// `GET /api/ui/remote` — what this machine's Tailscale is doing, and whether

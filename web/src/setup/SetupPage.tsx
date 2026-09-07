@@ -4,7 +4,8 @@
 //! What it draws is a frame — the three steps in the order a machine is set up
 //! in, which of them stands met, and which one is open — over the one endpoint
 //! that says how this Verkstead stands (`GET /api/ui/onboarding`). What each
-//! step *contains* is its own component, and each arrives with its own task.
+//! step *contains* is its own component — and the last of them reads a little
+//! more of its own, the fields it fills being nothing the frame is about.
 //!
 //! **The read runs on an interval while the open step is unmet**, and stops the
 //! moment it is met. Somebody is standing at a terminal waiting for an install
@@ -28,6 +29,7 @@ import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { Accounts } from "./Accounts";
 import { Dependencies } from "./Dependencies";
+import { Git } from "./Git";
 import { Mark } from "./Mark";
 import {
   STEPS,
@@ -65,8 +67,8 @@ export function SetupPage(): JSX.Element {
   /// step that is over rather than one being skipped.
   ///
   /// The last step's Continue is the wizard *finishing* rather than a step
-  /// opening, and that — the mode going off and the app landing on `/compose` —
-  /// arrives with the git step's own task.
+  /// opening — the mode going off and the app landing on `/compose` — so it
+  /// never arrives here: see [`Git`](./Git.tsx), which does that itself.
   const onwards = (step: Step): void => {
     const next = after(step);
 
@@ -127,8 +129,7 @@ export function SetupPage(): JSX.Element {
                     open={open() === step}
                     show={show}
                   />
-                  {/* And under the open one, what that step is about. The last
-                      of the three arrives with the task after this one. */}
+                  {/* And under the open one, what that step is about. */}
                   <Show when={open() === step}>
                     <div class={styles.body}>
                       <Show when={step === "dependencies"}>
@@ -142,6 +143,13 @@ export function SetupPage(): JSX.Element {
                           reading={view()}
                           onwards={() => onwards(step)}
                         />
+                      </Show>
+                      {/* And the last of the three, whose Continue is the
+                          wizard finishing rather than a step opening — which is
+                          why it takes no `onwards`: what it goes on to is the
+                          app itself. */}
+                      <Show when={step === "git"}>
+                        <Git />
                       </Show>
                     </div>
                   </Show>

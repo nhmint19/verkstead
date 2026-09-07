@@ -91,7 +91,7 @@ import type {
 import { Empty, ErrorLine, Note } from "../notices";
 import { utcStamp } from "../set/when";
 import { PaneHead } from "../workbench/PaneHead";
-import { heldCleanup, heldPaths } from "./held";
+import { heldConfig } from "./held";
 import styles from "./Credentials.module.css";
 
 /// The two files as they stand, read once for the two panes that draw them.
@@ -259,27 +259,9 @@ export function GithubPane(props: {
   const authorName = () => name() ?? author()?.name ?? "";
   const authorEmail = () => email() ?? author()?.email ?? "";
 
-  /// Everything in `config.yaml` this pane is not about, as it stands.
-  ///
-  /// The endpoint writes the whole file in one request, so a save leaving one of
-  /// these out would be a save emptying it. The defaults are what the server
-  /// would write anyway, for the moment before the read has landed.
-  const held = () => ({
-    rust_build_cache: {
-      enabled: told()?.rust_build_cache.enabled ?? true,
-      size: told()?.rust_build_cache.size_configured
-        ? (told()?.rust_build_cache.size ?? "")
-        : "",
-    },
-    // And what becomes of an archived Conversation, likewise — see
-    // [`heldCleanup`].
-    cleanup: heldCleanup(told()),
-    // And how a conflicted pull request is resolved, likewise.
-    conflict_resolution: told()?.conflict_resolution ?? "Merge",
-    // And the binds the settings hold, again for that reason — a list this
-    // form left out would be a list it emptied. See [`heldPaths`].
-    ...heldPaths(told()),
-  });
+  /// Everything in `config.yaml` this pane is not about, as it stands — see
+  /// [`heldConfig`], which the wizard's git step sends the same way.
+  const held = () => heldConfig(told());
 
   /// Where the share-on-Done switch sits, which is off until somebody has been
   /// here.

@@ -26,6 +26,12 @@ import type { StepsView } from "../api/types";
 /// see ADR-0016 — and the only page there is while onboarding mode is on.
 export const SETUP = "/setup";
 
+/// And where the wizard lets go: the compose page, which is where a Verkstead
+/// with nothing in it yet has something to do. ADR-0016's own landing — stage
+/// 04 makes that page's zero state, and until it lands the compose page is the
+/// one that exists.
+export const COMPOSE = "/compose";
+
 /// The three steps, in the order they are worked through.
 ///
 /// Named for the fields of [`StepsView`], which is what says whether one is met:

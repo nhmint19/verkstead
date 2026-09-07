@@ -1,0 +1,14 @@
+{
+  "name": {
+    "value": "Ada Lovelace",
+    "source": "GitConfig"
+  },
+  "email": {
+    "value": "ada@example.com",
+    "source": "GitConfig"
+  },
+  "token": {
+    "value": "ghp_intheenvironment",
+    "source": "GhToken"
+  }
+}

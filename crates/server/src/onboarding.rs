@@ -47,6 +47,14 @@
 //! session's boundary is an identity rather than something to install, and the
 //! row is not applicable at all.
 //!
+//! **The git step's prefills are a read apart.** What `git config --global`
+//! says the machine commits as, and whatever GitHub token it is already
+//! holding, are asked for by the step that has those fields rather than
+//! carried on every reading — see [`Onboarding::prefill`]. Two processes and
+//! an environment read are not something to run every ten seconds while
+//! somebody waits for an install, and a token is not something to hand a page
+//! that is drawing a sidebar.
+//!
 //! **All of it follows [`crate::platform`]'s discipline**: the platform is a
 //! value rather than a `cfg`, and the machine is a set of values read at the
 //! edge and passed down — see [`Machine`]. That is what leaves every arm,
@@ -62,12 +70,14 @@ use anyhow::Result;
 use sqlx::SqlitePool;
 use tokio::sync::OnceCell;
 use verkstead_render::{
-    AccountView, Dependency, DependencyState, DependencyView, Distro, OnboardingView, StepsView,
+    AccountView, Dependency, DependencyState, DependencyView, Distro, OnboardingView, PrefillView,
+    Prefilled, Source, StepsView,
 };
 
+use crate::github::Gh;
 use crate::platform::{Environment, Platform};
 use crate::settings::Settings;
-use crate::{profiles, sandbox, sessions, store};
+use crate::{github, profiles, sandbox, sessions, store};
 
 /// Where a Linux machine says which distribution it is.
 ///
@@ -133,6 +143,13 @@ pub struct Machine {
     /// see [`crate::platform::home_dir`] — and `None` on a machine that names
     /// none, which is a machine with no account to be found.
     home: Option<PathBuf>,
+
+    /// And the two variables a GitHub token is prefilled out of, in the order
+    /// `gh` itself reads them: `GH_TOKEN` and then `GITHUB_TOKEN`. Read at the
+    /// edge with everything else here, so the arm that prefers one to the other
+    /// is a unit test rather than a process environment a suite has to mutate.
+    gh_token: Option<String>,
+    github_token: Option<String>,
 }
 
 impl Machine {
@@ -173,6 +190,8 @@ impl Machine {
             // a Windows machine was set by somebody's shell, and the account
             // the wizard is looking for is under the profile.
             home: crate::platform::home_dir(platform, env),
+            gh_token: env.gh_token.clone(),
+            github_token: env.github_token.clone(),
         }
     }
 
@@ -275,6 +294,94 @@ impl Machine {
             },
         }
     }
+
+    /// What this machine can offer the git step, for each field of it Verkstead
+    /// has not been told — see [`Wanted`].
+    ///
+    /// Blocks: a `git config` apiece for the two fields that are wanted, and at
+    /// most one `gh` for the third.
+    fn prefilled(&self, gh: &Gh, wanted: Wanted) -> PrefillView {
+        PrefillView {
+            name: self.configured(wanted.name, "user.name"),
+            email: self.configured(wanted.email, "user.email"),
+            token: wanted.token.then(|| self.token(gh)).flatten(),
+        }
+    }
+
+    /// What `git config --global` says `key` is, where it is wanted at all.
+    ///
+    /// The `git` a session would run, resolved the way every other row here is:
+    /// what the wizard is about is the machine a session stands on, and the
+    /// author it commits as comes off the same one.
+    ///
+    /// Nothing where there is no `git`, where it would not run, or where it
+    /// printed nothing — all of which are the same thing to a field: there is
+    /// nothing to offer, so it stays empty.
+    fn configured(&self, wanted: bool, key: &str) -> Option<Prefilled> {
+        if !wanted {
+            return None;
+        }
+
+        let git = self.found(GIT)?;
+        let run = Command::new(git)
+            .args(["config", "--global", "--get", key])
+            .stdin(Stdio::null())
+            .output()
+            .ok()?;
+
+        run.status
+            .success()
+            .then(|| words(&run.stdout))
+            .flatten()
+            .map(|value| prefilled(value, Source::GitConfig))
+    }
+
+    /// And a GitHub token this machine is already holding: the server's own
+    /// environment first, in the order `gh` itself reads the two variables, and
+    /// the host `gh`'s own login after them.
+    ///
+    /// The environment before the process, because reading a variable costs
+    /// nothing and running `gh` is a process — and because a token put in the
+    /// environment of the thing that is running is the more deliberate of the
+    /// two.
+    fn token(&self, gh: &Gh) -> Option<Prefilled> {
+        let said = |held: &Option<String>| {
+            held.as_deref()
+                .map(str::trim)
+                .filter(|token| !token.is_empty())
+                .map(str::to_owned)
+        };
+
+        if let Some(token) = said(&self.gh_token) {
+            return Some(prefilled(token, Source::GhToken));
+        }
+
+        if let Some(token) = said(&self.github_token) {
+            return Some(prefilled(token, Source::GithubToken));
+        }
+
+        github::host_token(gh).map(|token| prefilled(token, Source::HostGh))
+    }
+}
+
+/// Which of the git step's three fields there is anything to prefill.
+///
+/// **A field Verkstead has been told is not one to prefill**: what the human is
+/// looking at is then what is written down, and a value found on the machine
+/// drawn over it would be the wizard proposing to overwrite the settings with
+/// the environment. So this is read off the settings and the probes are made
+/// for what is left — which is also what keeps a configured token from being
+/// handed back to a browser that had no business being sent one.
+#[derive(Debug, Clone, Copy)]
+struct Wanted {
+    name: bool,
+    email: bool,
+    token: bool,
+}
+
+/// One field's prefill.
+fn prefilled(value: String, source: Source) -> Prefilled {
+    Prefilled { value, source }
 }
 
 /// What one look at the machine found: the rows, and the accounts beside them.
@@ -357,6 +464,38 @@ impl Onboarding {
             accounts: probed.accounts,
             steps,
         })
+    }
+
+    /// What this machine can offer the git step, for whatever Verkstead has
+    /// not been told.
+    ///
+    /// **Its own read rather than a part of [`Onboarding::read`]**, and the
+    /// reasoning is the cost of the probes and what one of them carries: the
+    /// reading above is made every ten seconds while a step is unmet and again
+    /// by the workbench's own gate at every start, and neither of those has any
+    /// business running `git config` twice and `gh` once — or handing a GitHub
+    /// token to a page that is drawing a sidebar. This is asked for by the step
+    /// that has the fields, while they stand empty.
+    pub(crate) async fn prefill(&self, settings: &Settings, gh: &Gh) -> Result<PrefillView> {
+        // What is wanted is decided here, off the settings, and the probes are
+        // made for that alone — see [`Wanted`].
+        let wanted = {
+            let config = settings.config();
+            let author = config.git_author();
+
+            Wanted {
+                name: author.name().is_none(),
+                email: author.email().is_none(),
+                token: settings.secrets().github_token().is_none(),
+            }
+        };
+
+        // Off the runtime, for the reason the probes above are: every one of
+        // these is a process.
+        let machine = self.machine.clone();
+        let gh = gh.clone();
+
+        Ok(tokio::task::spawn_blocking(move || machine.prefilled(&gh, wanted)).await?)
     }
 
     /// The wizard is over: the mode is off for the rest of this run.
@@ -651,6 +790,77 @@ mod tests {
             })
             .collect()
     }
+
+    /// A machine whose `PATH` and home are `dir`, holding whatever the two
+    /// token variables were set to.
+    fn holding(dir: &Path, gh_token: Option<&str>, github_token: Option<&str>) -> Machine {
+        Machine::stated(
+            Platform::Linux,
+            dir.as_os_str().to_owned(),
+            None,
+            None,
+            &Environment {
+                gh_token: gh_token.map(str::to_owned),
+                github_token: github_token.map(str::to_owned),
+                ..home(Platform::Linux, dir)
+            },
+        )
+    }
+
+    /// A `git` in `dir` answering `git config --global --get user.name` with
+    /// `name` and the email likewise, and saying nothing where nothing was
+    /// configured — which is what a machine nobody has set up does.
+    #[cfg(unix)]
+    fn a_git(dir: &Path, name: Option<&str>, email: Option<&str>) {
+        let said = |value: Option<&str>| match value {
+            Some(value) => format!("echo '{value}'"),
+            None => "exit 1".to_owned(),
+        };
+
+        program(
+            &dir.join(GIT),
+            &format!(
+                r#"#!/bin/sh
+test "$1 $2 $3" = 'config --global --get' || exit 2
+case "$4" in
+  user.name) {};;
+  user.email) {};;
+  *) exit 1;;
+esac
+"#,
+                said(name),
+                said(email),
+            ),
+        );
+    }
+
+    /// And a `gh` that is logged in as somebody, or is not.
+    #[cfg(unix)]
+    fn a_gh(dir: &Path, token: Option<&str>) -> Gh {
+        let path = dir.join(GH);
+
+        program(
+            &path,
+            &match token {
+                Some(token) => format!(
+                    r#"#!/bin/sh
+test "$*" = 'auth token' || exit 2
+echo {token}
+"#
+                ),
+                None => "#!/bin/sh\nexit 1\n".to_owned(),
+            },
+        );
+
+        Gh::running(vec![path.to_string_lossy().into_owned()])
+    }
+
+    /// Everything wanted, which is a Verkstead that has been told nothing.
+    const EVERYTHING: Wanted = Wanted {
+        name: true,
+        email: true,
+        token: true,
+    };
 
     /// A file at `path`, executable where this platform has such a thing.
     fn program(path: &Path, contents: &str) {
@@ -1107,6 +1317,136 @@ mod tests {
         ];
 
         assert!(dependencies_met(&rows));
+    }
+
+    /// The two fields git asks for come off the machine's own global config,
+    /// labelled with where they were found.
+    #[cfg(unix)]
+    #[test]
+    fn the_author_is_prefilled_from_the_machines_global_git_config() {
+        let dir = tempfile::tempdir().unwrap();
+        a_git(dir.path(), Some("Ada Lovelace"), Some("ada@example.com"));
+        let gh = a_gh(dir.path(), None);
+
+        let prefill = holding(dir.path(), None, None).prefilled(&gh, EVERYTHING);
+
+        assert_eq!(
+            prefill.name,
+            Some(prefilled("Ada Lovelace".to_owned(), Source::GitConfig)),
+        );
+        assert_eq!(
+            prefill.email,
+            Some(prefilled("ada@example.com".to_owned(), Source::GitConfig)),
+        );
+    }
+
+    /// And a machine whose git config says nothing leaves them empty, which is
+    /// a field to type in rather than a wrong one to correct.
+    #[cfg(unix)]
+    #[test]
+    fn a_machine_that_names_no_author_prefills_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        a_git(dir.path(), None, None);
+        let gh = a_gh(dir.path(), None);
+
+        let prefill = holding(dir.path(), None, None).prefilled(&gh, EVERYTHING);
+
+        assert_eq!(prefill.name, None);
+        assert_eq!(prefill.email, None);
+        assert_eq!(prefill.token, None, "and no `gh` logged in is no token");
+    }
+
+    /// A machine with no `git` at all is the same nothing: the step above the
+    /// git one is where that is put right, and this one has nothing to offer
+    /// until it is.
+    #[cfg(unix)]
+    #[test]
+    fn a_machine_with_no_git_prefills_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let gh = a_gh(dir.path(), None);
+
+        let prefill = holding(dir.path(), None, None).prefilled(&gh, EVERYTHING);
+
+        assert_eq!(prefill.name, None);
+        assert_eq!(prefill.email, None);
+    }
+
+    /// The token comes out of the server's own environment first, in the order
+    /// `gh` itself reads the two variables — and which of them held it is what
+    /// the field is labelled with.
+    #[cfg(unix)]
+    #[test]
+    fn the_token_is_prefilled_from_gh_token_before_github_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let gh = a_gh(dir.path(), Some("ghp_thehostslogin"));
+
+        assert_eq!(
+            holding(dir.path(), Some("ghp_first"), Some("ghp_second"))
+                .prefilled(&gh, EVERYTHING)
+                .token,
+            Some(prefilled("ghp_first".to_owned(), Source::GhToken)),
+        );
+
+        assert_eq!(
+            holding(dir.path(), None, Some("ghp_second"))
+                .prefilled(&gh, EVERYTHING)
+                .token,
+            Some(prefilled("ghp_second".to_owned(), Source::GithubToken)),
+            "and the second variable where the first said nothing",
+        );
+
+        assert_eq!(
+            holding(dir.path(), Some("   "), Some("ghp_second"))
+                .prefilled(&gh, EVERYTHING)
+                .token,
+            Some(prefilled("ghp_second".to_owned(), Source::GithubToken)),
+            "a variable set to nothing but spaces holds no token",
+        );
+    }
+
+    /// And the host's own `gh` where the environment holds neither, which is
+    /// the one of the three that is a process.
+    #[cfg(unix)]
+    #[test]
+    fn the_token_falls_back_to_the_login_the_host_gh_is_holding() {
+        let dir = tempfile::tempdir().unwrap();
+        let gh = a_gh(dir.path(), Some("ghp_thehostslogin"));
+
+        assert_eq!(
+            holding(dir.path(), None, None)
+                .prefilled(&gh, EVERYTHING)
+                .token,
+            Some(prefilled("ghp_thehostslogin".to_owned(), Source::HostGh)),
+        );
+    }
+
+    /// A field Verkstead has already been told is not prefilled at all, and the
+    /// probe behind it is not made: what the human is looking at is what is
+    /// written down, and a token already configured is one this endpoint has no
+    /// business handing back to a browser.
+    #[cfg(unix)]
+    #[test]
+    fn a_field_that_is_already_configured_is_not_prefilled() {
+        let dir = tempfile::tempdir().unwrap();
+        a_git(dir.path(), Some("Ada Lovelace"), Some("ada@example.com"));
+        let gh = a_gh(dir.path(), Some("ghp_thehostslogin"));
+
+        let prefill = holding(dir.path(), Some("ghp_first"), None).prefilled(
+            &gh,
+            Wanted {
+                name: false,
+                email: true,
+                token: false,
+            },
+        );
+
+        assert_eq!(prefill.name, None, "the name is Verkstead's own already");
+        assert_eq!(prefill.token, None, "and so is the token");
+        assert_eq!(
+            prefill.email,
+            Some(prefilled("ada@example.com".to_owned(), Source::GitConfig)),
+            "and the one field that is still missing is the one that is offered",
+        );
     }
 
     /// The verdict is reached once and stands: a second reading of steps that

@@ -2095,6 +2095,49 @@ export type PinnedEvent = { "AgentOutput": AgentOutputEvent } | { "TaskList": Ta
 export type Platform = "Linux" | "MacOs" | "Windows";
 
 /**
+ * What this machine can offer the git step, for each field Verkstead has not
+ * been told yet.
+ *
+ * **Its own read, beside [`OnboardingView`] rather than in it.** The reading
+ * above is probed every ten seconds while a step is unmet and again by the
+ * workbench's own gate on every start, and neither of those has any business
+ * running `git config` — or handing a GitHub token to a page that is drawing
+ * a sidebar. This is asked for once, by the step that has the fields, and
+ * only while they are still empty.
+ *
+ * **Found rather than configured, and only where nothing is configured.** A
+ * value Verkstead already holds is what the field shows, so it is not
+ * prefilled over: what is here is what the machine could tell a Verkstead
+ * that has been told nothing. A field nothing answered for is absent, which
+ * is a field that stays empty until somebody types in it.
+ */
+export type PrefillView = { 
+/**
+ * Who the machine's own git commits are by.
+ */
+name: Prefilled | null, 
+/**
+ * And what address they carry.
+ */
+email: Prefilled | null, 
+/**
+ * And a GitHub token this machine is already holding somewhere — which is
+ * the one optional field of the three, GitHub being a choice.
+ */
+token: Prefilled | null, };
+
+/**
+ * One field's prefill: what was found, and where.
+ *
+ * The source travels with the value because the human is being asked to
+ * confirm something they did not type: a name off a `git config` and a token
+ * out of an environment variable are two different things to be sure about,
+ * and a field that only showed the value would be asking them to trust it
+ * blind.
+ */
+export type Prefilled = { value: string, source: Source, };
+
+/**
  * The account a Profile names, in the shape the agent type running it keeps
  * one.
  *
@@ -3400,6 +3443,15 @@ export type Shown = { "Painted": Screen } | { "Printed": string };
  * the latest one is the size the Screen and the session's own terminal are.
  */
 export type Size = { columns: number, rows: number, };
+
+/**
+ * And where a prefill came from.
+ *
+ * Four values rather than a variable name carried as a string: the wording
+ * around each of them is the viewer's, the way the install commands are, and
+ * which environment variable answered is part of what there is to say.
+ */
+export type Source = "GitConfig" | "GhToken" | "GithubToken" | "HostGh";
 
 /**
  * One stage's brief as the pane draws it: the entry it belongs to, and the
