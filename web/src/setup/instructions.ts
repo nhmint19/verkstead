@@ -256,8 +256,10 @@ export const GUIDES: Record<Distro, Guide> = {
     rows: {
       Sandbox: nixos(
         "bubblewrap",
-        "With Verkstead's own NixOS module, bwrap is on the service's PATH " +
-          "already and there is nothing to add.",
+        "Verkstead's own NixOS module adds this line for you, so a module " +
+          "install has nothing to do here. It is wanted in " +
+          "environment.systemPackages even so, and not only on the service's " +
+          "own PATH: what a session looks along is the machine's profile.",
       ),
       Git: nixos("git"),
       Claude: caveat(nixos("claude-code"), CLAUDE_ELSEWHERE),

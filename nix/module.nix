@@ -263,7 +263,20 @@ in
     # ask` is there for an agent working outside Verkstead. A session inside a
     # Sandbox asks with the running server's own image instead, bound in ahead of
     # this one, so the two halves of an ask are always the same build.
-    environment.systemPackages = [ cfg.package ];
+    #
+    # And bubblewrap beside it, which is here as well as on the unit's `path`
+    # below. The two are different questions: the unit's `path` is what the
+    # server can *run*, and the system profile is what the onboarding wizard can
+    # *see* — it resolves every dependency row on the `PATH` a Sandbox gets
+    # (`LINUX_PATH` in `crates/server/src/sandbox.rs`), which starts at
+    # `/run/current-system/sw/bin` and never names a unit's own. A module
+    # install with bwrap on the unit alone was a wizard reporting no sandbox on
+    # a machine whose sessions sandboxed perfectly, and holding its first step
+    # there for good.
+    environment.systemPackages = [
+      cfg.package
+      pkgs.bubblewrap
+    ];
 
     # The operator grant, made by the host rather than asked for on the page.
     #
@@ -304,7 +317,9 @@ in
       # sandbox, and it is here rather than in the package's own wrapper because
       # it is the server that spawns one — the CLI half of the same binary has
       # no use for it, and there are systems the package builds for that have no
-      # bwrap to offer.
+      # bwrap to offer. It is in `environment.systemPackages` as well, and for a
+      # different reason: what the wizard's sandbox row looks at is the `PATH` a
+      # Sandbox gets rather than this one — see that list above.
       #
       # `gh` is how Verkstead reaches GitHub itself: the pull request a finish
       # step opened, and what is on it. It runs as whoever the service's home is
