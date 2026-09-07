@@ -56,8 +56,8 @@ mod waits;
 mod wrap_up;
 
 pub use archives::{
-    Archiving, Unarchiving, archive_conversation, archived, show_archived, showing_archived,
-    unarchive_conversation,
+    Archiving, Unarchiving, any_archived, archive_conversation, archived, show_archived,
+    showing_archived, unarchive_conversation,
 };
 pub use attachments::{Attachment, Origin, attach, attachment, attachments, detach};
 pub use banners::{dismiss_remote_banner, remote_banner_dismissed};

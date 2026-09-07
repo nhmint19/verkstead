@@ -48,9 +48,15 @@
 //! And at the foot of the pane, under the list rather than over it, the one
 //! setting that is about these conversations rather than about anything else:
 //! whether the ones put away are drawn among them.
+//!
+//! Neither the head nor that foot is written here. Both are drawn on the compose
+//! page as well while there is nothing to list — the pane is not drawn at all
+//! then, and what stands in its place is entered the same way and offers the
+//! same switch — so they are `Wordmark.tsx` and `Archived.tsx`, and this pane
+//! puts them where they go. See `zero.ts` for what decides that this pane is
+//! drawn at all.
 
-import { faGear } from "@fortawesome/free-solid-svg-icons";
-import { A, useLocation, useNavigate } from "@solidjs/router";
+import { A } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import {
   For,
@@ -64,22 +70,19 @@ import {
 } from "solid-js";
 
 import { CardButton } from "../CardButton";
-import { IconButton } from "../IconButton";
 import { PaneSticky } from "../Panes";
-import { Switch as Toggle } from "../Switch";
 import { Truncated } from "../Truncated";
 import {
   listConversations,
   placeConversations,
-  showArchived,
   showingArchived,
 } from "../api/client";
 import type { ConversationEntry } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { CardActions } from "./Actions";
+import { ShowArchived } from "./Archived";
 import { caughtUp, pressedRows } from "./eager";
-import shell from "../Panes.module.css";
 import styles from "./Conversations.module.css";
 import { SPOKEN } from "./Mark";
 // The rings and the badge a card carries at its right edge. Drawn here rather
@@ -88,10 +91,10 @@ import { SPOKEN } from "./Mark";
 // so a ring means the same thing in the list that it means on the row it
 // opens.
 import marks from "./Mark.module.css";
-import { PaneHead } from "./PaneHead";
 import { WAITING_ON_CHECKS } from "./conditions";
 import { titled } from "./naming";
 import { STATE } from "./states";
+import { Wordmark } from "./Wordmark";
 
 export function Conversations(props: {
   selected: string;
@@ -147,7 +150,10 @@ export function Conversations(props: {
   // order and goes to the top, which is where an unplaced one goes on the
   // server too.
   const shown = (): ConversationEntry[] => {
-    const rows = pressedRows(conversations.data ?? [], archived.data ?? false);
+    const rows = pressedRows(
+      conversations.data ?? [],
+      archived.data?.showing ?? false,
+    );
     const order = dragged();
     if (!order) return rows;
 
@@ -459,28 +465,11 @@ export function Conversations(props: {
   return (
     <>
       {/* The mark rather than a title: this pane is where Verkstead is entered
-          and the list under it says what it is a list of. The icon is served
-          from `assets/`, which vite copies to the site root untouched, and it is
-          the same artwork the favicon is, at the size this draws it.
-
-          No alt text on it, because the word it stands beside is the alt text: a
-          screen reader that read both would say the name twice.
-
-          The wordmark is the class the pane head is handed for its `<h1>`, and
-          it is styled with the rest of what this pane draws — no way back
-          either, this being the level every other pane is entered from. */}
+          and the list under it says what it is a list of. Drawn by `Wordmark`
+          rather than here, because the compose page standing without this pane
+          is entered at the same head — see `zero.ts`. */}
       <PaneSticky>
-        <PaneHead
-          heading={styles.wordmark}
-          title={
-            <>
-              <img src="/icons/icon-192.png" alt="" />
-              Verkstead
-            </>
-          }
-        >
-          <Settings />
-        </PaneHead>
+        <Wordmark />
       </PaneSticky>
 
       {/* The one way work gets into the pipeline from here, and the whole of
@@ -546,110 +535,6 @@ export function Conversations(props: {
           enough to scroll. */}
       <ShowArchived />
     </>
-  );
-}
-
-/// The way to the rest of Verkstead, which is one page: the Repos and the Agent
-/// Profiles a Conversation is settled against, and what Verkstead itself has
-/// been told. What is waiting on the human is not there — a Question Set is
-/// reached through the Conversation it was asked from, which is the list this
-/// sits over.
-///
-/// At the head of the pane, where the ⋯ that held it was and where a link at
-/// the foot of the list was before that. That foot is under the conversations,
-/// and the conversations are the one part of the pane with no end: a long
-/// enough list and the way out to the settings was somewhere the human had to
-/// scroll to find.
-///
-/// An [`IconButton`](../IconButton.tsx) rather than a menu of one row, because
-/// a menu of one row is a press with a press in front of it — and because this
-/// is the same kind of thing the cards below it are: something in this pane
-/// that is selected and opened into the pane beside it. So it is drawn as open
-/// while the settings are what is being read, which is what the open card in
-/// the list says about itself, in the same fill.
-///
-/// A gear, which is what a settings icon is everywhere, and the label is the
-/// whole of what a screen reader gets: the shape says nothing when it is read
-/// aloud.
-function Settings(): JSX.Element {
-  const navigate = useNavigate();
-  const where = useLocation();
-
-  /// Open while the settings are what the human is looking at, whichever of
-  /// their panes they are in: everything the settings open into is a path
-  /// under this one.
-  const open = (): boolean =>
-    where.pathname === "/settings" || where.pathname.startsWith("/settings/");
-
-  return (
-    <IconButton
-      of={faGear}
-      label="Settings"
-      open={open()}
-      press={() => navigate("/settings")}
-    />
-  );
-}
-
-/// The one setting that is about this list rather than about the rest of
-/// Verkstead: whether the conversations the human has archived are drawn in it.
-///
-/// At the foot of the pane, under the list it is about, and kept there: it
-/// wears the frame's `paneFoot`, so a list too short to scroll leaves it
-/// against the bottom of the pane and a long one keeps it there with the cards
-/// going under it. What it costs is the strip of list behind it; what it saves
-/// is having to reach the end of a list with no end in sight to say whether the
-/// conversations put away are among them.
-///
-/// A switch rather than something that presses, because it is a state the list
-/// is in rather than something to do to it. *Show archived* rather than the
-/// whole sentence it could be: it stands under the list of conversations, so
-/// what else it could be showing does not have to be said.
-function ShowArchived(): JSX.Element {
-  const queries = useQueryClient();
-
-  /// The server's answer rather than this device's: the choice is the human's,
-  /// so a phone opened afterwards is looking at the same list.
-  const showing = useReading(() => ({
-    queryKey: ["conversations", "archived"],
-    queryFn: showingArchived,
-
-    // One boolean, so there is nothing in it to hold on to and nothing to
-    // match up: what a re-read lands on is the whole payload either way.
-    freshness: { reconcile: "id" } as const,
-  }));
-
-  const flip = useMutation(() => ({
-    mutationFn: (on: boolean) => showArchived(on),
-    onSuccess: () => {
-      // The list itself and the switch under it: what is drawn changes with the
-      // setting, which is the entire point of it. The other devices hear the
-      // same news as a Nudge.
-      void queries.invalidateQueries({ queryKey: ["conversations"] });
-    },
-  }));
-
-  /// Where the switch stands: the position asked for while that is in flight,
-  /// and the server's the rest of the time. A switch that snapped back to the
-  /// old position for the length of a round trip would read as a press that
-  /// failed.
-  const on = (): boolean =>
-    flip.isPending ? (flip.variables ?? false) : (showing.data ?? false);
-
-  return (
-    <div class={`${styles.showArchived} ${shell.paneFoot}`}>
-      <Toggle
-        label="Show archived"
-        on={on()}
-        disabled={showing.isPending || flip.isPending}
-        flip={(wanted) => flip.mutate(wanted)}
-      />
-      <Show when={flip.isError}>
-        <ErrorLine>
-          The setting could not be saved: {flip.error?.message}
-        </ErrorLine>
-      </Show>
-    </div>
   );
 }
 

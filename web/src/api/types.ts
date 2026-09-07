@@ -3410,19 +3410,49 @@ commits: Array<SharedCommit>,
 exported_at: string, };
 
 /**
- * Whether the sidebar is drawing what the human has archived.
+ * And putting that switch where the human has just put it.
+ *
+ * The position rather than a flip, so what is sent is what they are looking
+ * at — a switch says where it stands, and saying it twice says the same thing.
+ *
+ * Its own type rather than [`ShowingArchived`] said in the other direction:
+ * what comes back carries whether there is anything archived as well, and that
+ * is the server's fact about the record rather than anything a device could be
+ * telling it.
+ */
+export type ShowArchived = { 
+/**
+ * Where the switch has been put.
+ */
+showing: boolean, };
+
+/**
+ * Whether the sidebar is drawing what the human has archived, and whether
+ * there is anything of theirs to draw.
  *
  * Their standing choice rather than this device's: it is read back off the
- * server on every load, and what is sent when the toggle is flipped is the
- * position it has been put in rather than the flip itself — a switch says
- * where it stands, and saying it twice says the same thing.
+ * server on every load. What is *sent* when the switch is flipped is
+ * [`ShowArchived`] rather than this — a position, and nothing about what is
+ * behind it, that half being the server's own fact.
+ *
+ * Two answers in one payload because the page has one question. The sidebar's
+ * list is filtered by the switch in SQL, so an empty list says nothing about
+ * which of the two empties it is — nothing archived, or everything archived
+ * and hidden — and that is precisely what decides whether a page with no
+ * sidebar draws the switch at all.
  */
 export type ShowingArchived = { 
 /**
  * On: the archived Conversations are on the list, in their ordinary
  * places. Off: they are not drawn at all.
  */
-showing: boolean, };
+showing: boolean, 
+/**
+ * And whether there is anything archived at all, whichever position the
+ * switch is in. False is a switch with nothing behind it, which is a
+ * switch not worth drawing.
+ */
+any: boolean, };
 
 /**
  * What the server says down a live Screen's socket.

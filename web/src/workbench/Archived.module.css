@@ -1,0 +1,32 @@
+/* The one setting that is about the list of Conversations rather than about the
+   rest of Verkstead. See `Archived.tsx`.
+
+   The switch itself is `Switch.module.css`'s and paints itself; what is here is
+   the rule over its head and the line its label keeps to.
+
+   Where it sits and how it stays there are the frame's: it wears `paneFoot` —
+   see `Archived.tsx` for the name and `Panes.module.css` for what a pane does
+   with it — so it takes the room the pane's contents leave over, sticks to the
+   bottom edge once there is none left, and carries the paper they pass behind.
+
+   Stuck rather than left at the end of the list, because the list is the one
+   thing above it with no end in sight: a human with a hundred conversations
+   should not have to reach the bottom of them to say whether the ones put away
+   are among them. What it costs is the strip of list behind it.
+
+   What is left here is the rule over its head, because a control at the end of
+   a list is not the next row of it — the same rule, from the same edge, that
+   parts the roadmaps from the repos above them. The room under that rule is the
+   foot's own padding. */
+.showArchived {
+  border-top: 1px solid var(--edge);
+}
+
+/* Two words and a switch, on one line however narrow the pane is dragged: a
+   label that wrapped would put the switch on a line of its own with nothing to
+   say what it was for. The switch is `Switch.module.css`'s and its label is the
+   span it holds, which is what this reaches — the failure under it is a
+   paragraph of its own and still wraps. */
+.showArchived label > span {
+  white-space: nowrap;
+}

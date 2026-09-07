@@ -631,6 +631,25 @@
   }
 }
 
+/* And one pane rather than two: the frame the compose page is drawn in while
+   there is nothing to list — no conversations pane, and no record to read
+   beside a Conversation that does not exist yet. `Panes.tsx` puts this name on
+   the frame when it is handed neither, and the details pane is then the only
+   one in the document.
+
+   So it takes the window, at every width: the columns above are named for panes
+   that are not there, and the first of them would have stood this one a fifth of
+   the way in from the left with nothing to its left at all. No width of its own
+   and nothing to remember, there being no border in this frame to drag — which
+   is also why nothing here has to say which pane shows. The rules that do that
+   are `data-pane`'s, and the page stands this frame at the details.
+
+   Two classes deep for the reason `.two` and `.widened` are: that is what it
+   takes to outrank the columns set on `.panes` inside a media query. */
+.panes.alone {
+  grid-template-columns: 1fr;
+}
+
 /* And the composer itself, which is what the pane above centres: the room the
    pane has left over is taken above it and below it in equal halves.
 

@@ -136,6 +136,8 @@ import commitPaneCss from "../src/workbench/Commit.module.css?raw";
 import diffSection from "../src/set/Diff.module.css";
 // The sidebar, both ways: the hashed names its rows are queried by, and the
 // source of the rules that say what a card's state looks like.
+import archived from "../src/workbench/Archived.module.css";
+import archivedCss from "../src/workbench/Archived.module.css?raw";
 import sidebar from "../src/workbench/Conversations.module.css";
 import sidebarCss from "../src/workbench/Conversations.module.css?raw";
 import documentPane from "../src/workbench/Document.module.css";
@@ -595,13 +597,18 @@ describe("the workbench", () => {
     expect(row.textContent).not.toContain(DRAFTING.state);
   });
 
+  /// Which the pane says wherever it is still standing beside an empty list —
+  /// a Conversation opened by its own URL after the last of them was archived
+  /// elsewhere, which is the one page that draws this pane over nothing. The
+  /// bare workbench is not: an empty list is the zero state, and there is no
+  /// sidebar there at all.
   it("says so plainly when nothing is being worked on", async () => {
     serving(
       whenever("/api/ui/conversations", json([])),
       whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
       whenever("/api/ui/repos", json(REPOS)),
     );
-    mount();
+    mountSidebar("/");
 
     await waitFor(() => screen.getByText("Nothing is being worked on yet."));
   });
@@ -659,9 +666,9 @@ describe("the workbench", () => {
   /// showing does not have to be said — and a label that wrapped would leave the
   /// switch on a line of its own with nothing beside it to say what it was for.
   it("keeps the archived switch on one line", () => {
-    const at = sidebarCss.indexOf("\n.showArchived label > span {");
+    const at = archivedCss.indexOf("\n.showArchived label > span {");
     expect(at, "expected the sheet to hold the switch's own label rule").toBeGreaterThan(-1);
-    expect(sidebarCss.slice(at, sidebarCss.indexOf("\n}", at))).toContain(
+    expect(archivedCss.slice(at, archivedCss.indexOf("\n}", at))).toContain(
       "white-space: nowrap;",
     );
   });
@@ -676,7 +683,7 @@ describe("the workbench", () => {
     theWorkbench(
       whenever(
         "/api/ui/conversations/archived",
-        json({ showing: true } satisfies ShowingArchived),
+        json({ showing: true, any: true } satisfies ShowingArchived),
       ),
     );
     mount();
@@ -759,7 +766,7 @@ describe("the workbench", () => {
     const pane = container.querySelector(`.${shell.conversationsPane}`)!;
     const foot = pane.lastElementChild!;
 
-    expect(foot.classList.contains(sidebar.showArchived!)).toBe(true);
+    expect(foot.classList.contains(archived.showArchived!)).toBe(true);
     expect(foot.classList.contains(shell.paneFoot!)).toBe(true);
 
     const stuck = shellCss.indexOf("\n.pane > .paneFoot {");
@@ -2091,7 +2098,7 @@ describe("a press that takes the open conversation off the list", () => {
     const fetching = theOpenGrilling(
       whenever(
         "/api/ui/conversations/archived",
-        json({ showing: true } satisfies ShowingArchived),
+        json({ showing: true, any: true } satisfies ShowingArchived),
       ),
     );
     const { container, history } = mount(`/conversations/${GRILLING.id}`);

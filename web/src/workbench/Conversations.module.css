@@ -1,9 +1,9 @@
-/* The conversations sidebar: the wordmark over it, the one way to add to the
-   list, the rows themselves, and the one setting at the foot of them. See
-   `Conversations.tsx`.
+/* The conversations sidebar: the one way to add to the list, and the rows
+   themselves. See `Conversations.tsx`.
 
-   The gear at the head of the pane is an `IconButton` and paints itself — see
-   `IconButton.module.css` — so nothing of it is here. What this pane still
+   The head over them and the switch under them are drawn by components of their
+   own — `Wordmark.module.css` and `Archived.module.css` — because the compose
+   page standing without this pane draws both of them too. What this pane still
    paints of somebody else's component is the New conversation menu, and only
    its paint rather than its chrome: how a menu hangs and how it is dismissed is
    `Menu.module.css`. Its trigger and its drop are that component's own
@@ -14,68 +14,6 @@
    The mark a waiting card carries is `Mark.module.css`, drawn out of that module
    so that a ring means the same thing in this list that it means on the row the
    list opens. */
-
-/* The sidebar leads with the mark rather than with a title of its own: this pane
-   is the whole of what Verkstead is entered by, so what belongs over the list is
-   the thing the list is part of, and *Conversations* only named what was under
-   it a second time. The icon and the word together rather than either alone —
-   the icon by itself is a shape nobody has been taught yet, and the word by
-   itself is what every other pane's title already looks like.
-
-   Larger than a pane's title, and still an `<h1>`, so the pane keeps a heading
-   at the top of it for a screen reader to find. It is the class the sidebar
-   hands the pane head for its heading — see the `heading` prop in
-   `PaneHead.tsx`, which is how the app's own header is a variant of the one
-   header component rather than a second component beside it. Everything sized
-   here is sized on this class alone, so no other pane's title moves with it. */
-.wordmark {
-  display: flex;
-  align-items: center;
-  gap: 0.8rem;
-  /* Over the 1.4rem `base.css` gives every `<h1>`: this one names the app
-     rather than the pane, and it is read before any of them. */
-  font-size: 1.4rem;
-}
-
-/* The mark at the height of the header rather than of the word beside it, so
-   what the eye lands on first is the thing rather than the name of it. */
-.wordmark img {
-  --size: 2rem;
-  width: var(--size);
-  height: var(--size);
-  margin-left: 0.2rem;
-}
-
-/* The one setting that is about this list rather than about the rest of
-   Verkstead, at the foot of the pane under the conversations it is about.
-
-   Where it sits and how it stays there are the frame's: it wears `paneFoot` —
-   see `Conversations.tsx` for the name and `Panes.module.css` for what a pane
-   does with it — so it takes the room the list leaves over, sticks to the
-   bottom edge once there is no room left, and carries the paper the cards pass
-   behind.
-
-   Stuck rather than left at the end of the list, because the list is the one
-   thing here with no end in sight: a human with a hundred conversations should
-   not have to reach the bottom of them to say whether the ones put away are
-   among them. What it costs is the strip of list behind it.
-
-   What is left here is the rule over its head, because a control at the end of
-   a list is not the next row of it — the same rule, from the same edge, that
-   parts the roadmaps from the repos above them. The room under that rule is the
-   foot's own padding. */
-.showArchived {
-  border-top: 1px solid var(--edge);
-}
-
-/* Two words and a switch, on one line however narrow the pane is dragged: a
-   label that wrapped would put the switch on a line of its own with nothing to
-   say what it was for. The switch is `Switch.module.css`'s and its label is the
-   span it holds, which is what this reaches — the failure under it is a
-   paragraph of its own and still wraps. */
-.showArchived label > span {
-  white-space: nowrap;
-}
 
 /* The way on to the compose page, and the pane's one action: where a
    Conversation is written before it exists, roadmaps to adopt included. A link,

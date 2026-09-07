@@ -110,7 +110,7 @@ const SAVED = saved as SettingsSaved;
 
 /// The sidebar's one setting, off — which is where a workbench nobody has
 /// archived anything in stands.
-const HIDING_ARCHIVED: ShowingArchived = { showing: false };
+const HIDING_ARCHIVED: ShowingArchived = { showing: false, any: false };
 
 afterEach(() => {
   vi.unstubAllGlobals();

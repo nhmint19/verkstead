@@ -17,6 +17,13 @@
 //! Back out of the Conversation, there being no level in between. A second
 //! Event of any kind puts the Timeline back at the width this device left it.
 //!
+//! And none of them, where the sidebar's list is empty. The bare workbench is a
+//! sidebar and the paper beside it, so a list with nothing on it leaves this
+//! page nothing to be: it goes to the compose page instead, which is where a
+//! Verkstead with nothing to list is entered. Decided off the list itself rather
+//! than in the route table — see `zero.ts` — and only where the URL names no
+//! Conversation: one reached by its own link is drawn whatever the list says.
+//!
 //! Which level it is follows the URL: naming a Conversation walks the page into
 //! it, and walking back out to the list takes the name off again. One account of
 //! where the page stands rather than two — left selected behind the list, the
@@ -66,7 +73,7 @@
 //! builds those panes again rather than reading the second Conversation into the
 //! first one's page.
 
-import { useLocation, useNavigate, useParams } from "@solidjs/router";
+import { Navigate, useLocation, useNavigate, useParams } from "@solidjs/router";
 import {
   Match,
   Show,
@@ -117,6 +124,7 @@ import {
   roadmapOpened,
   type Opening,
 } from "./openings";
+import { useZero } from "./zero";
 
 /// The read the two panes share, as each of them is handed it: one query behind
 /// both, because they are two views of the one Conversation.
@@ -238,6 +246,26 @@ export function Workbench(): JSX.Element {
   /// either: a path names the Conversation and the detail together, so a new
   /// Conversation's path names no detail of the old one's.
   const event = createMemo(() => openingAt(where.pathname));
+
+  /// Whether there is anything to list, which is where the zero state is
+  /// decided: the sidebar's own query, read here as well — see `zero.ts`.
+  const zero = useZero();
+
+  /// And whether this page has anything left to be. The bare workbench is a
+  /// sidebar and the paper beside it, so a sidebar with nothing on it is a page
+  /// with nothing on it at all: what stands in its place is the compose page,
+  /// which is where a Verkstead with nothing to list is entered.
+  ///
+  /// Only where no Conversation is named. One reached by its own URL is drawn
+  /// whatever the list says — an archived Conversation opened from a link is
+  /// exactly that, and the list it is missing from is the list it was archived
+  /// off. The sidebar beside it says there is nothing to list, which is true.
+  ///
+  /// Which is also what makes this the moment the *other* device moves: the list
+  /// is re-read on every Nudge, so archiving the last Conversation anywhere
+  /// leaves this page with an empty list and takes it to the compose page on the
+  /// spot.
+  const nothing = () => selected() === "" && zero().holds;
 
   /// The Conversation whose Timeline is advancing itself, or `null` where none
   /// is — see [`advancing`].
@@ -508,42 +536,44 @@ export function Workbench(): JSX.Element {
   });
 
   return (
-    <Panes
-      pane={showing()}
-      middleLabel="Timeline"
-      conversations={
-        <Conversations
-          selected={selected()}
-          open={(id) => navigate(pathOf(id))}
-        />
-      }
-      middle={
-        // Nothing at all where the record is the one Event: the frame draws no
-        // middle pane when it is handed none, and the details pane takes the
-        // column it would have stood in. See [`alone`].
-        alone() ? undefined : (
+    <Show when={!nothing()} fallback={<Navigate href="/compose" />}>
+      <Panes
+        pane={showing()}
+        middleLabel="Timeline"
+        conversations={
+          <Conversations
+            selected={selected()}
+            open={(id) => navigate(pathOf(id))}
+          />
+        }
+        middle={
+          // Nothing at all where the record is the one Event: the frame draws no
+          // middle pane when it is handed none, and the details pane takes the
+          // column it would have stood in. See [`alone`].
+          alone() ? undefined : (
+            <Show when={open()} keyed>
+              <TimelinePane
+                id={selected()}
+                conversation={conversation}
+                event={event()}
+                select={select}
+                pane={setPane}
+                list={() => navigate("/")}
+              />
+            </Show>
+          )
+        }
+        details={
           <Show when={open()} keyed>
-            <TimelinePane
-              id={selected()}
+            <DetailsPane
               conversation={conversation}
               event={event()}
-              select={select}
-              pane={setPane}
-              list={() => navigate("/")}
+              back={leaving()}
             />
           </Show>
-        )
-      }
-      details={
-        <Show when={open()} keyed>
-          <DetailsPane
-            conversation={conversation}
-            event={event()}
-            back={leaving()}
-          />
-        </Show>
-      }
-    />
+        }
+      />
+    </Show>
   );
 }
 

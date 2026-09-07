@@ -1,0 +1,35 @@
+/* The head of whatever page Verkstead is entered at. See `Wordmark.tsx`.
+
+   The gear beside it is an `IconButton` and paints itself — see
+   `IconButton.module.css` — so nothing of it is here.
+
+   The page leads with the mark rather than with a title of its own: this is the
+   whole of what Verkstead is entered by, so what belongs at the top is the thing
+   the page is part of, and *Conversations* only named what was under it a second
+   time. The icon and the word together rather than either alone — the icon by
+   itself is a shape nobody has been taught yet, and the word by itself is what
+   every other pane's title already looks like.
+
+   Larger than a pane's title, and still an `<h1>`, so the pane keeps a heading
+   at the top of it for a screen reader to find. It is the class the pane head is
+   handed for its heading — see the `heading` prop in `PaneHead.tsx`, which is how
+   the app's own header is a variant of the one header component rather than a
+   second component beside it. Everything sized here is sized on this class
+   alone, so no other pane's title moves with it. */
+.wordmark {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  /* Over the 1.4rem `base.css` gives every `<h1>`: this one names the app
+     rather than the pane, and it is read before any of them. */
+  font-size: 1.4rem;
+}
+
+/* The mark at the height of the header rather than of the word beside it, so
+   what the eye lands on first is the thing rather than the name of it. */
+.wordmark img {
+  --size: 2rem;
+  width: var(--size);
+  height: var(--size);
+  margin-left: 0.2rem;
+}

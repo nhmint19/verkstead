@@ -292,13 +292,19 @@ export async function placeConversations(order: number[]): Promise<void> {
   await refused(await sent("/api/ui/conversations/order", { order }));
 }
 
-/// Whether the sidebar is drawing what has been archived.
+/// Whether the sidebar is drawing what has been archived, and whether there is
+/// anything archived for it to draw.
 ///
 /// The server's answer rather than this device's, because the choice is the
 /// human's rather than the browser's: a toggle kept here would be one they had
 /// to find again on their phone.
-export async function showingArchived(): Promise<boolean> {
-  return (await get<ShowingArchived>("/api/ui/conversations/archived")).showing;
+///
+/// Both halves rather than the position alone: the list is filtered by the
+/// switch on the server, so a page looking at an empty one cannot tell nothing
+/// archived from everything archived and hidden. See `workbench/zero.ts`, which
+/// is what wants the difference.
+export function showingArchived(): Promise<ShowingArchived> {
+  return get<ShowingArchived>("/api/ui/conversations/archived");
 }
 
 /// And put that switch where they have just put it.

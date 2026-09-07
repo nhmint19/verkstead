@@ -26,6 +26,12 @@
 //! hierarchy is the caller's to say, and a level with nothing in it is a level
 //! the frame does not draw.
 //!
+//! Both at once is the third frame: the details pane by itself, across the whole
+//! window. The compose page stands in it while there is nothing to list — no
+//! list to pick from, and no record beside a Conversation that does not exist
+//! yet — and it is the one frame with no border in it, so there is no divider on
+//! it and no width of it to remember.
+//!
 //! How wide they stand is the frame's, because a width is a property of the
 //! frame rather than of anything drawn in it. They are percentages kept per
 //! device (`widths.ts`) — one set for the device rather than one per page, with
@@ -190,6 +196,13 @@ export function Panes(props: {
   /// the two of them already stand in below the last breakpoint.
   const reading = () => record() !== undefined;
 
+  /// And the frame with neither of them: the details pane by itself, across the
+  /// whole window. The compose page while there is nothing to list stands in it
+  /// — no list to pick from, and no record to read beside a Conversation that
+  /// does not exist yet — and it is the one frame with no border in it at all,
+  /// so there is no divider and no width to remember. See `workbench/zero.ts`.
+  const alone = () => !picking() && !reading();
+
   /// Which layout is standing, which decides how many dividers there are and
   /// how much room each pane is allowed to leave the others.
   const beside = matching(BESIDE);
@@ -325,7 +338,7 @@ export function Panes(props: {
   /// and a name written over a column that is not there would be this frame
   /// answering for the one the Timeline comes back to.
   const columns = () => {
-    if (!beside()) {
+    if (!beside() || alone()) {
       return undefined;
     }
 
@@ -345,8 +358,12 @@ export function Panes(props: {
     <div
       class={[
         styles.panes,
-        picking() ? undefined : styles.two,
-        reading() ? undefined : styles.widened,
+        // The one pane by itself, which is neither of the two frames below and
+        // not both of them either: what those say is where the column that is
+        // missing used to be, and here there is only the one left.
+        alone() ? styles.alone : undefined,
+        alone() || picking() ? undefined : styles.two,
+        alone() || reading() ? undefined : styles.widened,
       ]
         .filter(Boolean)
         .join(" ")}
@@ -416,7 +433,7 @@ export function Panes(props: {
           panes themselves rather than with a third one, there being no third
           one to wait for — the two are side by side from the width the sidebar
           used to arrive at. */}
-      <Show when={beside() && !picking()}>
+      <Show when={beside() && !picking() && !alone()}>
         <Handle
           divider="pair"
           label={`Resize the ${props.middleLabel.toLowerCase()} pane`}

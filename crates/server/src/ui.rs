@@ -40,7 +40,8 @@ use verkstead_render::{
     Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed,
     RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress, SetReading, SetView, SettingsEdit,
     SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation,
-    ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription,
+    ShowArchived, ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed,
+    Subscription,
     TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice,
     Verified,
 };
@@ -3422,12 +3423,25 @@ async fn seen(State(state): State<AppState>, Path(id): Path<String>) -> HttpResp
 }
 
 /// `GET /api/ui/conversations/archived` — whether the sidebar is drawing what
-/// has been put away.
+/// has been put away, and whether anything has been.
+///
+/// Two facts about one switch, in one payload: the list above is filtered by
+/// the setting in SQL, so an empty list cannot say whether there is anything
+/// behind the switch — and that is what decides whether a page with no sidebar
+/// draws the switch at all. Read together so that the page reads once.
 async fn showing_archived(State(state): State<AppState>) -> HttpResponse {
-    match store::showing_archived(&state.pool).await {
-        Ok(showing) => Json(ShowingArchived { showing }).into_response(),
+    let showing = match store::showing_archived(&state.pool).await {
+        Ok(showing) => showing,
         Err(error) => {
             tracing::error!(error = ?error, "reading whether the archived Conversations are shown failed");
+            return unavailable("the setting could not be read");
+        }
+    };
+
+    match store::any_archived(&state.pool).await {
+        Ok(any) => Json(ShowingArchived { showing, any }).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "reading whether anything is archived failed");
             unavailable("the setting could not be read")
         }
     }
@@ -3441,7 +3455,7 @@ async fn showing_archived(State(state): State<AppState>) -> HttpResponse {
 /// to answer with beyond that it was taken.
 async fn show_archived(
     State(state): State<AppState>,
-    Json(showing): Json<ShowingArchived>,
+    Json(showing): Json<ShowArchived>,
 ) -> HttpResponse {
     match store::show_archived(&state.pool, showing.showing).await {
         Ok(()) => {

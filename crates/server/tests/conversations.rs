@@ -1316,6 +1316,14 @@ async fn showing_archived(app: &Router) -> bool {
         .showing
 }
 
+/// And whether there is anything behind that switch, which the same read
+/// answers: the list is filtered by the switch, so it cannot say for itself.
+async fn anything_archived(app: &Router) -> bool {
+    get::<ShowingArchived>(app, "/api/ui/conversations/archived")
+        .await
+        .any
+}
+
 /// And putting that switch where the human has put it. Answered with nothing,
 /// as the order is, because there is nothing to answer.
 async fn show_archived(app: &Router, showing: bool) {
@@ -4132,6 +4140,36 @@ async fn the_toggle_shows_and_hides_what_has_been_archived() {
 
     assert!(!showing_archived(&app).await);
     assert_eq!(order(&app).await, vec![kept]);
+}
+
+/// And the same read says whether there is anything behind the switch at all,
+/// which the list itself cannot: it is filtered by the switch, so an empty list
+/// is the same empty list whether nothing has been put away or everything has.
+///
+/// Which is what a page with no sidebar to hang the switch under needs — the
+/// zero state draws it only where there is something for it to bring back.
+#[tokio::test]
+async fn the_toggle_says_whether_there_is_anything_behind_it() {
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+
+    assert!(!anything_archived(&app).await);
+
+    close(&app, id).await;
+    archive(&app, id).await;
+
+    // Nothing on the list, and something behind the switch: the two empties
+    // told apart.
+    assert!(sidebar(&app).await.is_empty());
+    assert!(anything_archived(&app).await);
+
+    // And it is about the archiving rather than about the switch, so flipping
+    // the switch does not move it.
+    show_archived(&app, true).await;
+    assert!(anything_archived(&app).await);
+
+    unarchive(&app, id).await;
+    assert!(!anything_archived(&app).await);
 }
 
 /// It is the human's standing choice rather than one device's, so it is read
