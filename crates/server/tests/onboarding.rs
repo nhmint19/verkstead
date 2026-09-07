@@ -11,6 +11,11 @@
 //! access suite and `gh` is one in the settings suite. What is asserted is what
 //! the server made of it.
 //!
+//! **The accounts are stated the same way.** What the machine holds is looked
+//! for in the home the server was started with, and the suite's is a directory
+//! of its own with the four shapes made under it by hand — an account being a
+//! set of paths rather than anything the agent has to have been run to make.
+//!
 //! The other half of the objective is not on the machine at all: a Profile is a
 //! row in the store and an author is a line in `config.yaml`. Both go in
 //! **before** the router is stood up, which is what makes a start over them a
@@ -31,7 +36,7 @@
 
 use std::ffi::OsString;
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use axum::Router;
 use axum::body::Body;
@@ -39,10 +44,12 @@ use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
-use verkstead_render::{Dependency, DependencyState, DependencyView, Distro, OnboardingView};
+use verkstead_render::{
+    Dependency, DependencyState, DependencyView, Distro, OnboardingView, ProfileAccount,
+};
 use verkstead_server::onboarding::Machine;
-use verkstead_server::platform::Platform;
-use verkstead_server::store::{Account, ProfileFacts};
+use verkstead_server::platform::{Environment, Platform};
+use verkstead_server::store::{Account, AgentType, ProfileFacts};
 use verkstead_server::{open_database, router_onboarding, store};
 
 /// A program that is there and does nothing, which is the whole of what a row
@@ -110,9 +117,52 @@ fn served(dir: &Path, pool: &SqlitePool, programs: &[(&str, &str)]) -> Router {
         OsString::from(bin.as_os_str()),
         None,
         Some(OS_RELEASE.to_owned()),
+        &Environment {
+            home: Some(home(dir)),
+            ..Environment::default()
+        },
     );
 
     router_onboarding(pool.clone(), dir.to_owned(), machine)
+}
+
+/// The home this start was given, which is where its accounts are looked for.
+///
+/// Under the suite's own directory rather than the one the tests are running
+/// as: what is found in it is what this test put there, on every box and on a
+/// box whose own home is full of accounts.
+fn home(dir: &Path) -> PathBuf {
+    let home = dir.join("home");
+    std::fs::create_dir_all(&home).unwrap();
+
+    home
+}
+
+/// An account of `agent_type` in that home: the paths a session of that type
+/// mounts its account from, made by hand.
+///
+/// Made rather than logged in: an account is a set of paths, and what the
+/// wizard answers is whether they are there.
+fn an_account(dir: &Path, agent_type: AgentType) {
+    let home = home(dir);
+
+    let dirs: Vec<PathBuf> = match agent_type {
+        AgentType::Claude => vec![home.join(".claude")],
+        AgentType::Codex => vec![home.join(".codex")],
+        AgentType::Grok => vec![home.join(".grok")],
+        AgentType::OpenCode => vec![
+            home.join(".config/opencode"),
+            home.join(".local/share/opencode"),
+        ],
+    };
+
+    for path in dirs {
+        std::fs::create_dir_all(path).unwrap();
+    }
+
+    if agent_type == AgentType::Claude {
+        std::fs::write(home.join(".claude.json"), "{}\n").unwrap();
+    }
 }
 
 /// An Agent Profile in the store, which is the whole of what the accounts step
@@ -380,6 +430,73 @@ async fn deleting_the_last_profile_mid_run_leaves_the_mode_where_it_was() {
     );
 }
 
+/// The accounts in the server's home are offered as the Profiles they would be
+/// saved as, each with whether the harness that runs it is on this machine.
+///
+/// The two halves of the accounts step in one reading: an account whose binary
+/// is there is one to tick, and an account whose binary is not is one to grey.
+/// The paths are the account's own, because what the step does with a ticked
+/// row is hand them back to the profile create.
+#[tokio::test]
+async fn the_accounts_in_the_home_are_offered_with_their_harnesses() {
+    let (dir, pool) = ready().await;
+
+    an_account(dir.path(), AgentType::Claude);
+    an_account(dir.path(), AgentType::Codex);
+
+    // Claude Code is on this machine and Codex is not, which is the whole
+    // difference between the two rows.
+    let app = served(dir.path(), &pool, EVERYTHING);
+    let reading = reading(&app).await;
+
+    let home = home(dir.path());
+
+    assert_eq!(
+        reading
+            .accounts
+            .iter()
+            .map(|found| (found.account.clone(), found.harness))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                ProfileAccount::Claude {
+                    claude_dir: home.join(".claude").to_string_lossy().into_owned(),
+                    config_file: home.join(".claude.json").to_string_lossy().into_owned(),
+                },
+                true,
+            ),
+            (
+                ProfileAccount::Codex {
+                    home: home.join(".codex").to_string_lossy().into_owned(),
+                },
+                false,
+            ),
+        ],
+        "one account per harness, in the order the harness rows are drawn, and \
+         ticked by whether a session could be launched under it",
+    );
+
+    assert!(
+        !reading.steps.accounts,
+        "an account on the machine is not an Agent Profile until it is saved as \
+         one, which is what the step's own Continue does",
+    );
+}
+
+/// A home with nothing in it offers nothing, which is the step that says what
+/// to run rather than what to tick.
+#[tokio::test]
+async fn a_home_with_no_account_in_it_offers_none() {
+    let (dir, pool) = ready().await;
+
+    let app = served(dir.path(), &pool, EVERYTHING);
+
+    assert!(
+        reading(&app).await.accounts.is_empty(),
+        "nothing was ever logged in here",
+    );
+}
+
 /// Where the golden fixtures are written, relative to this crate — the same
 /// directory `ui_content` and `nudges` write the other endpoints' payloads to.
 const FIXTURES: &str = "../../web/tests/fixtures";
@@ -402,17 +519,21 @@ const FIXTURES: &str = "../../web/tests/fixtures";
 #[tokio::test]
 async fn the_viewers_own_tests_are_fed_from_here() {
     // A machine with nothing on it and a Data Directory with nothing in it:
-    // every row absent and all three steps unmet, which is a first start on a
-    // box somebody has just installed Verkstead on.
+    // every row absent, no account in the home and all three steps unmet, which
+    // is a first start on a box somebody has just installed Verkstead on.
     let (dir, pool) = ready().await;
     let app = served(dir.path(), &pool, &[]);
-    write("onboarding-fresh.json", &reading(&app).await);
+    write("onboarding-fresh.json", &reading(&app).await, dir.path());
 
     // The dependencies settled and nothing else: the step that is met, the two
-    // that are not, and the mode still on.
+    // that are not, and the mode still on. Two accounts in the home, one of
+    // whose harnesses is on the machine, which is the row to tick and the row
+    // to grey.
     let (dir, pool) = ready().await;
+    an_account(dir.path(), AgentType::Claude);
+    an_account(dir.path(), AgentType::Codex);
     let app = served(dir.path(), &pool, EVERYTHING);
-    write("onboarding-part-way.json", &reading(&app).await);
+    write("onboarding-part-way.json", &reading(&app).await, dir.path());
 
     // And the objective met, which is the reading that says the wizard is no
     // page at all.
@@ -420,16 +541,26 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     a_profile(&pool, dir.path()).await;
     an_author(dir.path());
     let app = served(dir.path(), &pool, EVERYTHING);
-    write("onboarding-ready.json", &reading(&app).await);
+    write("onboarding-ready.json", &reading(&app).await, dir.path());
 }
 
-/// One fixture, as the server would have written it.
-fn write(name: &str, reading: &OnboardingView) {
+/// What a home reads as in a fixture, whoever ran the suite.
+const A_HOME: &str = "/home/you";
+
+/// One fixture, as the server would have written it — with the one thing in it
+/// that is this run's own written back out as a home anybody would recognise.
+///
+/// A detected account is a set of real paths: it has to be on disk to be found,
+/// so the home it was found in is a temporary directory whose name is different
+/// every run. What the viewer's tests are drawn over is the shape of a reading
+/// rather than this box's paths, so that one directory is written as
+/// [`A_HOME`] — which is what the same reading on somebody's own machine says.
+fn write(name: &str, reading: &OnboardingView, ran_in: &Path) {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(FIXTURES);
     std::fs::create_dir_all(&dir).unwrap();
 
-    let mut pretty = serde_json::to_string_pretty(reading).unwrap();
-    pretty.push('\n');
+    let pretty = serde_json::to_string_pretty(reading).unwrap();
+    let pretty = pretty.replace(&home(ran_in).to_string_lossy().into_owned(), A_HOME) + "\n";
 
     std::fs::write(dir.join(name), pretty).unwrap();
 }

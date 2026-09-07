@@ -60,7 +60,8 @@ pub use conversations::{
     task_list_reached, unreadable_set_event,
 };
 pub use onboarding::{
-    Dependency, DependencyState, DependencyView, Distro, OnboardingView, Platform, StepsView,
+    AccountView, Dependency, DependencyState, DependencyView, Distro, OnboardingView, Platform,
+    StepsView,
 };
 pub use profiles::{
     AgentType, Broken, PairingView, PickedView, ProfileAccount, ProfileChoice, ProfileChosen,

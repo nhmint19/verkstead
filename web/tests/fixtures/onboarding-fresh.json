@@ -53,6 +53,7 @@
       }
     }
   ],
+  "accounts": [],
   "steps": {
     "dependencies": false,
     "accounts": false,

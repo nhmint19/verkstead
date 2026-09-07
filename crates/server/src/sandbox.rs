@@ -989,6 +989,57 @@ fn account_inside(account: &store::Account, home: &Path) -> Vec<(PathBuf, PathBu
     }
 }
 
+/// The account an agent of `agent_type` keeps directly in `home`, where the
+/// whole of one is there.
+///
+/// **The same list as [`account_inside`] rather than a second one.** What a
+/// session mounts an account *from* and what the onboarding wizard finds one
+/// *in* are one question about one set of paths: this builds the account whose
+/// own paths are the ones under `home`, and asks that list whether every one of
+/// them is there. So a backend arriving with a shape of its own is offered by
+/// the wizard the day it can be joined into a sandbox, rather than being taught
+/// to both halves separately.
+///
+/// **At most one per harness**, which is what a home being asked about at all
+/// turns on: each shape is a fixed path under it, so a home holds one Claude
+/// account and one Codex account and no more — which is the same fact an
+/// unnamed Profile is unique per harness for.
+///
+/// Blocking: one `stat` per path of the shape.
+pub(crate) fn account_in_home(agent_type: store::AgentType, home: &Path) -> Option<store::Account> {
+    let account = kept_in(agent_type, home);
+
+    account_inside(&account, home)
+        .into_iter()
+        .all(|(host, _)| host.exists())
+        .then_some(account)
+}
+
+/// And what such an account would be: the shape `agent_type` keeps one in,
+/// rooted where that agent itself would have written it.
+///
+/// [`account_inside`]'s own arms read the other way round — the pair under
+/// `~/.claude`, the one dot-directory each of the two after it, and, for
+/// opencode, the home its XDG defaults resolve inside, which is the home
+/// itself.
+fn kept_in(agent_type: store::AgentType, home: &Path) -> store::Account {
+    match agent_type {
+        store::AgentType::Claude => store::Account::Claude {
+            claude_dir: home.join(CLAUDE_DIR_INSIDE_HOME),
+            config_file: home.join(CLAUDE_CONFIG_INSIDE_HOME),
+        },
+        store::AgentType::Codex => store::Account::Codex {
+            home: home.join(CODEX_INSIDE_HOME),
+        },
+        store::AgentType::Grok => store::Account::Grok {
+            home: home.join(GROK_INSIDE_HOME),
+        },
+        store::AgentType::OpenCode => store::Account::OpenCode {
+            home: home.to_owned(),
+        },
+    }
+}
+
 /// Whichever of `account`'s own paths cannot be joined into a profile at
 /// `home`, and `None` where every one of them can.
 ///

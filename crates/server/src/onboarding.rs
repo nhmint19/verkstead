@@ -16,10 +16,11 @@
 //! gone is said. See [`Mode`].
 //!
 //! **Everything else is probed on every read.** The probes are a `PATH` walked,
-//! one `bwrap` run and a settings file read, and probing on read is what leaves
-//! nothing running while nobody is looking: the wizard re-reads while a step is
-//! unmet, so an install that lands is ticked within ten seconds of landing and
-//! a closed workbench asks the machine nothing at all.
+//! one `bwrap` run, a home looked in and a settings file read, and probing on
+//! read is what leaves nothing running while nobody is looking: the wizard
+//! re-reads while a step is unmet, so an install that lands is ticked within ten
+//! seconds of landing, an account that appears is offered as quickly, and a
+//! closed workbench asks the machine nothing at all.
 //!
 //! **Present means a session would find it.** A session resolves its binaries
 //! on the `PATH` inside the Sandbox rather than on the server's, so every probe
@@ -29,6 +30,14 @@
 //! not start, which is exactly the failure the wizard exists to move forward in
 //! time. The names are [`crate::sessions::binary`]'s, for the same reason:
 //! what a row is about is the program a session is launched as.
+//!
+//! **The accounts are found in the server's own home**, which is where an
+//! agent that has been logged into once wrote one. What a shape is made of is
+//! [`crate::sandbox::account_in_home`]'s — the same list a session's account is
+//! mounted from — so a home holds at most one account per harness, and each is
+//! offered as the Profile the wizard would save it as. Which home that is, is
+//! the platform's: `$HOME` on the two Unixes and `%USERPROFILE%` on Windows,
+//! read the one way [`crate::platform::home_dir`] reads it.
 //!
 //! **The sandbox row is a run rather than a lookup** on Linux, because a
 //! `bwrap` that is installed is not yet a `bwrap` that works: unprivileged user
@@ -53,12 +62,12 @@ use anyhow::Result;
 use sqlx::SqlitePool;
 use tokio::sync::OnceCell;
 use verkstead_render::{
-    Dependency, DependencyState, DependencyView, Distro, OnboardingView, StepsView,
+    AccountView, Dependency, DependencyState, DependencyView, Distro, OnboardingView, StepsView,
 };
 
-use crate::platform::Platform;
+use crate::platform::{Environment, Platform};
 use crate::settings::Settings;
-use crate::{sandbox, sessions, store};
+use crate::{profiles, sandbox, sessions, store};
 
 /// Where a Linux machine says which distribution it is.
 ///
@@ -118,18 +127,25 @@ pub struct Machine {
     /// file, because which line answers is [`distro`]'s business rather than
     /// the reading's.
     os_release: Option<String>,
+
+    /// And the home of whoever is running this server, which is where the
+    /// accounts are looked for. Whichever variable the platform keeps it in —
+    /// see [`crate::platform::home_dir`] — and `None` on a machine that names
+    /// none, which is a machine with no account to be found.
+    home: Option<PathBuf>,
 }
 
 impl Machine {
     /// The machine this server is running on: the one read of it, made where a
     /// router is stood up and passed down from there.
     pub fn here() -> Machine {
-        Machine {
-            platform: Platform::HERE,
-            path: sandbox::machine_path(Platform::HERE),
-            pathext: std::env::var_os("PATHEXT"),
-            os_release: std::fs::read_to_string(OS_RELEASE).ok(),
-        }
+        Machine::stated(
+            Platform::HERE,
+            sandbox::machine_path(Platform::HERE),
+            std::env::var_os("PATHEXT"),
+            std::fs::read_to_string(OS_RELEASE).ok(),
+            &Environment::of_the_process(),
+        )
     }
 
     /// A machine stated rather than read, which is what a test stands a server
@@ -145,12 +161,30 @@ impl Machine {
         path: OsString,
         pathext: Option<OsString>,
         os_release: Option<String>,
+        env: &Environment,
     ) -> Machine {
         Machine {
             platform,
             path,
             pathext,
             os_release,
+            // Read here rather than taken as a path, because which variable
+            // holds it is one of the things this platform decides: a `HOME` on
+            // a Windows machine was set by somebody's shell, and the account
+            // the wizard is looking for is under the profile.
+            home: crate::platform::home_dir(platform, env),
+        }
+    }
+
+    /// Everything a reading of this machine asks it, made in one hop off the
+    /// runtime: the rows, and the accounts whose harnesses those rows are.
+    fn probed(&self) -> Probed {
+        let dependencies = self.rows();
+        let accounts = self.accounts(&dependencies);
+
+        Probed {
+            dependencies,
+            accounts,
         }
     }
 
@@ -170,6 +204,33 @@ impl Machine {
         rows.push(row(Dependency::Gh, self.installed(GH)));
 
         rows
+    }
+
+    /// Every agent account already in this server's home, in the order the
+    /// harness rows are drawn.
+    ///
+    /// A home holds at most one account per harness — see
+    /// [`sandbox::account_in_home`], which is where the shapes are — so this is
+    /// four looks and never a search. Each carries whether its harness is
+    /// there, read off the row that was already probed rather than probed
+    /// again: one answer, so the tick and the row cannot disagree.
+    ///
+    /// Nothing at all where the platform names no home, which is a machine
+    /// there is nowhere to look in.
+    fn accounts(&self, dependencies: &[DependencyView]) -> Vec<AccountView> {
+        let Some(home) = self.home.as_deref() else {
+            return Vec::new();
+        };
+
+        HARNESSES
+            .iter()
+            .filter_map(|(dependency, agent_type)| {
+                Some(AccountView {
+                    account: profiles::account(&sandbox::account_in_home(*agent_type, home)?),
+                    harness: there(dependencies, *dependency),
+                })
+            })
+            .collect()
     }
 
     /// Whether a session would find `program`, said as a row's state.
@@ -214,6 +275,16 @@ impl Machine {
             },
         }
     }
+}
+
+/// What one look at the machine found: the rows, and the accounts beside them.
+///
+/// The two together because they are one hop off the runtime and one answer:
+/// whether a harness is there is a row's state and an account's tick both, and
+/// asking twice would be two `PATH` walks that could disagree.
+struct Probed {
+    dependencies: Vec<DependencyView>,
+    accounts: Vec<AccountView>,
 }
 
 /// Onboarding mode: the verdict this server reached at startup, and the machine
@@ -271,17 +342,19 @@ impl Onboarding {
     ) -> Result<OnboardingView> {
         // Off the runtime: a `PATH` walk is a handful of `stat` calls and the
         // sandbox row is a process, and neither belongs on a thread that is
-        // meant to be answering requests.
+        // meant to be answering requests. The accounts are looked for in the
+        // same hop, being more of the same `stat` calls.
         let machine = self.machine.clone();
-        let dependencies = tokio::task::spawn_blocking(move || machine.rows()).await?;
+        let probed = tokio::task::spawn_blocking(move || machine.probed()).await?;
 
-        let steps = steps(&dependencies, pool, settings).await?;
+        let steps = steps(&probed.dependencies, pool, settings).await?;
 
         Ok(OnboardingView {
             mode: self.mode(steps).await,
             platform: shown(self.machine.platform),
             distro: distro(self.machine.platform, self.machine.os_release.as_deref()),
-            dependencies,
+            dependencies: probed.dependencies,
+            accounts: probed.accounts,
             steps,
         })
     }
@@ -368,15 +441,21 @@ fn met(steps: StepsView) -> bool {
 /// one agent type: three rows left unticked hold nothing up. And `gh` holds
 /// nothing up at all, GitHub being a choice rather than a dependency.
 fn dependencies_met(dependencies: &[DependencyView]) -> bool {
-    let there = |dependency: Dependency| {
-        dependencies
+    there(dependencies, Dependency::Sandbox)
+        && there(dependencies, Dependency::Git)
+        && HARNESSES
             .iter()
-            .any(|row| row.dependency == dependency && present(&row.state))
-    };
+            .any(|(dependency, _)| there(dependencies, *dependency))
+}
 
-    there(Dependency::Sandbox)
-        && there(Dependency::Git)
-        && HARNESSES.iter().any(|(dependency, _)| there(*dependency))
+/// Whether one row of a reading says the machine has that thing.
+///
+/// The one reading of a row's state, so that the objective and an account's
+/// tick are answering off the same list.
+fn there(dependencies: &[DependencyView], dependency: Dependency) -> bool {
+    dependencies
+        .iter()
+        .any(|row| row.dependency == dependency && present(&row.state))
 }
 
 /// Whether a row is one the objective can be met with: it is there, or it is
@@ -500,10 +579,77 @@ fn shown(platform: Platform) -> verkstead_render::Platform {
 mod tests {
     use super::*;
 
-    /// A machine on `platform` whose `PATH` is `dir` and which says nothing
-    /// about itself.
+    /// A machine on `platform` whose `PATH` is `dir`, which says nothing about
+    /// itself and whose home is `dir` as well.
+    ///
+    /// One directory for both because the two questions are asked apart: a
+    /// `PATH` walk looks for names this puts there and an account is a shape
+    /// under a home, and no test here writes both.
     fn machine(platform: Platform, dir: &Path) -> Machine {
-        Machine::stated(platform, dir.as_os_str().to_owned(), None, None)
+        Machine::stated(
+            platform,
+            dir.as_os_str().to_owned(),
+            None,
+            None,
+            &home(platform, dir),
+        )
+    }
+
+    /// An environment naming `dir` as the home, in whichever variable this
+    /// platform keeps one in.
+    fn home(platform: Platform, dir: &Path) -> Environment {
+        let dir = Some(dir.to_owned());
+
+        match platform {
+            Platform::Windows => Environment {
+                userprofile: dir,
+                ..Environment::default()
+            },
+            Platform::Linux | Platform::MacOs => Environment {
+                home: dir,
+                ..Environment::default()
+            },
+        }
+    }
+
+    /// The four shapes an account comes in, made under `home` — the same paths
+    /// a session's account is mounted from.
+    fn an_account(home: &Path, agent_type: store::AgentType) {
+        let dirs: Vec<PathBuf> = match agent_type {
+            store::AgentType::Claude => vec![home.join(".claude")],
+            store::AgentType::Codex => vec![home.join(".codex")],
+            store::AgentType::Grok => vec![home.join(".grok")],
+            store::AgentType::OpenCode => {
+                vec![
+                    home.join(".config/opencode"),
+                    home.join(".local/share/opencode"),
+                ]
+            }
+        };
+
+        for dir in dirs {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+
+        if agent_type == store::AgentType::Claude {
+            std::fs::write(home.join(".claude.json"), "{}\n").unwrap();
+        }
+    }
+
+    /// Which harnesses a machine found an account for, in the order it offered
+    /// them.
+    fn offered(machine: &Machine) -> Vec<store::AgentType> {
+        machine
+            .probed()
+            .accounts
+            .iter()
+            .map(|found| match found.account {
+                verkstead_render::ProfileAccount::Claude { .. } => store::AgentType::Claude,
+                verkstead_render::ProfileAccount::Codex { .. } => store::AgentType::Codex,
+                verkstead_render::ProfileAccount::Grok { .. } => store::AgentType::Grok,
+                verkstead_render::ProfileAccount::OpenCode { .. } => store::AgentType::OpenCode,
+            })
+            .collect()
     }
 
     /// A file at `path`, executable where this platform has such a thing.
@@ -677,6 +823,7 @@ mod tests {
             dir.path().as_os_str().to_owned(),
             Some(OsString::from(".COM;.EXE;.BAT;.CMD")),
             None,
+            &Environment::default(),
         );
 
         assert_eq!(
@@ -764,6 +911,155 @@ mod tests {
         );
     }
 
+    /// Each of the four shapes in the server's home is offered as the Profile
+    /// it would be saved as, in the order the harness rows are drawn.
+    ///
+    /// The paths are the account's own — the wizard hands them straight back to
+    /// the profile create — and the tick beside each is that harness's row,
+    /// which is what says an account there is one there is anything to run.
+    #[cfg(unix)]
+    #[test]
+    fn every_account_in_the_home_is_offered_with_its_harness_beside_it() {
+        let dir = tempfile::tempdir().unwrap();
+
+        for agent_type in [
+            store::AgentType::Claude,
+            store::AgentType::Codex,
+            store::AgentType::Grok,
+            store::AgentType::OpenCode,
+        ] {
+            an_account(dir.path(), agent_type);
+        }
+
+        // And one harness on the machine, which is what tells the ticked row
+        // from the greyed ones.
+        program(&dir.path().join("claude"), "#!/bin/sh\n");
+
+        let machine = machine(Platform::Linux, dir.path());
+        let accounts = machine.probed().accounts;
+
+        assert_eq!(
+            offered(&machine),
+            vec![
+                store::AgentType::Claude,
+                store::AgentType::Codex,
+                store::AgentType::Grok,
+                store::AgentType::OpenCode,
+            ],
+            "a home holds one account per harness, and all four are here",
+        );
+
+        assert_eq!(
+            accounts[0].account,
+            verkstead_render::ProfileAccount::Claude {
+                claude_dir: dir.path().join(".claude").to_string_lossy().into_owned(),
+                config_file: dir
+                    .path()
+                    .join(".claude.json")
+                    .to_string_lossy()
+                    .into_owned(),
+            },
+            "Claude's is the pair, which is what a session mounts and what the \
+             profile create is handed",
+        );
+        assert_eq!(
+            accounts[3].account,
+            verkstead_render::ProfileAccount::OpenCode {
+                home: dir.path().to_string_lossy().into_owned(),
+            },
+            "and opencode's is the home its XDG directories are under, which is \
+             the home itself",
+        );
+
+        assert!(
+            accounts[0].harness,
+            "the account whose harness is on this machine is one to offer ticked",
+        );
+        assert!(
+            accounts[1..].iter().all(|found| !found.harness),
+            "and the three whose binaries are missing are not accounts to make a \
+             Profile of yet",
+        );
+    }
+
+    /// Half a shape is no account. Every path of it has to be there, because
+    /// every one of them is mounted — and a row offered here that the profile
+    /// create would refuse is a tick that saves nothing.
+    #[cfg(unix)]
+    #[test]
+    fn a_shape_that_is_only_half_there_is_not_offered() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // Claude's directory without the config file beside it, which is an
+        // account the profile create refuses as `ConfigMissing`.
+        std::fs::create_dir_all(dir.path().join(".claude")).unwrap();
+
+        // And an opencode home with the config directory and no data
+        // directory, which is the half of it the account is *not* in.
+        std::fs::create_dir_all(dir.path().join(".config/opencode")).unwrap();
+
+        assert_eq!(
+            offered(&machine(Platform::Linux, dir.path())),
+            Vec::new(),
+            "neither is a whole account, so neither is offered",
+        );
+    }
+
+    /// Where the home is, is the platform's own question: a Windows machine
+    /// keeps it in `%USERPROFILE%`, and a `HOME` there was set by somebody's
+    /// shell.
+    #[test]
+    fn a_windows_machine_looks_in_the_user_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        an_account(dir.path(), store::AgentType::Codex);
+
+        assert_eq!(
+            offered(&machine(Platform::Windows, dir.path())),
+            vec![store::AgentType::Codex],
+            "the profile is where a Windows account is kept, and the shape under \
+             it is the one a session mounts",
+        );
+
+        let shells_home = Machine::stated(
+            Platform::Windows,
+            OsString::new(),
+            None,
+            None,
+            &Environment {
+                home: Some(dir.path().to_owned()),
+                ..Environment::default()
+            },
+        );
+
+        assert_eq!(
+            offered(&shells_home),
+            Vec::new(),
+            "and a Windows machine naming no profile has no home to look in, \
+             whatever a shell set HOME to",
+        );
+    }
+
+    /// A machine that names no home at all is a machine with nowhere to look,
+    /// which is nothing offered rather than a search.
+    #[test]
+    fn a_machine_with_no_home_offers_nothing() {
+        for platform in [Platform::Linux, Platform::MacOs, Platform::Windows] {
+            let nowhere = Machine::stated(
+                platform,
+                OsString::new(),
+                None,
+                None,
+                &Environment::default(),
+            );
+
+            assert_eq!(
+                offered(&nowhere),
+                Vec::new(),
+                "{platform:?} says where a home is, and this one says nothing",
+            );
+        }
+    }
+
     /// The objective wants a sandbox, `git` and *one* harness — so three rows
     /// left unticked hold nothing up, and `gh` holds nothing up at all.
     #[test]
@@ -833,6 +1129,7 @@ mod tests {
             OsString::new(),
             None,
             None,
+            &Environment::default(),
         ));
 
         assert!(onboarding.mode(unmet).await, "the objective was not met");
@@ -857,6 +1154,7 @@ mod tests {
             OsString::new(),
             None,
             None,
+            &Environment::default(),
         ));
 
         assert!(onboarding.mode(unmet).await);

@@ -71,6 +71,34 @@ stage_title: string,
 base: string, };
 
 /**
+ * One account this machine already has, offered as the Agent Profile it would
+ * be saved as.
+ *
+ * **Found rather than configured.** The server looks in its own home for the
+ * shapes a session mounts an account from, so what is here is an account some
+ * agent wrote there by being logged into once. At most one per harness, each
+ * shape being a fixed path under a home — which is the same fact an unnamed
+ * Profile's uniqueness is per harness for.
+ *
+ * **And it is the whole account**, in the shape the profile form sends one:
+ * the wizard saves a ticked row by handing it straight back to the profile
+ * create, with no name and the models this build knows for its harness, rather
+ * than by naming paths of its own.
+ */
+export type AccountView = { 
+/**
+ * What was found, ready to be saved as it stands.
+ */
+account: ProfileAccount, 
+/**
+ * And whether the harness that runs it is on this machine — the same
+ * answer that harness's [`Dependency`] row carries, so a row is offered
+ * ticked or drawn greyed without the viewer pairing the two lists up. An
+ * account whose binary is missing is not one to make a Profile of yet.
+ */
+harness: boolean, };
+
+/**
  * What became of pressing Adopt.
  *
  * Named the way [`GrillingStarted`]'s refusals are, and for the same reason: a
@@ -1931,6 +1959,12 @@ distro: Distro,
  * Every row of the dependencies step, in the order it is drawn.
  */
 dependencies: Array<DependencyView>, 
+/**
+ * And every agent account already on this machine, in the order the
+ * harnesses above are drawn. Empty on a machine that has none, which is
+ * the step saying what to run rather than what to tick.
+ */
+accounts: Array<AccountView>, 
 /**
  * And whether each of the three steps stands met, at this moment.
  */

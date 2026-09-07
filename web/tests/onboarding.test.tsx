@@ -122,8 +122,11 @@ describe("the wizard's frame", () => {
     const { container } = mount(PART_WAY);
 
     await waitFor(() => expect(rows(container)).toHaveLength(3));
+    // The heading's own press rather than any press in the row: the open step
+    // has its own controls under its heading, and what is being asked about is
+    // the way *back* into a step.
     const pressable = rows(container).filter((row) =>
-      row.querySelector("button"),
+      row.querySelector("h2 button"),
     );
     expect(pressable.map((row) => row.dataset.step)).toEqual(["dependencies"]);
   });

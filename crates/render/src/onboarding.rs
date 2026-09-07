@@ -23,6 +23,11 @@
 //! `ID_LIKE` is a guess about a derivative and the human is the one looking at
 //! the machine.
 //!
+//! **The accounts are the machine's too.** What is found in the server's own
+//! home is one account per harness at most — each shape is a fixed path under a
+//! home — offered as the Profile it would be saved as, with whether that
+//! harness is on the machine carried beside it. See [`AccountView`].
+//!
 //! **A row is present, absent or neither.** Neither is the Windows sandbox
 //! row, which is not a thing to install there — see [`DependencyState`] — and
 //! an absent one carries whatever the machine said about it, which on Linux is
@@ -51,6 +56,11 @@ pub struct OnboardingView {
 
     /// Every row of the dependencies step, in the order it is drawn.
     pub dependencies: Vec<DependencyView>,
+
+    /// And every agent account already on this machine, in the order the
+    /// harnesses above are drawn. Empty on a machine that has none, which is
+    /// the step saying what to run rather than what to tick.
+    pub accounts: Vec<AccountView>,
 
     /// And whether each of the three steps stands met, at this moment.
     pub steps: StepsView,
@@ -150,6 +160,32 @@ pub enum DependencyState {
     /// It is not a thing on this platform: the Windows sandbox row, where a
     /// session's boundary is an identity rather than something to install.
     NotApplicable,
+}
+
+/// One account this machine already has, offered as the Agent Profile it would
+/// be saved as.
+///
+/// **Found rather than configured.** The server looks in its own home for the
+/// shapes a session mounts an account from, so what is here is an account some
+/// agent wrote there by being logged into once. At most one per harness, each
+/// shape being a fixed path under a home — which is the same fact an unnamed
+/// Profile's uniqueness is per harness for.
+///
+/// **And it is the whole account**, in the shape the profile form sends one:
+/// the wizard saves a ticked row by handing it straight back to the profile
+/// create, with no name and the models this build knows for its harness, rather
+/// than by naming paths of its own.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct AccountView {
+    /// What was found, ready to be saved as it stands.
+    pub account: crate::ProfileAccount,
+
+    /// And whether the harness that runs it is on this machine — the same
+    /// answer that harness's [`Dependency`] row carries, so a row is offered
+    /// ticked or drawn greyed without the viewer pairing the two lists up. An
+    /// account whose binary is missing is not one to make a Profile of yet.
+    pub harness: bool,
 }
 
 /// Whether each of the wizard's three steps stands met, read at the moment the

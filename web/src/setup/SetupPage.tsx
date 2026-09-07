@@ -26,6 +26,7 @@ import { For, Show, createSignal, type JSX } from "solid-js";
 import { loadOnboarding } from "../api/client";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
+import { Accounts } from "./Accounts";
 import { Dependencies } from "./Dependencies";
 import { Mark } from "./Mark";
 import {
@@ -59,6 +60,10 @@ export function SetupPage(): JSX.Element {
 
   /// What a step's own Continue does: open the one after it.
   ///
+  /// Pressed once the step has done whatever it was for — the accounts step
+  /// saves what is ticked before it presses this — so what arrives here is a
+  /// step that is over rather than one being skipped.
+  ///
   /// The last step's Continue is the wizard *finishing* rather than a step
   /// opening, and that — the mode going off and the app landing on `/compose` —
   /// arrives with the git step's own task.
@@ -80,7 +85,9 @@ export function SetupPage(): JSX.Element {
       met(query.state.data?.steps, open()) ? false : PROBE,
     // Merged rather than replaced, keyed by what a dependency row carries: the
     // page is re-read under somebody who is reading it, and a rebuild would
-    // take the open step's own controls down every ten seconds.
+    // take the open step's own controls down every ten seconds. The accounts
+    // beside those rows carry no such key and are matched by position, which is
+    // what a list of at most four in a fixed order can be matched by.
     freshness: { reconcile: "dependency" },
   }));
 
@@ -120,12 +127,18 @@ export function SetupPage(): JSX.Element {
                     open={open() === step}
                     show={show}
                   />
-                  {/* And under the open one, what that step is about. Two of
-                      the three arrive with the two tasks after this one. */}
+                  {/* And under the open one, what that step is about. The last
+                      of the three arrives with the task after this one. */}
                   <Show when={open() === step}>
                     <div class={styles.body}>
                       <Show when={step === "dependencies"}>
                         <Dependencies
+                          reading={view()}
+                          onwards={() => onwards(step)}
+                        />
+                      </Show>
+                      <Show when={step === "accounts"}>
+                        <Accounts
                           reading={view()}
                           onwards={() => onwards(step)}
                         />

@@ -50,6 +50,23 @@
       }
     }
   ],
+  "accounts": [
+    {
+      "account": {
+        "agent_type": "Claude",
+        "claude_dir": "/home/you/.claude",
+        "config_file": "/home/you/.claude.json"
+      },
+      "harness": true
+    },
+    {
+      "account": {
+        "agent_type": "Codex",
+        "home": "/home/you/.codex"
+      },
+      "harness": false
+    }
+  ],
   "steps": {
     "dependencies": true,
     "accounts": false,

@@ -50,6 +50,7 @@
       }
     }
   ],
+  "accounts": [],
   "steps": {
     "dependencies": true,
     "accounts": true,

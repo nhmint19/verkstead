@@ -480,7 +480,7 @@ fn chosen(chosen: store::Chosen) -> ProfileChosen {
 ///
 /// The paths are stored as UTF-8 in the first place — one that is not cannot be
 /// saved — so nothing is lost putting them back on the wire.
-fn account(account: &store::Account) -> ProfileAccount {
+pub(crate) fn account(account: &store::Account) -> ProfileAccount {
     match account {
         store::Account::Claude {
             claude_dir,
