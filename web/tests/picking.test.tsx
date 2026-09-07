@@ -4,16 +4,16 @@
 //! A native `<select>` arrives with all of this and a control drawn out of
 //! ordinary elements arrives with none of it, so the whole of what was given
 //! back is asserted here rather than trusted: the workbench is answered from a
-//! phone and from a keyboard as readily as from a mouse, and every one of the
-//! five choices this control stands in for is a choice about who runs somebody's
-//! work.
+//! phone and from a keyboard as readily as from a mouse, and every choice this
+//! control stands in for settles something about somebody's work — who runs it,
+//! and which repository it is in.
 //!
 //! Driven straight rather than through a page — what is asked is the control's
 //! own, so no query, no card and no modal is in the way of the answer. Where a
 //! page's own picker is the subject, the test is with that page:
-//! `workbench.test.tsx` for the four pairing pickers, `profiles.test.tsx` for
-//! the profile form's harness type, and `surviving.test.tsx` for what a re-read
-//! leaves of a choice.
+//! `workbench.test.tsx` for the four pairing pickers and the Repo,
+//! `profiles.test.tsx` for the profile form's harness type, and
+//! `surviving.test.tsx` for what a re-read leaves of a choice.
 
 import { fireEvent, render, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
@@ -512,7 +512,7 @@ describe("the listbox with its label in the handle", () => {
 
 /// The last thing a native dropdown kept for itself: its popup is the browser's
 /// and goes wherever it fits, and these rows are an element inside whatever
-/// clips the page. Every one of the five controls stands in a box that clips —
+/// clips the page. Every one of these controls stands in a box that clips —
 /// a pane scrolls its own content, the steer modal's card is capped at `80vh` —
 /// so a control low in one of those would drop its rows out of sight behind a
 /// backdrop that says nothing about where they went.
@@ -712,21 +712,28 @@ describe("the rows that press rather than pick", () => {
 });
 
 /// And the one question about this control that is not about the control: a
-/// listbox is worth its keep only where a row has something to draw, so which
-/// modules draw one is written down here rather than left to spread.
+/// listbox is worth its keep only where a row has something a native `<option>`
+/// cannot hold, so which modules draw one is written down here rather than left
+/// to spread.
+///
+/// Two things earn it. A row that carries a **mark** beside its words, which is
+/// the four pairing pickers and the profile form's harness type; and a list with
+/// rows at its foot that **press** rather than pick, which is the Repo's, where
+/// **Create repo** and **Open repo** stand behind the rule — an `<option>` that
+/// acted is the bug class this whole module was written against.
 describe("where the listbox is drawn at all", () => {
   it("reads every source in the viewer", () => {
     expect(Object.keys(SOURCES).length).toBeGreaterThan(10);
   });
 
-  /// Every other choice in the app stays a native `<select>` — the repos, the
-  /// branches, the merge strategy — because a control the app draws itself has
-  /// to be given the keyboard, the roles and the tap targets back, and none of
-  /// those rows has a mark to justify it.
+  /// Every other choice in the app stays a native `<select>` — the branches, the
+  /// merge strategy — because a control the app draws itself has to be given the
+  /// keyboard, the roles and the tap targets back, and none of those rows has
+  /// either reason to ask for it.
   /// Read for the element rather than for the word: the browsing path field
   /// names this control in its own header, having borrowed the chrome and the
   /// keyboard off it, and naming one is not drawing one.
-  it("is drawn by the three modules whose rows carry marks", () => {
+  it("is drawn by the three modules whose rows have earned it", () => {
     const drawing = Object.entries(SOURCES)
       .filter(([path]) => path !== "../src/picking.tsx")
       .filter(([, source]) => /<Listbox\b/.test(source))
