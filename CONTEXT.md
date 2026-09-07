@@ -348,7 +348,7 @@ reads nothing of this server.
 startup line carries `workbench=`, and on the desktop app the browser opened at
 startup and the tray's **Open** both go to the link, built afresh at each press
 so a browser that forgot the cookie is let in again.
-**Reset key**, under the QR code on **Remote Access**, re-issues it: everything
+**Reset key**, its own section on **Remote Access**, re-issues it: everything
 holding the old one meets a 401 on its next request, and the browser that
 pressed stays in — a reset made from the phone is a reset made from the only
 device that could reach the server at all. One secret with a press behind it,
@@ -385,8 +385,12 @@ on a host is shown a command they are also the one to run.
 **And the address by itself lets nobody in**, which is why the pane draws the
 login link rather than the address: a QR code, drawn in the browser from an
 encoder the viewer ships because a workbench standing behind a secret has no
-business handing it to a third party to render, with the link to copy beside it
-and **Reset key** under them.
+business handing it to a third party to render, with the link to copy beside it.
+**And the key those links carry is a section under them**, on every state of the
+pane rather than under the code: the key gates a machine that has never heard of
+a tailnet exactly as it gates one serving on it, so **Reset key** is not a press
+the serve switch can take away — turning remote access off is one of the moments
+somebody wants a link back.
 **The banner is how somebody finds it**: one line above the Timeline while the
 first grilling is writing its first Question Set — the first moment there is
 nothing to do at the desk — pointing here and dismissed with *Got it*. The

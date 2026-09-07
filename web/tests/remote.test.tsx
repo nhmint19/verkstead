@@ -401,7 +401,8 @@ describe("the login link", () => {
   });
 
   /// A machine serving nothing has no address to be let in at, so there is
-  /// nothing to point a camera at and nothing for a Reset to take back.
+  /// nothing to point a camera at — and the key is still there to be taken
+  /// back, because it is not Tailscale's.
   it("draws nothing to scan on a machine serving nothing", async () => {
     mountPane(OFF);
 
@@ -410,7 +411,32 @@ describe("the login link", () => {
     );
 
     expect(screen.queryByRole("img")).toBeNull();
-    expect(screen.queryByText("Reset key")).toBeNull();
+    expect(screen.getByText("Reset key")).toBeTruthy();
+  });
+
+  /// And so has a machine with no Tailscale on it, one whose daemon is not
+  /// answering, and one whose serve could not be read.
+  ///
+  /// The key gates every install, and the daemon prints it in the startup line
+  /// wherever it is running — so a key that has gone somewhere it should not
+  /// have has to be re-issuable whatever the tailnet is doing. Turning the
+  /// serve off is one of the moments somebody would want it back, and a Reset
+  /// that went away with the address would be the press removing itself.
+  it("keeps Reset key on every state of the pane", async () => {
+    for (const [named, told] of [
+      ["with no Tailscale", ABSENT],
+      ["with the daemon down", DOWN],
+      ["whose serve could not be read", UNREADABLE_SERVE],
+    ] as const) {
+      const { unmount } = mountPane(told);
+
+      expect(
+        await waitFor(() => screen.getByText("Reset key")),
+        `the ${named} machine`,
+      ).toBeTruthy();
+
+      unmount();
+    }
   });
 
   /// **Reset key** re-issues the secret, and the QR and the link redraw on the

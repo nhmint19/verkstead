@@ -45,8 +45,12 @@
 //! business handing that secret to a third party to render, and an install on a
 //! tailnet may have nowhere to fetch from — see [`Qr`].
 //!
-//! **Reset key sits under them**, because it is what takes that link back. It
-//! re-issues the secret, which logs every other device out: the QR and the link
+//! **Reset key is a section of its own**, because the key is not Tailscale's.
+//! It gates a machine that has never heard of a tailnet exactly as it gates one
+//! serving on it, and the daemon prints it in the startup line wherever it is
+//! running — so it stands on every state of this pane rather than under the
+//! code, and turning the serve off does not take away the press that would take
+//! a link back. Re-issuing logs every other device out: the QR and the link
 //! redraw on the new one out of the answer, and whatever was holding the old one
 //! meets a 401 on its next request. The browser that pressed it stays in — a
 //! reset made from the phone on the tailnet is a reset made from the only device
@@ -337,9 +341,10 @@ export function RemotePane(props: {
                       </dl>
 
                       {/* And the way in, where there is an address to be let in
-                          at. A machine serving nothing has none — and so has
-                          nothing for a camera to be pointed at, and nothing for
-                          a Reset to take back. */}
+                          at. A machine serving nothing has none, and so has
+                          nothing for a camera to be pointed at — the key those
+                          links carry is a section of its own below, which every
+                          machine has. */}
                       <Show when={here.link} keyed>
                         {(link) => <Reach link={link} />}
                       </Show>
@@ -347,6 +352,13 @@ export function RemotePane(props: {
                   )}
                 </Match>
               </Choose>
+
+              {/* And the key itself, under whichever of the four the machine
+                  turned out to be. It is not Tailscale's — it gates a machine
+                  that has never heard of a tailnet exactly as it gates one
+                  serving on it — so the press that re-issues it must not be a
+                  thing the serve switch can take away. */}
+              <TheKey />
             </div>
           )}
         </Match>
@@ -355,28 +367,18 @@ export function RemotePane(props: {
   );
 }
 
-/// How a phone gets in: the login link as a code to point a camera at, as text
-/// to paste, and the press that takes it back.
+/// How a phone gets in: the login link as a code to point a camera at, and as
+/// text to paste.
 ///
-/// Three things about one string, which is why they are one section rather than
-/// three. The QR is for the phone in somebody's hand; the copy is for every
-/// other way a link travels — a laptop on the same tailnet, a note to oneself —
-/// and Reset key is what makes both of them recoverable, because a link handed
-/// out is a link that cannot be taken back any other way.
+/// Two things about one string. The QR is for the phone in somebody's hand; the
+/// copy is for every other way a link travels — a laptop on the same tailnet, a
+/// note to oneself.
 ///
-/// The press answers with the machine read again, exactly as the serve switch's
-/// does, so it is written straight over the read this pane is drawn from: the
-/// code above redraws on the new key out of the answer rather than out of a
-/// second request.
+/// Drawn only where there is a served address to build a link on, because that
+/// is what a link *is* here: a machine serving nothing has nothing for a camera
+/// to be pointed at. The key those links carry is a section of its own below,
+/// which every machine has whether or not it is serving.
 function Reach(props: { link: string }): JSX.Element {
-  const queries = useQueryClient();
-
-  const reset = useMutation(() => ({
-    mutationFn: resetKey,
-    onSuccess: (reading: RemoteView) =>
-      queries.setQueryData(["remote"], reading),
-  }));
-
   return (
     <section class={styles.reach}>
       <h3>Open the workbench on a phone</h3>
@@ -397,6 +399,47 @@ function Reach(props: { link: string }): JSX.Element {
         The link carries the workbench key, so anything holding it is in: it is
         worth as much as the workbench itself.
       </Note>
+    </section>
+  );
+}
+
+/// And the key every one of those links hands over, with the press that takes
+/// it back.
+///
+/// **On every state of this pane**, because the key is not Tailscale's. It
+/// gates a machine that has never heard of a tailnet exactly as it gates one
+/// serving on it, and the daemon prints it in its startup line wherever it is
+/// running — so a key that has gone somewhere it should not have has to be
+/// re-issuable from the same place whether or not there is an address in front
+/// of it. Drawn under the code where there is one, and on its own where there
+/// is not.
+///
+/// Which also settles the awkward one: turning the serve *off* is exactly a
+/// moment somebody might want the key back, and a Reset that went away with the
+/// address would be the press removing itself.
+///
+/// The press answers with the machine read again, exactly as the serve switch's
+/// does, so it is written straight over the read this pane is drawn from: the
+/// code above redraws on the new key out of the answer rather than out of a
+/// second request.
+function TheKey(): JSX.Element {
+  const queries = useQueryClient();
+
+  const reset = useMutation(() => ({
+    mutationFn: resetKey,
+    onSuccess: (reading: RemoteView) =>
+      queries.setQueryData(["remote"], reading),
+  }));
+
+  return (
+    <section class={styles.key}>
+      <h3>The workbench key</h3>
+
+      <Note>
+        Every page of this workbench answers 401 without the key, and a login
+        link is the address with it on the end. Everything you have opened one
+        in stays logged in until the key is re-issued.
+      </Note>
 
       <button
         type="button"
@@ -409,8 +452,9 @@ function Reach(props: { link: string }): JSX.Element {
 
       <Note>
         A new key over the old one, for a phone that was lost or a link that
-        went where it should not have. Every other device is logged out by it,
-        and the code above becomes the way back in.
+        went where it should not have. Every other device is logged out by it;
+        this browser stays in, and the new link is the one the tray's Open and
+        the startup line hand out from here on.
       </Note>
 
       <Show when={reset.isError}>

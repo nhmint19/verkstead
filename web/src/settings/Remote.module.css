@@ -137,19 +137,21 @@
   }
 }
 
-/* How a phone gets in, under the readings it is made of: the code, the link
-   beside it, and the press that takes both back.
+/* How a phone gets in, under the readings it is made of — the code and the
+   link beside it — and, under that again, the key both of them hand over.
 
-   A rule above it rather than a card of its own, because it is the same
-   section — what is above is what the machine is, and this is what to do with
+   A rule above each rather than a card of its own, because they are the same
+   section: what is above is what the machine is, and these are what to do with
    it. */
-.reach {
+.reach,
+.key {
   margin-top: 1.5rem;
   padding-top: 1.25rem;
   border-top: 1px solid var(--edge);
 }
 
-.reach h3 {
+.reach h3,
+.key h3 {
   margin: 0 0 0.75rem;
   font-size: 0.95rem;
 }
@@ -234,7 +236,13 @@
   opacity: 0.6;
 }
 
-.reach .reset + p {
+/* The key section starts with its own heading, so the button under it needs no
+   space of its own — and the sentence under the button sits close to it. */
+.key .reset {
+  margin-top: 0.85rem;
+}
+
+.key .reset + p {
   margin-top: 0.5rem;
 }
 
