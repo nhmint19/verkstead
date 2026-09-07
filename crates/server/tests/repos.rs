@@ -37,6 +37,9 @@ use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{ConflictResolution, Created, Registered, RepoEntry, RepoRemoved, RepoView};
+// Only the shell stand-in below authenticates as a saved token, and that is
+// off Windows with the shell it needs.
+#[cfg(unix)]
 use verkstead_server::settings::Settings;
 use verkstead_server::{Gh, open_database, router_asking_github, router_keeping, store};
 
@@ -1012,6 +1015,14 @@ async fn create_on_github(app: &Router, parent: &Path, name: &str) -> Created {
 ///
 /// `notes` is where the stub writes down what it was asked; `answering` is the
 /// body of the script, run with Verkstead's arguments from `$1`.
+///
+/// The script is a `/bin/sh` one, which is what leaves this and the three tests
+/// that ask for it off Windows, the way the same stand-in is kept off it in
+/// `sharing.rs` and `ui_content.rs`: a stand-in that is a shell script is a
+/// stand-in for a machine with a shell at that path. What they are about — what
+/// Verkstead asks GitHub for, and what it makes of a refusal — is nothing a
+/// platform changes, and the rest of this file is asked wherever the suite runs.
+#[cfg(unix)]
 async fn workbench_with_gh(answering: &str) -> (tempfile::TempDir, tempfile::TempDir, Router) {
     let dir = tempfile::tempdir().unwrap();
     let notes = tempfile::tempdir().unwrap();
@@ -1045,7 +1056,9 @@ async fn workbench_with_gh(answering: &str) -> (tempfile::TempDir, tempfile::Tem
     (dir, notes, router_asking_github(pool, data_dir, gh))
 }
 
-/// What the stub wrote down under `notes`, one file at a time.
+/// What the stub wrote down under `notes`, one file at a time. Off Windows with
+/// the stub itself, whose only readers are the creates that reach GitHub.
+#[cfg(unix)]
 fn noted(notes: &tempfile::TempDir, what: &str) -> String {
     std::fs::read_to_string(notes.path().join(what))
         .unwrap_or_else(|error| panic!("the stub wrote no {what}: {error}"))
@@ -1056,6 +1069,7 @@ fn noted(notes: &tempfile::TempDir, what: &str) -> String {
 /// The Repo a create that reached GitHub hands back, which is the same
 /// [`Created::Made`] a create with nothing to push hands back: the tick is not a
 /// second outcome, it is more of the one create.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_created_repository_is_private_on_github_with_origin_set_and_main_pushed() {
     let root = tempfile::tempdir().unwrap();
@@ -1107,6 +1121,7 @@ async fn a_created_repository_is_private_on_github_with_origin_set_and_main_push
 }
 
 /// A create that was not asked for a remote does not go near `gh` at all.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_create_with_the_tick_off_asks_github_nothing() {
     let root = tempfile::tempdir().unwrap();
@@ -1125,6 +1140,7 @@ async fn a_create_with_the_tick_off_asks_github_nothing() {
 /// The directory, the commit and the registration all stand — what is missing is
 /// a remote that can be added afterwards — so the answer carries the Repo *and*
 /// what failed rather than choosing between them.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_github_that_would_not_make_the_repository_leaves_the_local_one_registered() {
     let root = tempfile::tempdir().unwrap();
