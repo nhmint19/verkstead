@@ -60,7 +60,7 @@ import {
 import { carrying, drag, dropOn } from "./dragging";
 import { browse, held, listingAt } from "./fields";
 import { actionRows, offered, opened, pick, press, rows, showing } from "./pickers";
-import { askedFor, json, serving, whenever } from "./serving";
+import { askedFor, hangs, json, serving, whenever } from "./serving";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
 import listing from "./fixtures/directories.json" with { type: "json" };
 import made from "./fixtures/repo.json" with { type: "json" };
@@ -898,13 +898,17 @@ describe("making a repo from the Repo dropdown", () => {
   /// The workbench with the create answered however the test says, that
   /// directory served both by name and as the server's home, and the settings
   /// saying whether there is a token.
+  ///
+  /// The settings as an answer rather than as a view, because one of the states
+  /// this card has is the read not having landed — see the test that holds it
+  /// with [`hangs`].
   const creating = (
     answer: () => Promise<Response>,
-    settings: SettingsView = UNTOKENED,
+    settings: () => Promise<Response> = json(UNTOKENED),
   ) =>
     theWorkbench(
       whenever("/api/ui/repos/new", answer, "POST"),
-      whenever("/api/ui/settings", json(settings)),
+      whenever("/api/ui/settings", settings),
       // What the repo it made was last grilled with, which the page asks for the
       // moment the draft lands on it — the fixture's repos are served this
       // already, and the one this create makes is not one of them.
@@ -914,12 +918,24 @@ describe("making a repo from the Repo dropdown", () => {
       json(null),
     );
 
-  /// Open the modal off the dropdown's foot.
-  async function createRepoModal(): Promise<void> {
+  /// Open the modal off the dropdown's foot, and wait for it to have settled
+  /// what it is going to say about GitHub.
+  ///
+  /// The card asks the settings one thing — whether a token is saved — and says
+  /// neither the tick nor the note until they answer, taking no create in the
+  /// meantime. So a test that is about to fill it in waits for that answer, the
+  /// way the human filling it in does.
+  ///
+  /// `settled` off for the one test that is about the wait itself.
+  async function createRepoModal(settled = true): Promise<void> {
     await waitFor(() => expect(offered("Repo").length).toBe(REPOS.length));
     press("Repo", "Create repo");
 
     await waitFor(() => expect(screen.getByLabelText(WHERE)).toBeTruthy());
+
+    if (settled) {
+      await waitFor(() => expect(tick() ?? noRemote()).toBeTruthy());
+    }
   }
 
   /// What the two fields are labelled, which is how they are found.
@@ -932,6 +948,11 @@ describe("making a repo from the Repo dropdown", () => {
   /// The tick as the card is drawing it, or `null` where it is not drawn at all.
   function tick(): HTMLInputElement | null {
     return screen.queryByLabelText(ON_GITHUB) as HTMLInputElement | null;
+  }
+
+  /// And what stands where it would have on a Verkstead with no token saved.
+  function noRemote(): HTMLElement | null {
+    return screen.queryByText(/needs a remote/i);
   }
 
   /// Fill them in and send them.
@@ -1065,7 +1086,7 @@ describe("making a repo from the Repo dropdown", () => {
   /// saved one has said what they mean to do with it, and the pipeline this
   /// repository is about to go through ends in a push.
   it("asks for it on GitHub too where a token is saved", async () => {
-    const fetching = creating(json({ Made: MADE }), TOKENED);
+    const fetching = creating(json({ Made: MADE }), json(TOKENED));
     const { container } = mount("/compose");
 
     await composing(container);
@@ -1087,7 +1108,7 @@ describe("making a repo from the Repo dropdown", () => {
   /// And taking it off is a repository made here only, which is a thing somebody
   /// may well mean: the tick is on by default rather than compulsory.
   it("leaves GitHub alone where the tick is taken off", async () => {
-    const fetching = creating(json({ Made: MADE }), TOKENED);
+    const fetching = creating(json({ Made: MADE }), json(TOKENED));
     const { container } = mount("/compose");
 
     await composing(container);
@@ -1120,6 +1141,44 @@ describe("making a repo from the Repo dropdown", () => {
     expect(tick()).toBeNull();
   });
 
+  /// And says neither of those things until it has been told which it is.
+  ///
+  /// Nothing else on this page reads the settings, so the read this card starts
+  /// is always in flight when it opens. A card that took *not answered yet* for
+  /// *no token* would put the sentence above in front of everybody who has one,
+  /// every time, and replace it with the tick a moment later.
+  it("says nothing about GitHub until the settings have answered", async () => {
+    const fetching = creating(json({ Made: MADE }), hangs());
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await createRepoModal(false);
+
+    // The fields are there, so this is the card drawn rather than the card
+    // still coming.
+    expect(screen.getByLabelText(CALLED)).toBeTruthy();
+    expect(tick()).toBeNull();
+    expect(screen.queryByText(/needs a remote/i)).toBeNull();
+
+    // And it takes no create either: one sent now would ask nothing of GitHub
+    // without the card ever having said so, which is the sentence going missing
+    // rather than being wrong.
+    fireEvent.input(screen.getByLabelText(WHERE), {
+      target: { value: "/home/ada/src" },
+    });
+    fireEvent.input(screen.getByLabelText(CALLED), {
+      target: { value: "widgets" },
+    });
+
+    const press = screen.getByRole("button", {
+      name: "Create",
+    }) as HTMLButtonElement;
+    expect(press.disabled).toBe(true);
+
+    fireEvent.click(press);
+    expect(askedFor(fetching, "/api/ui/repos/new")).toBe(0);
+  });
+
   /// A GitHub failure after the local repository exists is not a failed create:
   /// the directory, the commit and the registration all stand. So the card stops
   /// being a form and says what failed, and the Repo goes onto the draft on the
@@ -1133,7 +1192,7 @@ describe("making a repo from the Repo dropdown", () => {
           why: "`gh` said: Name already exists on this account",
         },
       } satisfies Created),
-      TOKENED,
+      json(TOKENED),
     );
     const { container } = mount("/compose");
 

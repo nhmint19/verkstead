@@ -840,6 +840,20 @@ export function OpenRepo(props: {
 /// local repository is still worth making, and the token can be saved
 /// afterwards.
 ///
+/// **And neither of them until the settings have answered**, which is a state of
+/// its own rather than the second one said early. Nothing else on either page
+/// this card opens over reads the settings, so that query is cold every time it
+/// opens: a card that took *not read yet* for *no token* would put the note in
+/// front of somebody who has one, every time, and swap it for the tick it was
+/// denying a moment later. So it says nothing about GitHub while it does not
+/// know, and takes no create either — a create that went out then would ask
+/// nothing of GitHub with the card never having said so.
+///
+/// A read that *failed* is an answer, though, and the answer is the same as no
+/// token: the local repository is still worth making, and a card that stayed
+/// shut because the settings were unreadable would be a create nobody could
+/// make for a reason that has nothing to do with creating.
+///
 /// A refusal keeps the modal up with the reason under the fields, for the
 /// registration's reason: what answers a refusal is correcting what was typed,
 /// and a modal that closed on one would take the correction away with it.
@@ -865,10 +879,28 @@ export function CreateRepo(props: {
   // What Verkstead has been told, for the one thing this card asks of it:
   // whether a GitHub token is saved. Never the token itself — what comes back
   // about it is that there is one and what its last four characters are.
+  //
+  // Read from here rather than already in hand: nothing else on the compose
+  // page or on a draft's Repo panel reads the settings, so this card is always
+  // what starts that read — which is why the answer's absence has to be a state
+  // of its own below.
   const settings = useSettings();
 
-  // Whether there is one, which is what says the tick is drawn at all.
-  const tokened = () => settings.data?.github_token != null;
+  // Whether there is one — and `null` while the read above is still out, which
+  // is neither.
+  //
+  // Three states rather than two, because a card that read an unanswered query
+  // as *no token* would say so: the note under the fields would stand where the
+  // tick belongs, be read, and be replaced a moment later by the tick it was
+  // denying. What the card does while it does not know is say nothing about
+  // GitHub and take no create — see the two `Show`s and the press below.
+  //
+  // Pending rather than absent data, so that a settings read which *failed* is
+  // an answer like any other: false, which is the true one — a token nothing
+  // can read is a token nothing can make a repository as — and the local
+  // repository is still worth making, which a card held shut would not be.
+  const tokened = (): boolean | null =>
+    settings.isPending ? null : settings.data?.github_token != null;
 
   // And whether it is ticked, which starts on: somebody who has saved a token
   // has said what they mean to do with it.
@@ -981,7 +1013,9 @@ export function CreateRepo(props: {
 
     const where = parent().trim();
     const called = name().trim();
-    if (where === "" || called === "") {
+    // Nothing while the settings are unread, for the press's own reason: what
+    // this card would ask of GitHub is not settled yet.
+    if (where === "" || called === "" || tokened() === null) {
       return;
     }
 
@@ -990,7 +1024,7 @@ export function CreateRepo(props: {
     create.mutate({
       parent: where,
       name: called,
-      github: tokened() && onGithub(),
+      github: tokened() === true && onGithub(),
     });
   };
 
@@ -1051,8 +1085,11 @@ export function CreateRepo(props: {
           />
 
           {/* And the third question, asked only where there is a token to answer
-            it with — see the note below, which is what stands here instead. */}
-          <Show when={tokened()}>
+            it with — see the note below, which is what stands here instead.
+            Neither of them until the settings have answered: what is drawn there
+            is what the card is about to do about GitHub, and it does not know
+            yet. */}
+          <Show when={tokened() === true}>
             <label class={styles.github}>
               <input
                 type="checkbox"
@@ -1067,7 +1104,7 @@ export function CreateRepo(props: {
             making, and the token can be saved afterwards. But the pipeline ends
             in a push and a pull request, so a repository with nowhere to push
             is one that will stop halfway through the first conversation. */}
-          <Show when={!tokened()}>
+          <Show when={tokened() === false}>
             <Note class={styles.remote}>
               No GitHub token is saved, so this repo is made here only. It needs
               a remote before the work on it can be finished — Settings has the
@@ -1076,10 +1113,16 @@ export function CreateRepo(props: {
           </Show>
 
           <div class={styles.buttons}>
+            {/* Held while the settings are unread as well as while a field is
+                empty, and for the same kind of reason: a create that went out
+                then would ask nothing of GitHub without the card ever having
+                said so, which is the sentence above going missing rather than
+                being wrong. */}
             <button
               type="submit"
               disabled={
                 create.isPending ||
+                tokened() === null ||
                 parent().trim() === "" ||
                 name().trim() === ""
               }

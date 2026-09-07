@@ -286,6 +286,7 @@ import more from "./fixtures/transcript-more.json" with { type: "json" };
 import screenOfIt from "./fixtures/screen.json" with { type: "json" };
 import wrapping from "./fixtures/conversation-wrapping.json" with { type: "json" };
 import repoView from "./fixtures/repo.json" with { type: "json" };
+import told from "./fixtures/settings.json" with { type: "json" };
 
 /// The renderer, which is each pane's own doing rather than this file's: what is
 /// asked here is whether a commit's pane reached for it at all, and never what it
@@ -4047,6 +4048,11 @@ describe("switching a draft's repo", () => {
         json({ Made: { ...(repoView as RepoView), id: 4343 } }),
         "POST",
       ),
+      // The card asks the settings one thing — whether a GitHub token is saved
+      // — and says nothing about GitHub, and takes no create, until they
+      // answer. Which is a read this page makes nowhere else, so it is served
+      // here rather than left to the fallback.
+      whenever("/api/ui/settings", json(told)),
       json("Switched"),
     );
     const { container } = mount(`/conversations/${OPEN.id}`);
@@ -4057,6 +4063,14 @@ describe("switching a draft's repo", () => {
     fireEvent.input(
       await waitFor(() => screen.getByLabelText("Where it goes")),
       { target: { value: "/home/ada/src" } },
+    );
+
+    // Waited for, as the human filling the card in waits for it: what says the
+    // settings have answered is the card having something to say about GitHub.
+    await waitFor(() =>
+      expect(
+        screen.getByLabelText("Create it on GitHub too, privately"),
+      ).toBeTruthy(),
     );
     fireEvent.input(screen.getByLabelText("What it is called"), {
       target: { value: "widgets" },
