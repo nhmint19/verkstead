@@ -4084,6 +4084,64 @@ describe("switching a draft's repo", () => {
     );
   });
 
+  /// And once, which is the whole of what a move is: the card is taken away by
+  /// the very landing that moves the work, and a modal that said its close back
+  /// afterwards would land the same Repo a second time — two switches onto the
+  /// repo the draft is already on, which re-picks the base. See `Modal.tsx`.
+  ///
+  /// The GitHub-failed create is the one that goes out this way: it is the only
+  /// answer where landing the Repo is what the press *out* of the card does
+  /// rather than what the create's own answer does.
+  it("moves it once, though the card lands it on the way out", async () => {
+    const fetching = theWorkbench(
+      whenever(
+        "/api/ui/repos/new",
+        json({
+          MadeWithoutRemote: {
+            repo: { ...(repoView as RepoView), id: 4343 },
+            why: "`gh` said: Name already exists on this account",
+          },
+        }),
+        "POST",
+      ),
+      whenever("/api/ui/settings", json(told)),
+      json("Switched"),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await repoRows(container);
+    press("Repo", "Create repo");
+
+    fireEvent.input(
+      await waitFor(() => screen.getByLabelText("Where it goes")),
+      { target: { value: "/home/ada/src" } },
+    );
+    fireEvent.input(screen.getByLabelText("What it is called"), {
+      target: { value: "widgets" },
+    });
+    await waitFor(() =>
+      expect(
+        screen.getByLabelText("Create it on GitHub too, privately"),
+      ).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    // The card is what happened rather than a form now, and the one press out
+    // of it is what lands the Repo.
+    fireEvent.click(
+      await waitFor(() => screen.getByRole("button", { name: "Done" })),
+    );
+
+    await waitFor(() =>
+      expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/repo`)).toBe(1),
+    );
+    // Waited past the turn a second close would land on, so that a second move
+    // has had every chance to go out rather than merely not having gone yet.
+    await new Promise((go) => setTimeout(go, 0));
+
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/repo`)).toBe(1);
+  });
+
   /// A later round, steered onto work that is already built: the checkout is of
   /// one repository, so the server refuses the switch and the picker says so by
   /// being disabled. The branch and the base go entirely, as they always have —
