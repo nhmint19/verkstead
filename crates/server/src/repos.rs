@@ -19,7 +19,9 @@
 //! the sandboxed sessions will see later when they run it themselves. Making one
 //! is git as well: a directory, `git init` onto `main`, and a `README.md`
 //! committed as the configured author, after which it is registered through the
-//! very call a typed path goes through — see [`create`].
+//! very call a typed path goes through — see [`create`]. And, where it was asked
+//! for, `gh` puts the same repository on GitHub and pushes to it, which is the
+//! one thing here that can fail without the create failing.
 //!
 //! And the one thing a registered Repo is *told* rather than read: how a merge
 //! conflict on its pull requests is resolved, which is an override of the
@@ -33,6 +35,7 @@ use anyhow::{Context, Result};
 use sqlx::SqlitePool;
 use verkstead_render::{ConflictResolution, Created, Registered, RepoEntry, RepoRemoved, RepoView};
 
+use crate::github::Gh;
 use crate::resolved::{Resolved, resolve};
 use crate::settings::GitAuthor;
 use crate::store;
@@ -120,14 +123,28 @@ pub(crate) fn entry(repo: store::Repo) -> RepoEntry {
 /// and a repository whose first commit is by nobody is that repository's history
 /// from now on.
 ///
+/// **And where `github` is asked for, a fifth thing: the same repository on
+/// GitHub.** `gh repo create`, private, sourced from the directory it has just
+/// made, with `origin` written and `main` pushed — see
+/// [`crate::github::create_repository`]. Run after the first commit, there being
+/// nothing to push before it, and before the registration, so that what is read
+/// back is a Repo with its remote on it.
+///
+/// A GitHub failure there is **not** a failed create. The directory, the commit
+/// and the registration all stand, and what is missing is a remote that can be
+/// added afterwards — so the answer carries the Repo *and* what failed rather
+/// than choosing between them: [`Created::MadeWithoutRemote`].
+///
 /// The filesystem half runs off the runtime the way the registration's does:
 /// making a directory and shelling out to git are both blocking, and a create is
 /// rare enough that the thread it borrows costs nothing.
 pub(crate) async fn create(
     pool: &SqlitePool,
     author: &GitAuthor,
+    gh: &Gh,
     parent: &str,
     name: &str,
+    github: bool,
 ) -> Result<Created> {
     // Both halves or neither. Git wants an identity rather than half of one, and
     // what it would say about the half that was missing is a sentence about git
@@ -146,11 +163,36 @@ pub(crate) async fn create(
     // intention and every later reading of the name would carry it.
     let name = name.trim().to_owned();
 
-    let made = tokio::task::spawn_blocking(move || make(&parent, &name, &author)).await?;
+    let called = name.clone();
+    let made = tokio::task::spawn_blocking(move || make(&parent, &called, &author)).await?;
 
     let path = match made {
         Ok(path) => path,
         Err(refusal) => return Ok(refusal.into()),
+    };
+
+    // GitHub, where it was asked for — after the commit, because there is
+    // nothing to push before it, and before the registration, so that the Repo
+    // read back at the end is one with its remote already on it.
+    //
+    // What comes back is the reason it did not happen rather than a failure to
+    // return: a repository that is on somebody's disk is made, whatever GitHub
+    // said about it, and taking the local one back over a token that has
+    // expired would be the worse of the two mistakes.
+    let unpushed = match github {
+        false => None,
+        true => {
+            let gh = gh.clone();
+            let dir = path.clone();
+            let called = name.clone();
+
+            tokio::task::spawn_blocking(move || {
+                crate::github::create_repository(&gh, &dir, &called)
+            })
+            .await?
+            .err()
+            .map(|trouble| trouble.why())
+        }
     };
 
     // Registered through the very call the form's registration goes through:
@@ -179,7 +221,10 @@ pub(crate) async fn create(
     // [`Created::Made`]. `None` is a Repo taken off the registry between the two
     // reads, which is nothing that happens to somebody making one.
     Ok(match opened(pool, repo.id).await? {
-        Some(view) => Created::Made(view),
+        Some(repo) => match unpushed {
+            Some(why) => Created::MadeWithoutRemote { repo, why },
+            None => Created::Made(repo),
+        },
         None => {
             Created::Refused("the repository was registered but could not be read back".to_owned())
         }

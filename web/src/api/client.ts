@@ -232,8 +232,17 @@ export function registerRepo(path: string): Promise<Registered> {
 /// server never agreed to. Every refusal is in the body for the registration's
 /// reason: each is a different sentence to put in front of the human, and none
 /// of them is something to retry.
-export function createRepo(parent: string, name: string): Promise<Created> {
-  return post<Created>("/api/ui/repos/new", { parent, name });
+///
+/// `github` is the modal's tick: the same repository on GitHub, private, with
+/// `origin` written and `main` pushed. False wherever no token is saved, there
+/// being nothing to make it as — and a GitHub failure after the local repository
+/// exists comes back as the Repo *and* the reason rather than as either.
+export function createRepo(
+  parent: string,
+  name: string,
+  github: boolean,
+): Promise<Created> {
+  return post<Created>("/api/ui/repos/new", { parent, name, github });
 }
 
 /// Take one off the registry, which is an unregistering rather than a delete:

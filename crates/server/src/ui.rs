@@ -789,8 +789,8 @@ async fn register_repo(
 ///
 /// The other way a Repo arrives, and the one that ends in the same registration:
 /// a directory under the parent, `git init` onto `main`, a `README.md` committed
-/// as the configured author, and the Repo the pane is drawn from back. See
-/// [`crate::repos::create`].
+/// as the configured author, the same repository on GitHub where that was asked
+/// for, and the Repo the pane is drawn from back. See [`crate::repos::create`].
 ///
 /// Every refusal is a named outcome in the body rather than a status, the way
 /// the registration's are and for the same reason: each is a different sentence
@@ -798,7 +798,8 @@ async fn register_repo(
 ///
 /// The author is read at the moment of the call rather than held from startup,
 /// the way a publish reads it: somebody filling the settings in and coming
-/// straight back has an author.
+/// straight back has an author. The token the `gh` authenticates as is read the
+/// same way and for the same reason — see [`crate::github`].
 async fn create_repo(
     State(state): State<AppState>,
     Json(creation): Json<Creation>,
@@ -808,8 +809,10 @@ async fn create_repo(
     match crate::repos::create(
         &state.pool,
         author.git_author(),
+        &state.github,
         &creation.parent,
         &creation.name,
+        creation.github,
     )
     .await
     {

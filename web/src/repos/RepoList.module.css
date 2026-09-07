@@ -384,3 +384,37 @@
 .form .name {
   width: 100%;
 }
+
+/* And the third question the create asks, where there is a token to answer it
+   with: a tick and its words on one line, because what it says is short and a
+   label above a box would read as a fourth field. */
+.form .github {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
+  font-size: 0.9rem;
+}
+
+.form .github input {
+  /* The box is the control here, so it keeps its own width rather than taking
+     the full-width one every other input in this form has. */
+  width: auto;
+  margin: 0;
+}
+
+/* What stands where the tick would be on a Verkstead with no token saved. Given
+   the tick's own air above it, so that the card is the same height either way
+   and the buttons do not move when a token is saved. */
+.form .remote {
+  margin: 0.85rem 0 0;
+}
+
+/* What the card becomes when a repository was made and GitHub would not have
+   it: the news where the fields were, and one press out. Its own class rather
+   than the form's, because nothing in it is a field — what it shares is the
+   line the reason is drawn on. */
+.made .failure {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}

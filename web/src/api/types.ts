@@ -1609,13 +1609,12 @@ attachments: Array<AttachmentView>, };
  * disk, so what comes back has to be a sentence about their machine rather
  * than a status code.
  *
- * A refusal registers nothing. [`Created::Made`] is the only outcome that
- * leaves a Repo, and it carries the whole opened Repo rather than the row: the
- * modal that asked for it is about to put a draft on it, and a page that had to
- * go and read the Repo it just made would be asking for something the server
- * was already holding.
+ * A refusal registers nothing. The two outcomes that leave a Repo both carry
+ * the whole opened Repo rather than the row: the modal that asked for it is
+ * about to put a draft on it, and a page that had to go and read the Repo it
+ * just made would be asking for something the server was already holding.
  */
-export type Created = { "Made": RepoView } | "ParentMissing" | "AlreadyThere" | "BadName" | "NoAuthor" | { "Refused": string };
+export type Created = { "Made": RepoView } | { "MadeWithoutRemote": { repo: RepoView, why: string, } } | "ParentMissing" | "AlreadyThere" | "BadName" | "NoAuthor" | { "Refused": string };
 
 /**
  * A repository the human is asking Verkstead to *make*, said as where it is to
@@ -1637,7 +1636,23 @@ parent: string,
  * what a Repo is called is read off the directory rather than claimed, and
  * a create is the one moment the human chooses the directory.
  */
-name: string, };
+name: string, 
+/**
+ * And whether the same repository is to be made on GitHub, pushed to, and
+ * left as this one's `origin`.
+ *
+ * Asked because the pipeline ends in a push and a pull request: a
+ * repository with nowhere to push is one that will stop halfway through
+ * the first Conversation. What is made there is private — a repository
+ * made from here is somebody's work before it is anybody else's business,
+ * and public is a decision to take deliberately rather than by leaving a
+ * box alone.
+ *
+ * False where no token is configured, there being nothing to make it as:
+ * the modal draws no tick at all then, and says a remote is needed before
+ * the work is finished.
+ */
+github: boolean, };
 
 /**
  * What a row is about.

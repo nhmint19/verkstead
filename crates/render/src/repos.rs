@@ -11,6 +11,10 @@
 //! Making one is refused the same way and for the same reason, with one more
 //! of its own behind it: a create that got half way is a directory on somebody's
 //! disk rather than a form to fill in again.
+//!
+//! And a create may reach GitHub as well, which is the one outcome here that is
+//! neither a Repo nor a refusal: the repository is made, and the remote it was
+//! to have is not. Both halves travel — see [`Created::MadeWithoutRemote`].
 
 use serde::{Deserialize, Serialize};
 
@@ -193,6 +197,21 @@ pub struct Creation {
     /// what a Repo is called is read off the directory rather than claimed, and
     /// a create is the one moment the human chooses the directory.
     pub name: String,
+
+    /// And whether the same repository is to be made on GitHub, pushed to, and
+    /// left as this one's `origin`.
+    ///
+    /// Asked because the pipeline ends in a push and a pull request: a
+    /// repository with nowhere to push is one that will stop halfway through
+    /// the first Conversation. What is made there is private — a repository
+    /// made from here is somebody's work before it is anybody else's business,
+    /// and public is a decision to take deliberately rather than by leaving a
+    /// box alone.
+    ///
+    /// False where no token is configured, there being nothing to make it as:
+    /// the modal draws no tick at all then, and says a remote is needed before
+    /// the work is finished.
+    pub github: bool,
 }
 
 /// What became of a create.
@@ -202,17 +221,31 @@ pub struct Creation {
 /// disk, so what comes back has to be a sentence about their machine rather
 /// than a status code.
 ///
-/// A refusal registers nothing. [`Created::Made`] is the only outcome that
-/// leaves a Repo, and it carries the whole opened Repo rather than the row: the
-/// modal that asked for it is about to put a draft on it, and a page that had to
-/// go and read the Repo it just made would be asking for something the server
-/// was already holding.
+/// A refusal registers nothing. The two outcomes that leave a Repo both carry
+/// the whole opened Repo rather than the row: the modal that asked for it is
+/// about to put a draft on it, and a page that had to go and read the Repo it
+/// just made would be asking for something the server was already holding.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Created {
     /// Made: the directory is there, `main` holds one commit by the configured
-    /// author, and the Repo is on the registry.
+    /// author, and the Repo is on the registry — and where GitHub was asked
+    /// for, the repository is there too, private, with `origin` set and `main`
+    /// pushed.
     Made(RepoView),
+
+    /// Made here, and not on GitHub.
+    ///
+    /// Not a failed create, which is why it carries the Repo the way
+    /// [`Created::Made`] does: the directory, the commit and the registration
+    /// all stand, and what is missing is a remote that can be added afterwards.
+    /// So the answer holds both halves rather than choosing between them — the
+    /// Repo lands on the draft exactly as a clean create's does, and the modal
+    /// says what failed.
+    ///
+    /// `why` is `gh`'s own account of it, for the reason [`Created::Refused`]
+    /// carries git's.
+    MadeWithoutRemote { repo: RepoView, why: String },
 
     /// Nothing is at the parent, or what was typed was not an absolute path —
     /// which is the same sentence, there being no directory either way for the

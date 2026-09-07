@@ -25,6 +25,7 @@ import type {
   RepoEntry,
   RepoPairingsView,
   RepoView,
+  SettingsView,
 } from "../src/api/types";
 import menu from "../src/Menu.module.css";
 import pill from "../src/Attaching.module.css";
@@ -47,7 +48,15 @@ import {
   stored,
   type Composed,
 } from "../src/workbench/composing";
-import { OPEN, PROFILES, REPOS, drawn, mount, theWorkbench } from "./bench";
+import {
+  NO_PAIRINGS,
+  OPEN,
+  PROFILES,
+  REPOS,
+  drawn,
+  mount,
+  theWorkbench,
+} from "./bench";
 import { carrying, drag, dropOn } from "./dragging";
 import { browse, held, listingAt } from "./fields";
 import { actionRows, offered, opened, pick, press, rows, showing } from "./pickers";
@@ -55,6 +64,7 @@ import { askedFor, json, serving, whenever } from "./serving";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
 import listing from "./fixtures/directories.json" with { type: "json" };
 import made from "./fixtures/repo.json" with { type: "json" };
+import told from "./fixtures/settings.json" with { type: "json" };
 
 /// The roadmaps nothing is driving, as the server answers for them: three of
 /// them in one repo, the last found on a branch that has not merged.
@@ -855,8 +865,8 @@ describe("registering a repo from the Repo dropdown", () => {
 ///
 /// The pick lands the same way the registration's does — that half is asked
 /// above — so what is asked here is what a create has of its own: the two fields
-/// going out as two, the parent this device remembers, and a refusal that keeps
-/// the card up.
+/// going out as two, the parent this device remembers, the tick that puts the
+/// same repository on GitHub, and a refusal that keeps the card up.
 describe("making a repo from the Repo dropdown", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -877,11 +887,28 @@ describe("making a repo from the Repo dropdown", () => {
   /// The one directory there is to browse, which is the fixture's own.
   const LISTING = listing as DirectoryListing;
 
-  /// The workbench with the create answered however the test says, and that
-  /// directory served both by name and as the server's home.
-  const creating = (answer: () => Promise<Response>) =>
+  /// What Verkstead has been told, which this card asks exactly one thing of:
+  /// whether a GitHub token is saved. The fixture's has one.
+  const TOKENED = told as SettingsView;
+
+  /// And the same with none, which is what a Verkstead nobody has told anything
+  /// looks like — and what every test here that is not about the tick reads.
+  const UNTOKENED: SettingsView = { ...TOKENED, github_token: null };
+
+  /// The workbench with the create answered however the test says, that
+  /// directory served both by name and as the server's home, and the settings
+  /// saying whether there is a token.
+  const creating = (
+    answer: () => Promise<Response>,
+    settings: SettingsView = UNTOKENED,
+  ) =>
     theWorkbench(
       whenever("/api/ui/repos/new", answer, "POST"),
+      whenever("/api/ui/settings", json(settings)),
+      // What the repo it made was last grilled with, which the page asks for the
+      // moment the draft lands on it — the fixture's repos are served this
+      // already, and the one this create makes is not one of them.
+      whenever(`/api/ui/repos/${MADE.id}/pairings`, json(NO_PAIRINGS)),
       whenever(listingAt("/home/ada/src"), json(LISTING)),
       whenever(listingAt(null), json(LISTING)),
       json(null),
@@ -898,6 +925,14 @@ describe("making a repo from the Repo dropdown", () => {
   /// What the two fields are labelled, which is how they are found.
   const WHERE = "Where it goes";
   const CALLED = "What it is called";
+
+  /// And the tick beside them, where a token is saved for it to be drawn by.
+  const ON_GITHUB = "Create it on GitHub too, privately";
+
+  /// The tick as the card is drawing it, or `null` where it is not drawn at all.
+  function tick(): HTMLInputElement | null {
+    return screen.queryByLabelText(ON_GITHUB) as HTMLInputElement | null;
+  }
 
   /// Fill them in and send them.
   function make(parent: string, name: string): void {
@@ -924,6 +959,9 @@ describe("making a repo from the Repo dropdown", () => {
       expect(sent(fetching, "/api/ui/repos/new")).toEqual({
         parent: "/home/ada/src",
         name: "widgets",
+        // Nothing is asked of GitHub on a Verkstead with no token saved: there
+        // is nothing to make the repository as.
+        github: false,
       }),
     );
 
@@ -1021,6 +1059,105 @@ describe("making a repo from the Repo dropdown", () => {
 
     await waitFor(() => screen.getByText("git init: permission denied"));
     expect(stored().repo).toBeNull();
+  });
+
+  /// Where a token is saved the tick is drawn and starts on: somebody who has
+  /// saved one has said what they mean to do with it, and the pipeline this
+  /// repository is about to go through ends in a push.
+  it("asks for it on GitHub too where a token is saved", async () => {
+    const fetching = creating(json({ Made: MADE }), TOKENED);
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await createRepoModal();
+
+    await waitFor(() => expect(tick()?.checked).toBe(true));
+    make("/home/ada/src", "widgets");
+
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/repos/new")).toEqual({
+        parent: "/home/ada/src",
+        name: "widgets",
+        github: true,
+      }),
+    );
+    await waitFor(() => expect(stored().repo).toBe(MADE.id));
+  });
+
+  /// And taking it off is a repository made here only, which is a thing somebody
+  /// may well mean: the tick is on by default rather than compulsory.
+  it("leaves GitHub alone where the tick is taken off", async () => {
+    const fetching = creating(json({ Made: MADE }), TOKENED);
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await createRepoModal();
+
+    await waitFor(() => expect(tick()).toBeTruthy());
+    fireEvent.click(tick()!);
+    make("/home/ada/src", "widgets");
+
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/repos/new")).toMatchObject({
+        github: false,
+      }),
+    );
+  });
+
+  /// With no token there is nothing to draw a tick for, and a sentence stands
+  /// where it would have: the local repository is still worth making, and the
+  /// token can be saved afterwards — but the work on it cannot be finished
+  /// without a remote, which is worth knowing now rather than halfway through
+  /// the first conversation.
+  it("says a remote is needed where no token is saved", async () => {
+    creating(json({ Made: MADE }));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await createRepoModal();
+
+    await waitFor(() => screen.getByText(/needs a remote/i));
+    expect(tick()).toBeNull();
+  });
+
+  /// A GitHub failure after the local repository exists is not a failed create:
+  /// the directory, the commit and the registration all stand. So the card stops
+  /// being a form and says what failed, and the Repo goes onto the draft on the
+  /// way out — landing one takes this card away with the dropdown it was opened
+  /// from, so a card that landed it at once would vanish with the reason unread.
+  it("says what GitHub would not do, and lands the repo it made", async () => {
+    creating(
+      json({
+        MadeWithoutRemote: {
+          repo: MADE,
+          why: "`gh` said: Name already exists on this account",
+        },
+      } satisfies Created),
+      TOKENED,
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await createRepoModal();
+    await waitFor(() => expect(tick()).toBeTruthy());
+    make("/home/ada/src", "widgets");
+
+    // `gh`'s own words, the way git's are for a git that would not commit — and
+    // the fields are gone, there being nothing left to fill in.
+    await waitFor(() =>
+      screen.getByText("`gh` said: Name already exists on this account"),
+    );
+    expect(screen.queryByLabelText(WHERE)).toBeNull();
+    expect(stored().repo).toBeNull();
+
+    // And the one press out lands it: the repository is registered whatever
+    // GitHub said, so the draft goes on it the way a clean create's does.
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    await waitFor(() => expect(stored().repo).toBe(MADE.id));
+    await waitFor(() =>
+      expect(screen.queryByText(/Name already exists/)).toBeNull(),
+    );
   });
 });
 

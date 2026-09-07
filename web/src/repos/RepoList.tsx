@@ -14,7 +14,9 @@
 //! a repository that is not there yet has nowhere to be browsed to, so the
 //! question is two fields rather than one — but the same card, the same words
 //! for the refusals, and the same rule about what a refusal does to the card
-//! it was made on.
+//! it was made on. Two fields and a tick: where a GitHub token is saved, the
+//! same repository is made there too, and where none is the card says a remote
+//! is needed before the work on it can be finished.
 //!
 //! The path is written into the shared path field — see `PathField.tsx` — which
 //! is the box it always was with a dropdown under it that browses the filesystem
@@ -112,7 +114,8 @@ import type {
 } from "../api/types";
 import { repoParent, setRepoParent } from "../device";
 import { useReading } from "../freshness";
-import { Empty, ErrorLine } from "../notices";
+import { Empty, ErrorLine, Note } from "../notices";
+import { useSettings } from "../settings/PathEditor";
 import { PaneHead } from "../workbench/PaneHead";
 import { RepoBinds } from "./RepoBinds";
 import app from "../App.module.css";
@@ -823,18 +826,53 @@ export function OpenRepo(props: {
 /// first run always is, the field stands empty and browses the server's own
 /// home, which is where an unbounded browse already opens.
 ///
+/// **And a tick that makes the same repository on GitHub**, drawn only where a
+/// token is saved. The settings say whether there is one without ever handing it
+/// over, which is the whole of what this has to know. Where there is one the
+/// tick is drawn and starts on, and what it makes is private: a repository made
+/// from here is somebody's work before it is anybody else's business, and public
+/// is a decision to take deliberately rather than by leaving a box alone.
+///
+/// Where there is none the tick is not drawn at all, and the card says a remote
+/// is needed before the work is finished — the pipeline ends in a push and a
+/// pull request, so a repository with nowhere to push is one that will stop
+/// halfway through the first Conversation. A sentence rather than a refusal: the
+/// local repository is still worth making, and the token can be saved
+/// afterwards.
+///
 /// A refusal keeps the modal up with the reason under the fields, for the
 /// registration's reason: what answers a refusal is correcting what was typed,
 /// and a modal that closed on one would take the correction away with it.
+///
+/// **A create GitHub would not finish is not a refusal.** The repository is
+/// there and registered, and what is missing is a remote that can be added
+/// afterwards — so the card stops being a form and becomes what happened:
+/// `gh`'s own words for it, and one press out. The Repo goes onto the draft on
+/// the way out rather than the moment it arrives, because landing one is what
+/// takes this card away — on the compose page the dropdown it was opened from
+/// *becomes* the panel as soon as a repo is on the draft — and a card that
+/// landed it at once would be a card that vanished with the reason unread.
 export function CreateRepo(props: {
   /// Said when the modal has closed itself — Escape, a press on the backdrop,
   /// or the Cancel beside the press.
   close: () => void;
   /// And what a create that landed does with the Repo it made, which is the
-  /// caller's: the draft goes onto it.
+  /// caller's: the draft goes onto it, and the card is spent.
   landed: (repo: RepoView) => void;
 }): JSX.Element {
   const queries = useQueryClient();
+
+  // What Verkstead has been told, for the one thing this card asks of it:
+  // whether a GitHub token is saved. Never the token itself — what comes back
+  // about it is that there is one and what its last four characters are.
+  const settings = useSettings();
+
+  // Whether there is one, which is what says the tick is drawn at all.
+  const tokened = () => settings.data?.github_token != null;
+
+  // And whether it is ticked, which starts on: somebody who has saved a token
+  // has said what they mean to do with it.
+  const [onGithub, setOnGithub] = createSignal(true);
 
   // The heading's own id, for [`OpenRepo`]'s reason: two Repo dropdowns may be
   // drawn on one page, and an id is the page's to keep unique.
@@ -860,9 +898,35 @@ export function CreateRepo(props: {
   // was sent, and it stops being about what is being typed.
   const [refused, setRefused] = createSignal<string | null>(null);
 
+  // The repository a create made that GitHub would not finish, held here rather
+  // than handed over the moment it arrives.
+  //
+  // Landing it is what takes this card away: on the compose page the dropdown
+  // the card was opened from *becomes* the panel as soon as a repo is on the
+  // draft, and the card goes with the dropdown. So a card that landed one at
+  // once would be a card that vanished with the reason still unread. It goes
+  // over when the human has done reading, which is what closing the card says —
+  // and it is registered from the moment the server answered either way, so
+  // nothing is waiting on this but the draft.
+  const [unpushed, setUnpushed] = createSignal<RepoView | null>(null);
+
+  /// The one way out of this card, however it was taken — Escape, the backdrop,
+  /// or the press. A repository this card made goes onto the draft on the way.
+  const leave = () => {
+    const held = unpushed();
+
+    if (held !== null) {
+      // Which shuts the card as well: landing a Repo is what spends it.
+      props.landed(held);
+      return;
+    }
+
+    props.close();
+  };
+
   const create = useMutation(() => ({
-    mutationFn: (asked: { parent: string; name: string }) =>
-      createRepo(asked.parent, asked.name),
+    mutationFn: (asked: { parent: string; name: string; github: boolean }) =>
+      createRepo(asked.parent, asked.name, asked.github),
     onSuccess: (outcome: Created) => {
       // Four of the refusals are a bare word, which this file has the sentence
       // for; the fifth is git's own account of what it would not do, said in
@@ -877,23 +941,40 @@ export function CreateRepo(props: {
         return;
       }
 
-      const repo = outcome.Made;
+      // A create GitHub would not finish is not a refused create: the directory,
+      // the commit and the registration all stand, and what is missing is a
+      // remote that can be added afterwards. So the card stops being a form and
+      // becomes what happened — the reason in `gh`'s own words, and the repo it
+      // is holding for the draft.
+      if ("MadeWithoutRemote" in outcome) {
+        setRefused(outcome.MadeWithoutRemote.why);
+        made(outcome.MadeWithoutRemote.repo);
+        setUnpushed(outcome.MadeWithoutRemote.repo);
+        return;
+      }
 
-      // The parent as the server resolved it rather than as it was typed: that
-      // is the directory the repository is actually in, and so the one the next
-      // create should open in.
-      const cut = repo.path.lastIndexOf("/");
-      setRepoParent(cut > 0 ? repo.path.slice(0, cut) : "/");
-
-      // The list this was made over is now out of date, and so are the roadmaps
-      // waiting to be adopted — a registration invalidates both for the same
-      // reason, and a repository that was just made is a repository that has
-      // just arrived.
-      void queries.invalidateQueries({ queryKey: ["repos"] });
-      void queries.invalidateQueries({ queryKey: ["abandoned-roadmaps"] });
-      props.landed(repo);
+      made(outcome.Made);
+      props.landed(outcome.Made);
     },
   }));
+
+  /// What every create that left a repository behind does with it, whether or
+  /// not GitHub was reached — everything but landing it on the draft, which is
+  /// the one thing the two answer differently.
+  const made = (repo: RepoView) => {
+    // The parent as the server resolved it rather than as it was typed: that
+    // is the directory the repository is actually in, and so the one the next
+    // create should open in.
+    const cut = repo.path.lastIndexOf("/");
+    setRepoParent(cut > 0 ? repo.path.slice(0, cut) : "/");
+
+    // The list this was made over is now out of date, and so are the roadmaps
+    // waiting to be adopted — a registration invalidates both for the same
+    // reason, and a repository that was just made is a repository that has
+    // just arrived.
+    void queries.invalidateQueries({ queryKey: ["repos"] });
+    void queries.invalidateQueries({ queryKey: ["abandoned-roadmaps"] });
+  };
 
   const make = (ev: SubmitEvent) => {
     ev.preventDefault();
@@ -904,69 +985,127 @@ export function CreateRepo(props: {
       return;
     }
 
-    create.mutate({ parent: where, name: called });
+    // With nothing saved to make it as, nothing is asked of GitHub whatever a
+    // stale tick would have said.
+    create.mutate({
+      parent: where,
+      name: called,
+      github: tokened() && onGithub(),
+    });
   };
 
   return (
-    <Modal class={styles.createRepo!} open close={props.close} labelledBy={id}>
+    <Modal class={styles.createRepo!} open close={leave} labelledBy={id}>
       <h3 id={id}>Create a repo</h3>
 
-      <form class={styles.form} onSubmit={make}>
-        <label for="repo-parent">Where it goes</label>
-        <PathField
-          id="repo-parent"
-          opened={remembered !== ""}
-          placeholder="/home/you/src"
-          value={parent()}
-          write={(where) => {
-            setParent(where);
-            setRefused(null);
-          }}
-        />
+      {/* Once there is a repository the card is no longer a form: what is left
+          to do about it is read what GitHub said and get on, and a Create press
+          under a repository that exists would only ever be refused. */}
+      <Show when={unpushed()}>
+        {(repo) => (
+          <div class={styles.made}>
+            <Note>
+              {repo().name} is made here and registered, and the draft goes on
+              it. It has no remote yet — add one, or make it on GitHub yourself,
+              before the work on it is finished.
+            </Note>
 
-        <label class={styles.second} for="repo-name">
-          What it is called
-        </label>
-        <input
-          id="repo-name"
-          class={styles.name}
-          type="text"
-          placeholder="verkstead"
-          value={name()}
-          onInput={(ev) => {
-            setName(ev.currentTarget.value);
-            setRefused(null);
-          }}
-        />
+            <ErrorLine class={styles.failure}>{refused()}</ErrorLine>
 
-        <div class={styles.buttons}>
-          <button
-            type="submit"
-            disabled={
-              create.isPending || parent().trim() === "" || name().trim() === ""
-            }
-          >
-            Create
-          </button>
-          {/* Drawn as well as the ways out the modal already has, for the reason
+            <div class={styles.buttons}>
+              <button type="button" onClick={leave}>
+                Done
+              </button>
+            </div>
+          </div>
+        )}
+      </Show>
+
+      <Show when={unpushed() === null}>
+        <form class={styles.form} onSubmit={make}>
+          <label for="repo-parent">Where it goes</label>
+          <PathField
+            id="repo-parent"
+            opened={remembered !== ""}
+            placeholder="/home/you/src"
+            value={parent()}
+            write={(where) => {
+              setParent(where);
+              setRefused(null);
+            }}
+          />
+
+          <label class={styles.second} for="repo-name">
+            What it is called
+          </label>
+          <input
+            id="repo-name"
+            class={styles.name}
+            type="text"
+            placeholder="verkstead"
+            value={name()}
+            onInput={(ev) => {
+              setName(ev.currentTarget.value);
+              setRefused(null);
+            }}
+          />
+
+          {/* And the third question, asked only where there is a token to answer
+            it with — see the note below, which is what stands here instead. */}
+          <Show when={tokened()}>
+            <label class={styles.github}>
+              <input
+                type="checkbox"
+                checked={onGithub()}
+                onChange={(ev) => setOnGithub(ev.currentTarget.checked)}
+              />
+              Create it on GitHub too, privately
+            </label>
+          </Show>
+
+          {/* A sentence rather than a refusal: the local repository is worth
+            making, and the token can be saved afterwards. But the pipeline ends
+            in a push and a pull request, so a repository with nowhere to push
+            is one that will stop halfway through the first conversation. */}
+          <Show when={!tokened()}>
+            <Note class={styles.remote}>
+              No GitHub token is saved, so this repo is made here only. It needs
+              a remote before the work on it can be finished — Settings has the
+              token.
+            </Note>
+          </Show>
+
+          <div class={styles.buttons}>
+            <button
+              type="submit"
+              disabled={
+                create.isPending ||
+                parent().trim() === "" ||
+                name().trim() === ""
+              }
+            >
+              Create
+            </button>
+            {/* Drawn as well as the ways out the modal already has, for the reason
               the Open modal draws one: Escape and a press on the backdrop are
               for a keyboard and a cursor, and this is the one a thumb has. */}
-          <button type="button" class={styles.cancel} onClick={props.close}>
-            Cancel
-          </button>
-        </div>
+            <button type="button" class={styles.cancel} onClick={leave}>
+              Cancel
+            </button>
+          </div>
 
-        <Show when={refused()}>
-          {(why) => <ErrorLine class={styles.failure}>{why()}</ErrorLine>}
-        </Show>
-        {/* A server that could not answer at all, which is the one thing here
+          <Show when={refused()}>
+            {(why) => <ErrorLine class={styles.failure}>{why()}</ErrorLine>}
+          </Show>
+          {/* A server that could not answer at all, which is the one thing here
             that is an error rather than an outcome. */}
-        <Show when={create.isError}>
-          <ErrorLine class={styles.failure}>
-            The repo could not be made: {create.error?.message}
-          </ErrorLine>
-        </Show>
-      </form>
+          <Show when={create.isError}>
+            <ErrorLine class={styles.failure}>
+              The repo could not be made: {create.error?.message}
+            </ErrorLine>
+          </Show>
+        </form>
+      </Show>
     </Modal>
   );
 }

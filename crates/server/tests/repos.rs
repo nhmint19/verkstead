@@ -7,6 +7,13 @@
 //! same registration at the end of it — with five refusals of its own, every one
 //! of them leaving nothing on the registry.
 //!
+//! A create may reach GitHub as well, and that half is asked of a script
+//! standing where `gh` goes, for the reason the rest of Verkstead's GitHub is:
+//! what there is to prove is that a process was run with the right arguments, in
+//! the right directory and as the right token, and asking the real GitHub would
+//! be a test that needed a network and somebody's account. It is the one thing
+//! here that can fail without the create failing.
+//!
 //! Every refusal here is asked of the *server*, through the endpoint, rather
 //! than of the checks underneath it: a browser that skipped the form, or a
 //! `curl` that never saw one, meets the same answers.
@@ -30,7 +37,8 @@ use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{ConflictResolution, Created, Registered, RepoEntry, RepoRemoved, RepoView};
-use verkstead_server::{open_database, router_keeping, store};
+use verkstead_server::settings::Settings;
+use verkstead_server::{Gh, open_database, router_asking_github, router_keeping, store};
 
 /// A router, plus the Data Directory holding its database alive.
 async fn workbench() -> (tempfile::TempDir, Router) {
@@ -707,11 +715,15 @@ async fn registering_a_removed_repo_again_brings_it_back() {
 }
 
 /// Ask for a repository to be made, and read back what the server made of it.
+///
+/// With the GitHub half left off, which is the create every refusal below is
+/// asked of: what those are about is the directory and the commit, and a create
+/// that never got as far as one has nothing to push.
 async fn create(app: &Router, parent: &Path, name: &str) -> Created {
     post(
         app,
         "/api/ui/repos/new",
-        &serde_json::json!({ "parent": parent, "name": name }),
+        &serde_json::json!({ "parent": parent, "name": name, "github": false }),
     )
     .await
 }
@@ -722,7 +734,7 @@ async fn create_under(app: &Router, parent: &str, name: &str) -> Created {
     post(
         app,
         "/api/ui/repos/new",
-        &serde_json::json!({ "parent": parent, "name": name }),
+        &serde_json::json!({ "parent": parent, "name": name, "github": false }),
     )
     .await
 }
@@ -980,4 +992,210 @@ async fn a_git_that_will_not_commit_leaves_nothing_behind() {
         !root.path().join("verkstead").exists(),
         "the half-made directory was taken back",
     );
+}
+
+/// Ask for a repository on GitHub as well as on the disk, which is the tick in
+/// the modal.
+async fn create_on_github(app: &Router, parent: &Path, name: &str) -> Created {
+    post(
+        app,
+        "/api/ui/repos/new",
+        &serde_json::json!({ "parent": parent, "name": name, "github": true }),
+    )
+    .await
+}
+
+/// A workbench with an author configured and `gh` standing in for the real one,
+/// authenticating as whatever token the Data Directory holds — which is how the
+/// served router builds its own: the settings rather than the token, so one
+/// saved through the page reaches the next call without a restart.
+///
+/// `notes` is where the stub writes down what it was asked; `answering` is the
+/// body of the script, run with Verkstead's arguments from `$1`.
+async fn workbench_with_gh(answering: &str) -> (tempfile::TempDir, tempfile::TempDir, Router) {
+    let dir = tempfile::tempdir().unwrap();
+    let notes = tempfile::tempdir().unwrap();
+
+    author(&dir, "Ada Lovelace", "ada@example.com");
+    std::fs::write(
+        dir.path().join("secrets.yaml"),
+        "github_token: ghp_thetokenthatwassaved\n",
+    )
+    .unwrap();
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let data_dir = dir.path().to_owned();
+    let gh = Gh::running(vec![
+        "/bin/sh".to_owned(),
+        "-c".to_owned(),
+        format!(
+            r#"printf '%s\n' "$*" > "{notes}/asked"
+               pwd > "{notes}/where"
+               printf '%s\n' "${{GH_TOKEN-unset}}" > "{notes}/token"
+               {answering}"#,
+            notes = notes.path().display(),
+        ),
+        "gh".to_owned(),
+    ])
+    .authenticated_by(Settings::in_data_dir(&data_dir));
+
+    (dir, notes, router_asking_github(pool, data_dir, gh))
+}
+
+/// What the stub wrote down under `notes`, one file at a time.
+fn noted(notes: &tempfile::TempDir, what: &str) -> String {
+    std::fs::read_to_string(notes.path().join(what))
+        .unwrap_or_else(|error| panic!("the stub wrote no {what}: {error}"))
+        .trim()
+        .to_owned()
+}
+
+/// The Repo a create that reached GitHub hands back, which is the same
+/// [`Created::Made`] a create with nothing to push hands back: the tick is not a
+/// second outcome, it is more of the one create.
+#[tokio::test]
+async fn a_created_repository_is_private_on_github_with_origin_set_and_main_pushed() {
+    let root = tempfile::tempdir().unwrap();
+    let remote = tempfile::tempdir().unwrap();
+
+    // A bare repository where GitHub's would be, so that the `--push` the stub
+    // stands in for is a push that really lands: what comes back then carries
+    // the remote-tracking branch, which is the whole claim about `origin`.
+    let there = remote.path().join("widgets.git");
+    git(remote.path(), &["init", "--bare", "--quiet", "widgets.git"]);
+
+    let (_dir, notes, app) = workbench_with_gh(&format!(
+        r#"git remote add origin "{there}"
+           git push --quiet --set-upstream origin main"#,
+        there = there.display(),
+    ))
+    .await;
+
+    let repo = made(create_on_github(&app, root.path(), "widgets").await);
+
+    // Private, sourced from the directory, `origin` written and the branch
+    // pushed — one `gh` rather than a remote added by hand with a push behind
+    // it, which would be two more ways to leave half a remote behind.
+    assert_eq!(
+        noted(&notes, "asked"),
+        "repo create widgets --private --source . --remote origin --push",
+    );
+
+    // Run inside the repository it has just made, which is what `--source .`
+    // means.
+    assert_eq!(
+        noted(&notes, "where"),
+        repo.path,
+        "`gh` was run in the repository it was making a remote for",
+    );
+
+    // And as the configured token, read at the moment of the call out of the
+    // file the settings page writes.
+    assert_eq!(noted(&notes, "token"), "ghp_thetokenthatwassaved");
+
+    // The Repo comes back with the remote already on it: the push happens
+    // before the registration, so what the modal is handed is a repository
+    // whose `origin` is there rather than one it would have to re-read to see.
+    assert_eq!(
+        repo.branches,
+        vec!["main".to_owned(), "origin/main".to_owned()]
+    );
+    assert_eq!(listed(&app).await.len(), 1, "and it is on the registry");
+}
+
+/// A create that was not asked for a remote does not go near `gh` at all.
+#[tokio::test]
+async fn a_create_with_the_tick_off_asks_github_nothing() {
+    let root = tempfile::tempdir().unwrap();
+    let (_dir, notes, app) = workbench_with_gh("exit 0").await;
+
+    made(create(&app, root.path(), "widgets").await);
+
+    assert!(
+        !notes.path().join("asked").exists(),
+        "`gh` was never run for a create with nothing to push",
+    );
+}
+
+/// A GitHub failure after the local repository exists is not a failed create.
+///
+/// The directory, the commit and the registration all stand — what is missing is
+/// a remote that can be added afterwards — so the answer carries the Repo *and*
+/// what failed rather than choosing between them.
+#[tokio::test]
+async fn a_github_that_would_not_make_the_repository_leaves_the_local_one_registered() {
+    let root = tempfile::tempdir().unwrap();
+    let (_dir, _notes, app) = workbench_with_gh(
+        r#"printf 'GraphQL: Name already exists on this account (createRepository)\n' >&2
+           exit 1"#,
+    )
+    .await;
+
+    let outcome = create_on_github(&app, root.path(), "widgets").await;
+
+    let Created::MadeWithoutRemote { repo, why } = outcome else {
+        panic!("the create did not answer with both halves: {outcome:?}");
+    };
+
+    // `gh`'s own words, the way a git that would not commit is answered in
+    // git's: nothing here could put it better.
+    assert!(
+        why.contains("Name already exists on this account"),
+        "what `gh` said rather than what Verkstead makes of it: {why}",
+    );
+
+    // The repository is there, on `main`, with its commit — and registered.
+    let path = root.path().join("widgets");
+    assert_eq!(repo.path, path.canonicalize().unwrap().to_str().unwrap());
+    assert_eq!(
+        git_says(&path, &["rev-parse", "--abbrev-ref", "HEAD"]),
+        "main"
+    );
+    assert_eq!(
+        listed(&app)
+            .await
+            .iter()
+            .map(|repo| repo.id)
+            .collect::<Vec<_>>(),
+        vec![repo.id],
+        "it is on the registry, so the draft it lands on has somewhere to be",
+    );
+}
+
+/// And a machine with no `gh` on it at all is the same shape of answer: the
+/// repository is made, and Verkstead says why there is no remote on it.
+#[tokio::test]
+async fn a_machine_with_no_gh_leaves_the_local_repository_registered_too() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+
+    author(&dir, "Ada Lovelace", "ada@example.com");
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+    let data_dir = dir.path().to_owned();
+    let app = router_asking_github(
+        pool,
+        data_dir,
+        Gh::running(vec![
+            dir.path().join("there-is-no-gh-here").display().to_string(),
+        ]),
+    );
+
+    let outcome = create_on_github(&app, root.path(), "widgets").await;
+
+    let Created::MadeWithoutRemote { repo, why } = outcome else {
+        panic!("the create did not answer with both halves: {outcome:?}");
+    };
+
+    assert!(
+        why.contains("no `gh` on this machine's PATH"),
+        "the sentence that names what to go and do: {why}",
+    );
+    assert_eq!(listed(&app).await.len(), 1);
+    assert_eq!(listed(&app).await[0].id, repo.id);
 }
