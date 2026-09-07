@@ -195,34 +195,44 @@ well: its Worktree and the git directory behind it, both at that companion's
 own mode, so a read-only one is read-only through both. The **Build Cache** is
 inside as well, writable, with the `sccache` it compiles through read-only
 beside the executable — that one is a client, and what it reaches is the
-**Compile Server** in a Sandbox of Verkstead's own. The filesystem is the
-boundary and the network is not: inside, it is the host's own, whole and
-unfiltered, because what stops a session doing harm is that there is nothing
-within reach to harm. The `verkstead` a session asks with is the running
-server's own image, first on the `PATH` inside, so the CLI a session asks with
-and the server it asks are one build and cannot disagree about a schema — with
-the libraries that image was packed with, where it was packed with any,
-reached through a launcher of Verkstead's own so that nothing else the session
-runs loads out of them. What
+**Compile Server** in a Sandbox of Verkstead's own — the sccache half only on
+the two platforms whose sessions can reach one, which is the Build Cache's own
+entry. The filesystem is the boundary and the network is not, because what
+stops a session doing harm is that there is nothing within reach to harm:
+inside, it is the host's own, whole and unfiltered — **except on Windows,
+where an identity is granted the internet and nothing else**, so this machine's
+own loopback and everything else on the network it sits on are refused a
+session there as surely as the human's Documents are. Which is not a boundary
+drawn on purpose but the narrowest thing an AppContainer can be given, and it
+is what the pipe below exists for. The `verkstead` a session asks with
+is the running server's own image, first on the `PATH` inside, so the CLI a
+session asks with and the server it asks are one build and cannot disagree
+about a schema — with the libraries that image was packed with, where it was
+packed with any, reached through a launcher of Verkstead's own so that nothing
+else the session runs loads out of them. What
 it asks *through* is the loopback, scoped to the Conversation it is asking
 from — except on Windows, where it is a **named pipe** the server opens beside
 its socket and names in the session's environment, in the same
 Conversation-scoped shape. The pipe is there because the boundary that platform
-is headed for is refused the loopback interface and can be granted a pipe
+runs behind is refused the loopback interface and can be granted a pipe
 instead, and it is named after the **Data Directory**, so two Verksteads on one
 machine are two pipes.
-**On Windows a session has none of this yet** and runs with the human's own
-account's reach: an ordinary process, its environment cleared and set
-explicitly and the Worktree its working directory, with nothing of the machine
-refused it. What it does get of the shape above is a profile of the
-Conversation's own under the **Data Directory**, made fresh as each session
-starts and with the Agent Profile's account joined into it — every directory by
-a junction and every file by a hard link — and the Build Cache, the Skills, the
-Attachments and the `verkstead` it asks with, each at the path it really is
-rather than at one a mount made. The workbench says it on every Conversation
-there: above **Start work**, beside the session's terminal, and on the
-**Terminal** pane. It is a stage's state rather than the platform's answer, and
-the stage after it is where the boundary arrives and this sentence goes.
+**One description, rendered three times**: bubblewrap's flags on Linux, where
+the rest of the machine is not in the session's namespace at all; a seatbelt
+policy on a Mac, where the machine is in plain sight and refused; and on
+Windows an **AppContainer**, the platform's own deny-by-default identity, where
+every path the description names is a real path and reach is an access-control
+entry on it granting that identity. The third is the Mac's kind of boundary
+rather than Linux's, with one thing neither other platform has: the entries are
+written on the human's own directories, so they are per Conversation, they come
+off with the Worktree when it closes, and a server that stopped between the two
+sweeps them at its next startup off a record it wrote under the Data Directory.
+The path a mount would have hidden is refused instead on both of the other two —
+the seatbelt's `require-not`, and on Windows an entry in front of the account's
+own skills — and where a session's profile and the account inside it cannot be
+made out of a mount they are really made: on a Mac under the Data Directory, and
+on Windows as a profile of the Conversation's own with every directory of the
+account joined in by a junction and every file by a hard link.
 _Avoid_: container, jail, isolation, environment
 
 **Sandbox Configuration**:
@@ -259,8 +269,14 @@ Sandbox gets one at all, and how
 big its compiled half may grow, is the human's, in the workbench settings. The
 one control there that only ever *closes* a hole — the **Sandbox
 Configuration** beside it opens them, and does so only for what somebody typed.
-Without an sccache it is still a cache — the crate downloads are shared —
-and the composer says so on a repository that builds Rust.
+Without an sccache it is still a cache — the crate downloads are shared — and
+the composer says so on a repository that builds Rust. **On Windows it is only
+ever that half**: a session there runs inside an **AppContainer**, which is
+refused the loopback an sccache client reaches the **Compile Server** over, so
+nothing installed on that machine would be reached and none is looked for. A
+Windows session downloads a crate once for the machine like every other and
+compiles it once per session, which is a slower build rather than a broken one;
+the settings page says why rather than telling anybody to install something.
 _Avoid_: sccache, cargo cache, artifact cache, shared target dir
 
 **Compile Server**:
@@ -269,12 +285,13 @@ The one `sccache` server the machine compiles through, run by Verkstead in a
 every Sandbox shares the host's network — so sessions left to start their own
 all reach for one port, and whichever lost the race has its compiles run inside
 another session's Sandbox, where its Worktree is not bound and the build fails.
-Started before the first session of a Conversation whose Repo builds Rust, and
-never on a machine that builds none. Its Sandbox holds the Worktrees directory —
-all of it, so a Conversation grilled later is one it can already compile for —
-and the Build Cache, and nothing else Verkstead keeps: `rustc` runs proc macros
-while it compiles, so the database and the settings files stay outside its
-reach.
+Started before the first session of a Conversation whose Repo builds Rust,
+never on a machine that builds none, and **never on Windows at all**, where no
+session inside an AppContainer could reach one. Its Sandbox holds the Worktrees
+directory — all of it, so a Conversation grilled later is one it can already
+compile for — and the Build Cache, and nothing else Verkstead keeps: `rustc`
+runs proc macros while it compiles, so the database and the settings files stay
+outside its reach.
 _Avoid_: daemon, sccache daemon, build server, compiler service
 
 **Log Directory**:
@@ -839,9 +856,8 @@ word's: on a Unix the server user's login shell, `/bin/sh` where there is no
 usable one, inside the worktree's dev shell and inside the Conversation's
 Sandbox; on Windows `pwsh` where PowerShell 7 is installed and Windows
 PowerShell where nobody has installed one — no passwd database to read a login
-shell out of, no dev shell to enter, and no Sandbox around it until that stage
-lands, so the pane says the shell is not sandboxed the way the composer says it
-of the agent. Opened from the **Terminal icon on the Timeline's header** into a
+shell out of and no dev shell to enter, inside the Conversation's AppContainer
+the same way. Opened from the **Terminal icon on the Timeline's header** into a
 details pane of its own at `/terminal`, where each one is a tab: one opens when
 the pane loads with none live, plus opens another, a tab goes when its shell
 ends, and the pane never stands empty — the last tab going opens a fresh one,

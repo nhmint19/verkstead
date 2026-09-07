@@ -32,7 +32,7 @@ use verkstead_render::{
     Adopted, Attached, AttachmentRemoved, Author, BaseBranchChoice, BranchRename, BriefEdit,
     BrowseScope, BuildCacheView, CheckRollup, CleanupStepView, CleanupView, CommentedOn,
     CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
-    CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView,
+    CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView, CompileCaching,
     ConflictResolutionEdit, ConversationArchived, ConversationClosed, ConversationEntry,
     ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Cursor,
     GrillingStarted, IgnoreRule, IgnoredCommentsEdit, Lifecycle, Locked, Merging, MissedOut,
@@ -1279,7 +1279,14 @@ pub(crate) async fn conversation_view(
     // halves already hold: the answer is the same for a repository that is not
     // Rust, and this way the settings file is read only on a server that has
     // something to warn about.
+    //
+    // A missing sccache rather than uncached compiles, which is the platform
+    // arm here: where no session compiles through one at all, nothing is
+    // missing and there is nothing for the human to go and do — see
+    // [`crate::build_cache::compiles_through_an_sccache`]. That is a standing
+    // fact about the machine, and the settings page is where it is said.
     let compiles_uncached = !state.sessions.caches_compiles()
+        && crate::build_cache::compiles_through_an_sccache(crate::platform::Platform::HERE)
         && state.settings.config().rust_build_cache().enabled()
         && crate::build_cache::builds_rust(&conversation.repo.path);
 
@@ -1532,13 +1539,6 @@ pub(crate) async fn conversation_view(
         state: lifecycle(conversation.state),
         ready_to_grill,
         compiles_uncached,
-        // Whether a session here stands outside a Sandbox, which is a fact about
-        // this build rather than about this Conversation — the same answer on
-        // every one it sends. Read off the registry rather than off the target
-        // this was compiled for, so that a test on any machine can stand a
-        // server up that answers either way — see
-        // [`crate::sessions::Sessions::unsandboxed`].
-        unsandboxed: state.sessions.unsandboxed(),
         ready_to_resume,
         ready_to_stop,
         stop_asked,
@@ -3962,6 +3962,27 @@ fn needed(scopes: &crate::github::Scopes) -> Vec<String> {
     }
 }
 
+/// Whether a session's compiling is cached, and where it is not, which of the
+/// two reasons it is — see [`CompileCaching`], which is why that is not one
+/// boolean.
+///
+/// `cached` is whether this server found an sccache to hand out. It is already
+/// false everywhere a session could not reach one — see
+/// [`crate::build_cache::compiles_through_an_sccache`], which is what stops one
+/// being looked for at all — so what is left here is telling the two falses
+/// apart, and that is the platform's own answer read the way every other one
+/// is.
+fn compile_caching(cached: bool) -> CompileCaching {
+    match (
+        cached,
+        crate::build_cache::compiles_through_an_sccache(crate::platform::Platform::HERE),
+    ) {
+        (true, _) => CompileCaching::Cached,
+        (false, true) => CompileCaching::NoSccache,
+        (false, false) => CompileCaching::NotThroughAContainer,
+    }
+}
+
 /// How the settings stand, read off the files.
 ///
 /// The token comes back as its last four characters and the moment the file was
@@ -3993,9 +4014,10 @@ fn as_told(
             // chose should say so, and it says so as a placeholder.
             size: cache.size().to_owned(),
             size_configured: cache.size_configured().is_some(),
-            // Not out of the files at all: this is the server's own
-            // environment, and the one thing on this page the human cannot set.
-            compiles_cached: caches_compiles,
+            // Not out of the files at all: this is the server's own environment
+            // and its own platform, and the one thing on this page the human
+            // cannot set.
+            compiles: compile_caching(caches_compiles),
         },
         // And the Cleanup's two rows, each read the way the size above is: the
         // days configured where somebody typed them, and the fallback with the

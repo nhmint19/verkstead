@@ -204,11 +204,13 @@ jobs:
           key: windows
 
       # The one thing the sessions suite needs that the runner image has not
-      # got. The Compile Server is the only thing the open rendering runs that
-      # is not a session, and it comes up only where the server can see an
-      # sccache — so without this, the two tests about it in
-      # `crates/server/tests/sessions_windows.rs` have nothing to prove and say
-      # so by failing rather than by quietly passing.
+      # got, and it is here to prove a *negative*: no session on this platform
+      # compiles through an sccache, because the AppContainer it runs in is
+      # refused the loopback a client reaches its server over. A runner with no
+      # sccache would start no Compile Server for want of a binary and would
+      # prove nothing — so the two tests about it in
+      # `crates/server/tests/sessions_windows.rs` insist on one being installed
+      # and say so by failing rather than by quietly passing.
       #
       # Pinned to a release like everything else here, unpacked, and put on the
       # `PATH`: that variable is what *installed* means on this platform, both
@@ -253,6 +255,15 @@ jobs:
       # answer: `crates/server/tests/sessions_windows.rs` runs a real grilling
       # on a real pseudoconsole with a PowerShell stand-in where the agent goes,
       # and `tests/sessions.rs` stays the Unix arm of the same questions.
+      #
+      # **And the boundary suite is in it**, which is what this job is to
+      # Windows that the `macOS sandbox` job above is to a Mac:
+      # `crates/server/tests/sandbox_windows.rs` builds a real AppContainer, has
+      # the description's entries written on real directories, and runs a probe
+      # inside that attempts each access and says what the machine said. It runs
+      # here rather than in a step of its own because this job already runs the
+      # whole workspace — a Windows build has no suite that has to be left out
+      # the way a Mac's does.
       - name: Test
         run: cargo test --workspace --features verkstead-desktop/shim
 

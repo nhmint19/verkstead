@@ -29,6 +29,14 @@
 //! the server itself, in a sandbox of its own that holds the Worktrees
 //! directory and this cache and nothing else of the Data Directory.
 //!
+//! **On the two platforms whose sandbox leaves the network alone**, which is
+//! this module's other platform arm — see [`compiles_through_an_sccache`]. The
+//! half of this that is directories works everywhere; the half that is a client
+//! talking to a server over the loopback does not work at all on Windows, where
+//! a session's boundary is an identity that is refused the local machine. So a
+//! Windows session gets the shared `CARGO_HOME` and no `RUSTC_WRAPPER`, and no
+//! compile server is started there for one to reach.
+//!
 //! **Rust by name**, deliberately. Nothing here generalises over languages: a
 //! node or a python cache would want its own directory, its own variables and
 //! its own switch, and a sibling of this module is where one would go. Naming
@@ -94,6 +102,38 @@ fn compiling_home(data_dir: &Path) -> PathBuf {
         &sandbox::own_directory(Platform::HERE, data_dir),
         COMPILING_HOME,
     )
+}
+
+/// Whether a session on `platform` compiles through an sccache at all — which
+/// is the whole of the difference between a cache of downloads and a cache of
+/// compiled objects, and the one place it is decided.
+///
+/// **The two Unixes do and Windows does not** (ADR-0014, *What the probe
+/// answered*). An sccache is a client and a server that talk over the loopback,
+/// and a session on Windows runs inside an AppContainer, which is refused the
+/// local machine: the probe's connections to `127.0.0.1` and to the machine's
+/// own address both timed out from inside one. The client would not have got
+/// that far anyway — the one the probe ran panicked reading its own
+/// configuration before it ever reached the network — so what a `RUSTC_WRAPPER`
+/// bought there would be every Rust build inside failing rather than one
+/// running uncached. The half of the cache that is directories is untouched by
+/// any of that, so a Windows session still gets the shared `CARGO_HOME` and
+/// downloads a crate once for the machine like everybody else.
+///
+/// **Read before the server's own `PATH` is walked**, so an sccache installed
+/// on a Windows machine is one nothing here finds: a [`BuildCache`] with none
+/// is then the right answer to everything downstream already — no
+/// `RUSTC_WRAPPER` in a session's environment, no compile server started for
+/// one to reach, and the workbench saying compiles are not cached.
+///
+/// A function of the platform rather than a `cfg!`, for the reason
+/// [`crate::platform::Platform`] is a value: the arm this machine will never
+/// run is still an arm its tests call.
+pub fn compiles_through_an_sccache(platform: Platform) -> bool {
+    match platform {
+        Platform::Linux | Platform::MacOs => true,
+        Platform::Windows => false,
+    }
 }
 
 /// The build cache this server hands out: where it is, and what it can offer.
@@ -234,16 +274,30 @@ impl BuildCache {
             )
         })?;
 
-        let sccache = on_the_path(SCCACHE);
+        let through_one = compiles_through_an_sccache(Platform::HERE);
 
-        if sccache.is_none() {
-            tracing::info!(
+        // Not looked for at all where nothing could reach one, rather than
+        // found and then ignored: an sccache installed on such a machine is one
+        // no session gets to from inside its container, so the honest answer is
+        // that this server has none — see [`compiles_through_an_sccache`].
+        let sccache = through_one.then(|| on_the_path(SCCACHE)).flatten();
+
+        match (&sccache, through_one) {
+            (Some(_), _) => {}
+            (None, true) => tracing::info!(
                 cache = %dir.display(),
                 "no sccache on the server's PATH, so compile caching is off: crate \
                  downloads are still shared between sessions, and dependencies are \
                  compiled once per session. Install sccache where the server can see \
                  it to cache the compiling too",
-            );
+            ),
+            (None, false) => tracing::info!(
+                cache = %dir.display(),
+                "compile caching is off on this platform: a session runs inside an \
+                 AppContainer, which is refused the loopback an sccache client \
+                 reaches its server over, so nothing installed here would be \
+                 reached. Crate downloads are still shared between sessions",
+            ),
         }
 
         // Made rather than waited for, because the compile server binds it and
@@ -272,10 +326,16 @@ impl BuildCache {
     /// One at `dir`, with `sccache` where the machine has one, compiling in a
     /// sandbox holding the Worktrees under `data_dir` — which is what a test
     /// builds when the cache is the thing under test.
+    ///
+    /// The platform's own answer is applied here as it is in
+    /// [`BuildCache::resolve`], so a test that hands one in on a machine that
+    /// cannot compile through it gets the cache that machine really has. There
+    /// is one answer to *does a session compile through an sccache* rather than
+    /// one per constructor.
     pub fn at(dir: PathBuf, sccache: Option<PathBuf>, data_dir: PathBuf) -> BuildCache {
         BuildCache {
             dir: Some(dir),
-            sccache,
+            sccache: sccache.filter(|_| compiles_through_an_sccache(Platform::HERE)),
             data_dir: Some(data_dir),
             compiling: Arc::default(),
         }
@@ -301,6 +361,12 @@ impl BuildCache {
     /// What the workbench warns about when a repository is a Cargo workspace
     /// and this is false: the session will build, and it will build every
     /// dependency itself.
+    ///
+    /// **False on Windows whatever is installed**, because no session there
+    /// compiles through an sccache — see [`compiles_through_an_sccache`], which
+    /// is what stops one ever being found. What the workbench says there is why
+    /// rather than telling somebody to install a thing that would not be
+    /// reached.
     pub fn caches_compiles(&self) -> bool {
         self.dir.is_some() && self.sccache.is_some()
     }
@@ -332,6 +398,12 @@ impl BuildCache {
     /// builds Rust never runs one, and the switch and the size are the human's,
     /// read at this moment like everything else a session is built from.
     ///
+    /// **And never on Windows**, which falls out of there being no sccache to
+    /// start one of — see [`compiles_through_an_sccache`]. A server there would
+    /// be a process nobody could reach: it serves sessions through
+    /// `RUSTC_WRAPPER` over the loopback and nothing else, and a session inside
+    /// an AppContainer is refused the loopback.
+    ///
     /// Nothing waits on it and nothing fails if it will not start: a session
     /// whose compile server is missing falls back to starting one of its own,
     /// which is what every session did before this existed.
@@ -361,7 +433,10 @@ impl BuildCache {
             *running = None;
         }
 
-        match compile_server(dir, sccache, data_dir, settings.size()).spawn() {
+        let started = compile_server(dir, sccache, data_dir, settings.size())
+            .and_then(|mut compiling| compiling.spawn());
+
+        match started {
             Ok(server) => {
                 // A keeper beside it, where the sandbox it was started in has
                 // nothing to say about outliving anybody — see
@@ -503,16 +578,25 @@ pub fn builds_rust(repo: &Path) -> bool {
 /// that serves every Conversation and belongs to none. **It is a
 /// [`crate::sandbox::Surface`] all the same**, and rendered by the renderer a
 /// session's is: what a sandbox holds is one description on every platform, so
-/// this is bubblewrap's flags on Linux, a deny-by-default policy on a Mac and a
-/// plain process on Windows without a word here saying which — see
-/// [`crate::sandbox::rendered`].
+/// this is bubblewrap's flags on Linux and a deny-by-default policy on a Mac
+/// without a word here saying which — see [`crate::sandbox::rendered`].
+///
+/// **Windows is not among them, because there is no compile server there** —
+/// see [`compiles_through_an_sccache`]. Nothing on that platform can reach one,
+/// so nothing on that platform starts one, and this is read by the two whose
+/// sessions compile through an sccache at all.
 ///
 /// What it gave up to be one is the hostname it used to be given inside. A name
 /// for the machine is something one of the two mechanisms can say and the other
 /// cannot, so it is no part of a description either of them answers — and what
 /// it was worth was telling this sandbox apart from a session's in a process
 /// listing.
-fn compile_server(dir: &Path, sccache: &Path, data_dir: &Path, size: &str) -> Command {
+fn compile_server(
+    dir: &Path,
+    sccache: &Path,
+    data_dir: &Path,
+    size: &str,
+) -> std::io::Result<Command> {
     let worktrees = crate::worktrees::directory(data_dir);
     let home = compiling_home(data_dir);
 
@@ -554,33 +638,20 @@ fn compile_server(dir: &Path, sccache: &Path, data_dir: &Path, size: &str) -> Co
         .set("SCCACHE_IDLE_TIMEOUT", "0")
         .running(&[&inside]);
 
-    // And what a Windows process is given beyond that, which is the same
-    // profile a session there is given and is given for the same reason: a
-    // program on that platform looks for its settings under the profile it was
-    // handed, and nothing there starts without the machine's own names. See
-    // [`crate::sandbox::windows_profile`] and [`crate::sandbox::windows_names`],
-    // which are the whole of both — and [`crate::sandbox::on_the_machine`],
-    // which leaves the profile to whoever knows where it is.
-    match Platform::HERE {
-        Platform::Windows => {
-            for made in sandbox::windows_profile(&home) {
-                surface.made(made);
-            }
-
-            for (name, value) in sandbox::windows_names(&home) {
-                surface.set(name, value);
-            }
-        }
-        Platform::Linux | Platform::MacOs => {}
-    }
-
     // And nothing to close after it, which is the one caller of a rendering
     // that has none: what a closing sees to is a file a session replaced rather
     // than wrote in place — see [`crate::sandbox::Closing`] — and the one file
     // this joins in is the sccache it is running, read-only. A compile server
     // outlives every session anyway, so there is no ending here to hang one on.
     let (rendering, _) = sandbox::rendered(Platform::HERE, &surface);
-    let mut compiling = Command::from(&rendering);
+
+    // Which is where this can refuse: a rendering naming an AppContainer is one
+    // the standard library cannot start — see
+    // [`crate::sandbox::off_a_console`], which is what starts such a thing. The
+    // compile server names none on any platform this runs on, and an error
+    // here is carried the way every other failure to start one is: said in the
+    // log, with each session starting a server of its own.
+    let mut compiling = Command::try_from(&rendering)?;
 
     // In a process group of its own where the platform needs one, which is what
     // a keeper ends when the server has gone — see
@@ -596,7 +667,7 @@ fn compile_server(dir: &Path, sccache: &Path, data_dir: &Path, size: &str) -> Co
         .stdout(Stdio::null())
         .stderr(Stdio::inherit());
 
-    compiling
+    Ok(compiling)
 }
 
 /// Where `program` is on the server's own `PATH`, or `None` where it is on none
@@ -605,6 +676,11 @@ fn compile_server(dir: &Path, sccache: &Path, data_dir: &Path, size: &str) -> Co
 /// The server's environment rather than the sandbox's fixed `PATH`: what is
 /// bound into a sandbox has to be a file on the host, and the packaged unit
 /// puts sccache on the service's path precisely so that this finds it.
+///
+/// **Read on the two platforms that compile through one.** Nothing calls this
+/// on Windows any more — see [`compiles_through_an_sccache`] — and the arm
+/// below is kept for the reason every platform arm here is: it is what a name
+/// means on that machine, rather than a claim that anything asks.
 ///
 /// **What a name means is the platform's**, which is the one arm here. A bare
 /// `sccache` is a file on the two Unixes and is nothing at all on Windows,
@@ -759,6 +835,49 @@ mod tests {
         cache.compiling(&RustBuildCache::default());
 
         assert!(cache.held().is_none());
+    }
+
+    /// The two Unixes compile through an sccache and Windows does not, which is
+    /// the one place that is decided — see [`compiles_through_an_sccache`].
+    #[test]
+    fn only_the_two_unixes_compile_through_an_sccache() {
+        assert!(compiles_through_an_sccache(Platform::Linux));
+        assert!(compiles_through_an_sccache(Platform::MacOs));
+        assert!(
+            !compiles_through_an_sccache(Platform::Windows),
+            "a session there is inside an AppContainer, which is refused the \
+             loopback an sccache client reaches its server over",
+        );
+    }
+
+    /// And what a cache hands out follows that answer rather than what it was
+    /// handed: an sccache given to a machine that cannot compile through one is
+    /// an sccache the cache does not have.
+    ///
+    /// Asked of [`Platform::HERE`] rather than of a platform, because this is
+    /// the arm the constructors take — so the assertion means the opposite
+    /// thing on the Windows job from what it means on the other two, which is
+    /// the whole point of running the suite on both.
+    #[test]
+    fn an_sccache_is_only_kept_where_a_session_could_reach_one() {
+        let cache = BuildCache::at(
+            PathBuf::from("/var/cache/verkstead"),
+            Some(PathBuf::from("/nix/store/whatever/bin/sccache")),
+            PathBuf::from("/var/lib/verkstead"),
+        );
+        let here = compiles_through_an_sccache(Platform::HERE);
+
+        assert_eq!(cache.caches_compiles(), here);
+        assert_eq!(
+            cache
+                .shared(&RustBuildCache::default())
+                .expect("nothing configured is the feature on")
+                .sccache()
+                .is_some(),
+            here,
+            "which is what puts a RUSTC_WRAPPER in a session's environment, or \
+             leaves it out",
+        );
     }
 
     /// A Repo builds Rust where it has a manifest at its root, which is the one

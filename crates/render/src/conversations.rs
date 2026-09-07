@@ -349,29 +349,18 @@ pub struct ConversationView {
     /// scratch every time, which is a slow build rather than a broken one — so
     /// it is a note above the button, not a refusal on it.
     ///
+    /// **And false where installing one would change nothing.** A Windows
+    /// session compiles through no sccache whatever the machine has, because
+    /// the AppContainer it runs in is refused the loopback the client reaches
+    /// its server over (ADR-0014) — so there is nothing here for the human to
+    /// go and do, and a note telling them to do it would be wrong. What is
+    /// standing rather than fixable is said on the settings page instead — see
+    /// [`crate::CompileCaching::NotThroughAContainer`].
+    ///
     /// The server's rule rather than three fields for the page to combine, for
     /// the reason [`ConversationView::ready_to_grill`] is one: two of the three
     /// are facts about the server that nothing else on this payload carries.
     pub compiles_uncached: bool,
-
-    /// Whether a session on this Conversation runs outside a Sandbox — with the
-    /// human's own account's reach rather than inside the boundary the product
-    /// promises.
-    ///
-    /// True on a Windows build and nowhere else, and only until the Sandbox
-    /// lands there: the pseudo-terminal came first, so a Windows session runs
-    /// the agent as an ordinary process in the meantime. Said rather than
-    /// hidden, because what is different about it is the one thing a human
-    /// would want to know before pressing anything.
-    ///
-    /// A fact about the build rather than about this Conversation, and the same
-    /// answer on every Conversation one server sends. Carried here for the
-    /// reason [`ConversationView::compiles_uncached`] is: it is read where the
-    /// work is started from, and nothing else on this payload says it. One
-    /// value, drawn in three places — above the press that starts the work,
-    /// beside the session's own terminal, and on a Conversation Terminal's
-    /// pane, a shell in the same nothing.
-    pub unsandboxed: bool,
 
     /// Whether there is driving to start again: the Conversation is in a state
     /// something ought to be driving, and nothing is.

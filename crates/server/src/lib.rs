@@ -36,6 +36,16 @@ mod cleanup;
 mod commenting;
 mod comments;
 mod commits;
+/// How long a Conversation's boundary lasts on the platform whose boundary is
+/// an identity: the AppContainer granted at its first session, taken away with
+/// its Worktree, and swept for at startup.
+///
+/// Public for the reason the sandbox is: how long what a session may reach
+/// lasts is part of the product's own promise rather than an implementation
+/// detail of an endpoint, and what proves a boundary has really been taken back
+/// is a suite standing where the close and the sweep do — see
+/// `crates/server/tests/sandbox_windows.rs`.
+pub mod containers;
 mod continuing;
 mod conversations;
 mod deferrals;
@@ -519,35 +529,6 @@ pub fn router_watching(pool: SqlitePool, watched: WatchedPaths, data_dir: PathBu
     )
 }
 
-/// The same again, answering as a build whose sessions run outside a Sandbox
-/// does — which today is a Windows one.
-///
-/// The arm the machine running these tests will never be, stood up so that they
-/// can ask it: nothing is refused, and every Conversation the viewer is handed
-/// says the session it would start has the human's own account's reach. A rule
-/// about the build rather than about the platform's filesystem, so it is asked
-/// wherever the suite runs — see [`sessions::unsandboxed_on`], which is where a
-/// real server's own answer comes from.
-///
-/// Watching `watched` and keeping what it makes in `data_dir`, as
-/// [`router_watching`] does: what these tests read is a Conversation with a
-/// Repo behind it.
-pub fn router_running_unsandboxed(
-    pool: SqlitePool,
-    watched: WatchedPaths,
-    data_dir: PathBuf,
-) -> Router {
-    routed(
-        pool,
-        updates::Updates::nothing_learned(),
-        watched,
-        nothing_bound(),
-        data_dir,
-        sessions::Sessions::unsandboxed_here(),
-        Gh::on_path(),
-    )
-}
-
 /// The same, over the whole of what the *installation* configured — the Watched
 /// Paths its flags named and the Sandbox Configuration binds beside them — and
 /// reaching GitHub through `gh`.
@@ -708,6 +689,15 @@ fn routed(
     // files, and a delete that could not have the directory deleted the rows
     // anyway. See [`attachments::at_startup`].
     attachments::at_startup(&state);
+
+    // And the boundaries of the Conversations that have stopped, which is the
+    // same sweep one platform further out: a close takes a Conversation's
+    // AppContainer with its Worktree, and a server that died took nothing at
+    // all — so what is written down under the Data Directory and belongs to a
+    // Conversation that has finished or closed is a profile and a set of
+    // entries on the human's own directories that nothing else will ever look
+    // at. See [`containers::at_startup`].
+    containers::at_startup(&state);
 
     // Before anything is served, because it is about what was already happening
     // rather than about anything a request will start: every Conversation the
@@ -949,11 +939,13 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
     // asks through. Here rather than with the bind, because its name comes off
     // the Data Directory — see [`pipe`] — and that is only settled above.
     //
-    // Granting nobody beyond the account this runs as: the identity a
-    // container's sessions run under is what the further argument is for, and
-    // there are no containers yet.
+    // Granting nobody beyond the account this runs as, because there are no
+    // containers yet: what it is opened against is the set this process's own
+    // containers put themselves into as they are made, so a Conversation
+    // starting its first session an hour from now is granted then — see
+    // [`pipe::Grants`].
     #[cfg(windows)]
-    let pipe = pipe::Listener::open(&data_dir, None)
+    let pipe = pipe::Listener::open(&data_dir, &pipe::Grants::of_this_process())
         .context("opening the named pipe a Windows session asks through")?;
 
     tracing::info!(

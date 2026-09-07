@@ -62,7 +62,7 @@
     ]
   },
   "rust_build_cache": {
-    "compiles_cached": false,
+    "compiles": "NoSccache",
     "enabled": true,
     "size": "50G",
     "size_configured": true

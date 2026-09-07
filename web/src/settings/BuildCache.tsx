@@ -17,9 +17,10 @@
 //! Two halves in two panes, which is what the settings page is: a card in the
 //! middle pane saying how the cache stands, and the controls that change it in
 //! the details pane it opens, at `/settings/build-cache`. What the human cannot
-//! fix from the browser — no sccache where the server can see one — is on the
-//! card as well as in the pane, the way the credentials' warnings are: whoever
-//! needs to read it is precisely whoever is not editing.
+//! fix from the browser — no sccache where the server can see one, or a platform
+//! where no session could reach one — is on the card as well as in the pane, the
+//! way the credentials' warnings are: whoever needs to read it is precisely
+//! whoever is not editing.
 //!
 //! Both halves read the one query, which is the one the credentials above them
 //! read: one payload holds both files, and a read apiece would be two opinions
@@ -62,18 +63,38 @@ function useSettings() {
   }));
 }
 
-/// What is said where there is no sccache for the server to compile through.
+/// What is said where a session's compiling is not cached — which is two
+/// different things to say, and the server has already decided which.
 ///
 /// Drawn on the card and in the pane alike, because it is the same sentence in
-/// both: something the human would have to leave the browser to fix, said where
-/// they would otherwise wonder why nothing got faster. Not an error — the
-/// downloads are still shared, and the builds still work.
-function uncompiled(): JSX.Element {
+/// both: said where somebody would otherwise wonder why nothing got faster. Not
+/// an error either way — the downloads are still shared, and the builds still
+/// work.
+///
+/// **One of them is something to go and do and the other is not**, which is the
+/// whole reason `compiles` is not a boolean. A machine with no sccache on it is
+/// a machine somebody can install one on; a Windows server is a machine where no
+/// session could reach one, because the AppContainer a session runs in is
+/// refused the loopback the client talks to its server over — so what is said
+/// there is why, and not an instruction that would change nothing.
+function uncompiled(cache: BuildCacheView): JSX.Element {
   return (
     <p class={styles.warning}>
-      No sccache is installed where the server can see it, so dependency{" "}
-      <em>compiles</em> are not cached — only the crate downloads. Install
-      sccache on the server to cache the compiling too.
+      <Show
+        when={cache.compiles === "NoSccache"}
+        fallback={
+          <>
+            Sessions on this machine run inside an AppContainer, which cannot
+            reach a compile server, so dependency <em>compiles</em> are not
+            cached — only the crate downloads. There is nothing to install: it
+            is how the sandbox works on Windows.
+          </>
+        }
+      >
+        No sccache is installed where the server can see it, so dependency{" "}
+        <em>compiles</em> are not cached — only the crate downloads. Install
+        sccache on the server to cache the compiling too.
+      </Show>
     </p>
   );
 }
@@ -82,12 +103,15 @@ function uncompiled(): JSX.Element {
 ///
 /// Only while the cache is on, because the rest of it is only true then:
 /// switched off, nothing is cached at all, and a line saying the downloads still
-/// are would be wrong exactly where somebody has just turned it off. The setup
-/// card's own warning is gated the same way — see
+/// are would be wrong exactly where somebody has just turned it off.
+///
+/// The setup card's own warning is gated on less than this: it is drawn only
+/// where installing an sccache would fix it, because that is a note above a
+/// press rather than a page about the machine — see
 /// `ConversationView::compiles_uncached`, which the server works out with the
 /// switch already in hand.
 function warned(cache: BuildCacheView): boolean {
-  return cache.enabled && !cache.compiles_cached;
+  return cache.enabled && cache.compiles !== "Cached";
 }
 
 /// The cache as it stands, as the card that opens it.
@@ -124,7 +148,7 @@ export function BuildCacheCard(props: {
           >
             <h2>Rust build cache</h2>
 
-            <Show when={warned(cache())}>{uncompiled()}</Show>
+            <Show when={warned(cache())}>{uncompiled(cache())}</Show>
 
             <p class={styles.standing}>
               <Show
@@ -132,9 +156,9 @@ export function BuildCacheCard(props: {
                 fallback="Off, so every session downloads and compiles its own crates."
               >
                 Crates are downloaded{" "}
-                <Show when={cache().compiles_cached}>and compiled </Show>
+                <Show when={cache().compiles === "Cached"}>and compiled </Show>
                 once for this machine
-                <Show when={cache().compiles_cached}>
+                <Show when={cache().compiles === "Cached"}>
                   , in up to <span class={styles.size}>{cache().size}</span> of
                   compiled output
                 </Show>
@@ -255,11 +279,11 @@ export function BuildCachePane(props: {
                 started; one already running keeps what it began with.
               </Note>
 
-              <Show when={warned(set())}>{uncompiled()}</Show>
+              <Show when={warned(set())}>{uncompiled(set())}</Show>
 
               {/* The size is sccache's, so it is asked for only where there is
                   an sccache to read it. */}
-              <Show when={set().enabled && set().compiles_cached}>
+              <Show when={set().enabled && set().compiles === "Cached"}>
                 <form class={styles.sizing} onSubmit={commit}>
                   <label for="build-cache-size">
                     How large the compiled half may grow

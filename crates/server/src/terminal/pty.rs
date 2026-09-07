@@ -93,7 +93,11 @@ impl Terminal {
             ));
         };
 
-        let mut command = Command::from(std::process::Command::from(rendering));
+        // Which cannot refuse on this arm: what a conversion to a command
+        // refuses is a rendering that names an AppContainer, and there are none
+        // on a platform whose boundary is a wrapper the vector already carries
+        // — see [`Rendering::container`].
+        let mut command = Command::from(std::process::Command::try_from(rendering)?);
 
         command
             .kill_on_drop(true)

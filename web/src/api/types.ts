@@ -569,9 +569,9 @@ export type BrowseScope = "watched" | "anywhere";
  * one is *no size configured* rather than a size of nothing — which is what
  * clearing the field means and what puts the default back.
  *
- * Whether an sccache was found is not here. It is the server's own
+ * Whether compiling is cached is not here. It is the server's own
  * circumstance rather than anything a page can decide, so it travels one way
- * only — see [`BuildCacheView::compiles_cached`].
+ * only — see [`BuildCacheView::compiles`].
  */
 export type BuildCacheEdit = { enabled: boolean, size: string, };
 
@@ -602,15 +602,16 @@ size: string,
  */
 size_configured: boolean, 
 /**
- * Whether the server found an sccache to compile through.
+ * Whether a session's *compiling* is cached as well as its downloads, and
+ * where it is not, why not.
  *
  * Read-only, and the one fact here nobody can set from a page: it is the
- * server's own environment. False means a session's crate downloads are
- * still shared and its dependencies are compiled every time — which is
- * what the workbench warns about on a Rust repository, and what installing
- * sccache on the server fixes.
+ * server's own environment and its own platform. Anything but
+ * [`CompileCaching::Cached`] means a session's crate downloads are still
+ * shared and its dependencies are compiled every time, which is a slow
+ * build rather than a broken one.
  */
-compiles_cached: boolean, };
+compiles: CompileCaching, };
 
 /**
  * One session's Capture, whole, as the details pane receives it.
@@ -985,6 +986,18 @@ worktree: Worktree | null,
 base_commit: string | null, };
 
 /**
+ * Whether a session's compiling is cached, and where it is not, what would
+ * have to change — which is not the same question twice.
+ *
+ * Two false answers rather than one, because they ask different things of the
+ * reader. One is a machine missing a program, which the human fixes by
+ * installing it; the other is a platform that cannot reach a compile server at
+ * all, which nobody fixes and which a page telling them to install something
+ * would be lying about.
+ */
+export type CompileCaching = "Cached" | "NoSccache" | "NotThroughAContainer";
+
+/**
  * How a merge conflict between a pull request and its base branch is resolved.
  *
  * Two words for two ways of putting the base's work on a branch that has
@@ -1262,31 +1275,19 @@ ready_to_grill: boolean,
  * scratch every time, which is a slow build rather than a broken one — so
  * it is a note above the button, not a refusal on it.
  *
+ * **And false where installing one would change nothing.** A Windows
+ * session compiles through no sccache whatever the machine has, because
+ * the AppContainer it runs in is refused the loopback the client reaches
+ * its server over (ADR-0014) — so there is nothing here for the human to
+ * go and do, and a note telling them to do it would be wrong. What is
+ * standing rather than fixable is said on the settings page instead — see
+ * [`crate::CompileCaching::NotThroughAContainer`].
+ *
  * The server's rule rather than three fields for the page to combine, for
  * the reason [`ConversationView::ready_to_grill`] is one: two of the three
  * are facts about the server that nothing else on this payload carries.
  */
 compiles_uncached: boolean, 
-/**
- * Whether a session on this Conversation runs outside a Sandbox — with the
- * human's own account's reach rather than inside the boundary the product
- * promises.
- *
- * True on a Windows build and nowhere else, and only until the Sandbox
- * lands there: the pseudo-terminal came first, so a Windows session runs
- * the agent as an ordinary process in the meantime. Said rather than
- * hidden, because what is different about it is the one thing a human
- * would want to know before pressing anything.
- *
- * A fact about the build rather than about this Conversation, and the same
- * answer on every Conversation one server sends. Carried here for the
- * reason [`ConversationView::compiles_uncached`] is: it is read where the
- * work is started from, and nothing else on this payload says it. One
- * value, drawn in three places — above the press that starts the work,
- * beside the session's own terminal, and on a Conversation Terminal's
- * pane, a shell in the same nothing.
- */
-unsandboxed: boolean, 
 /**
  * Whether there is driving to start again: the Conversation is in a state
  * something ought to be driving, and nothing is.

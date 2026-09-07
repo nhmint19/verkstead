@@ -157,17 +157,6 @@
   font-size: 0.9rem;
 }
 
-/* And what a session here can reach, on a Verkstead with no Sandbox to put one
-   in: the same size as the note under a button, because that is what it is.
-   Left-aligned against the box rather than following the press to the far edge
-   — it is a sentence to read, and the end of the line is not where one starts —
-   and spaced off the press under it the way the note under the box is. */
-.startGrilling .unsandboxed {
-  margin: 0 0 0.6rem;
-  font-size: 0.9rem;
-  text-align: start;
-}
-
 /* Under the pointer, the one filled button on the pane: it deepens its accent.
    Never while it is refusing the press — the start has two ways of doing that
    and this excludes both — and inside a query, because a hover state has to be

@@ -57,6 +57,15 @@ flowchart LR
   Terminal. [ADR-0014](../adr/0014-windows-sessions.md) is why the terminal and
   the Sandbox land as two stages rather than one; the AppContainer of its third
   is what takes the note away again.)
+  (*revised 2026-09-06, windows sessions stage 03*: it did. A Windows session
+  runs inside an AppContainer now, so the one description of what a session may
+  reach has a third rendering and there is no unsandboxed session on any
+  platform — the note is gone from the composer, the session pane and the
+  Terminal pane, and the value the three drew it from is gone with it. What is
+  different about this rendering is that reach is an access-control entry on the
+  human's own directories rather than a mount or a policy, so a container is per
+  Conversation, goes with the Worktree, and is swept at the next startup where a
+  crash left one standing.)
 - **Single user, no app-level auth; the tailnet is the perimeter.** Unchanged
   from askance.
 - **Fresh database.** No import of askance history.
@@ -454,6 +463,21 @@ flowchart LR
     The switch and the size are `rust_build_cache` in `config.yaml`, read at
     every spawn, so a change applies to the next session; absent means on at
     30G. Named for Rust so a sibling can stand beside it later.
+
+    **Compile caching is off on Windows, and the downloads are not** (*settled
+    2026-09-06, the AppContainer stage's probe;
+    [ADR 0014](../adr/0014-windows-sessions.md)*). A session there runs inside
+    an AppContainer, and a probe run twice on a real Windows 11 machine found
+    every connection from inside one to `127.0.0.1` and to the machine's own
+    LAN address timing out — and the sccache client it ran panicked reading its
+    own configuration before it reached the network at all. So the server looks
+    for no `sccache` on that platform, sets no `RUSTC_WRAPPER`, and starts no
+    compile server for one to reach: a client that cannot reach a server is
+    every Rust build inside failing rather than one missing a cache. The cache
+    directory itself is granted to the container read-write with `CARGO_HOME`
+    inside it exactly as elsewhere, because a directory is a directory. The
+    settings page says which of the two kinds of *not cached* a server is in,
+    so that a Windows one is not told to install something it could not use.
   - Nix dev-shell autodetection kept (wrap in `nix develop` only when a shell
     attribute actually evaluates)
   - This drops today's blanket rw bind of all of `~/src`.

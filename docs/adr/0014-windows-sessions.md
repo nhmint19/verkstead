@@ -136,7 +136,12 @@ session reaches its own Worktree and its own binds and no other Conversation's.
 A server that crashed between the two would leave entries behind, so **the
 server sweeps at startup**: profiles of Conversations that are Done or Closed
 are deleted and their entries stripped from the directories the Surface would
-have named. One profile for the installation was the alternative, cheaper per
+have named. What the sweep reads them off is a record Verkstead writes under
+its own Data Directory as each container is made, one file per Conversation
+holding the profile's name, its SID and every entry written for it: a Closed
+Conversation has no Worktree left to build a Surface from, so *the directories
+the Surface would have named* has to be something the server that named them
+wrote down. One profile for the installation was the alternative, cheaper per
 session and with nothing to undo, and was rejected for letting any session
 reach every directory ever granted.
 
@@ -180,6 +185,53 @@ at all, and that a ConPTY works inside one. The container stage therefore
 machine and pastes the output of — before the rendering is written, and the
 stage's own grilling reads that output. A rendering built on a claim the
 machine contradicts would be a stage rebuilt.
+
+### What the probe answered
+
+*(added 2026-09-06, as the container stage was planned. The program is
+`crates/server/examples/appcontainer-probe.rs`; it was run twice on a Windows 11
+machine, the second time after two mistakes of its own were fixed. Everything
+below is what that machine did rather than what anything expected it to do.)*
+
+**Every claim above about the network holds, and the one this ADR called
+unverified now is not.** A connection from inside a container to `127.0.0.1` is
+refused, and so is one to the machine's own address on its LAN — both by
+*timing out* rather than by a fast refusal, which is what a session dialling
+either would experience as a hang. So the named pipe is load-bearing rather
+than belt-and-braces, and binding a LAN address would never have worked.
+
+**A pseudoconsole opened outside and handed in works.** A process started inside
+a container on a console `CreatePseudoConsole` made out here printed to it and
+the bytes came back off the console's own pipe. This was the claim the stage
+could not have survived losing.
+
+**A per-user process can make a profile.** `CreateAppContainerProfile` needs no
+elevation, so the per-user msi install has everything it needs.
+
+**Grants work, and the boundary is real.** A directory granted read-write is
+written from inside, one granted read-only is read, and one granted nothing at
+all is refused with `Access is denied`. A junction whose *target* alone is
+granted is read through, so the grant belongs on the real directory the account
+is at, as this ADR assumed. **And no ancestor needs granting**: the container
+reached a directory deep inside the human's own profile with no entry anywhere
+above it, so a rendering never has to grant the profile on the way to a
+Worktree.
+
+**Program Files and the system are readable with no entry** — `node`, `git` and
+Windows PowerShell all ran inside a container that had been granted nothing at
+all about them, which is what this ADR assumed and is what makes the per-user
+`PATH` entries the only ones needing a grant.
+
+**Two things came back short of an answer, and are the container stage's to
+settle.** An explicit **deny** entry written under a granted tree did *not*
+refuse the path beneath it — so `Nothing` over the account's own skills needs a
+mechanism worked out by attempting rather than the one line this ADR imagined,
+whether that is the deny ordered or flagged differently, a protected list on
+that one directory, or granting the account's children rather than the account.
+And **sccache does not run inside a container as it stands**: its client panicked
+reading its own configuration before it ever reached the network. With loopback
+refused as well, this settles the switch this ADR left to the probe — **sccache
+is off for sandboxed Windows sessions**, and the shared `CARGO_HOME` stays.
 
 ## What stays as it was
 

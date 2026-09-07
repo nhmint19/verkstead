@@ -34,8 +34,8 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
-    ConflictResolution, IgnoreRule, PathResolution, PathSource, RuleField, SettingsSaved,
-    SettingsView, Verified,
+    CompileCaching, ConflictResolution, IgnoreRule, PathResolution, PathSource, RuleField,
+    SettingsSaved, SettingsView, Verified,
 };
 use verkstead_server::sandbox::SandboxConfig;
 use verkstead_server::{Gh, WatchedPaths, open_database, router_asking_github, router_installed};
@@ -595,8 +595,9 @@ async fn a_build_cache_nobody_has_configured_is_on_at_the_default_size() {
         !cache.size_configured,
         "the default is shown rather than chosen"
     );
-    assert!(
-        !cache.compiles_cached,
+    assert_ne!(
+        cache.compiles,
+        CompileCaching::Cached,
         "this router runs no sessions, so it has no sccache to hand any"
     );
 }

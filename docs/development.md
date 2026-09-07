@@ -107,22 +107,35 @@ One directory is made outside it: the **Build Cache**, at
 `CARGO_HOME` inside it, so a crate is downloaded once for the machine rather
 than once per Conversation; with `sccache` on the `PATH` the server was started
 from, every session is told to compile through it as `RUSTC_WRAPPER` and the
-compiling is cached too. The dev shell carries one, so a checkout run gets the
-whole thing. It is on with nothing configured, and the settings page is where
-it is switched off or given a size.
+compiling is cached too — on the two Unixes, and never on Windows, for the
+reason below. The dev shell carries one, so a checkout run gets the whole
+thing. It is on with nothing configured, and the settings page is where it is
+switched off or given a size.
 
 The sccache **server** is Verkstead's own, not the sessions'. It comes up as a
 child of the running server the first time a session starts on a repo with a
 root `Cargo.toml`, in a sandbox holding `<data-dir>/worktrees` and the build
 cache and nothing else — so `ps` shows one more sandboxed child beside each
 session's, and it goes when the server does. That sandbox is described and
-rendered by the code a session's is, so it is `bwrap` on Linux, `sandbox-exec`
-on a Mac, and on Windows a plain process, that platform's rendering having no
-boundary in it until the container stage lands — without either half saying
-which. Every session's `sccache` is only the client half reaching it. Sessions
-starting their own is what this replaces: they all bind one port, and the
-loser's compiles then run in the winner's sandbox where its worktree is not
-reachable.
+rendered by the code a session's is, so it is `bwrap` on Linux and
+`sandbox-exec` on a Mac without either half saying which. Every session's
+`sccache` is only the client half reaching it. Sessions starting their own is
+what this replaces: they all bind one port, and the loser's compiles then run
+in the winner's sandbox where its worktree is not reachable.
+
+**Windows has neither half, and that is deliberate rather than unfinished.** A
+session there runs inside an AppContainer, which is refused every connection to
+the local machine — the probe behind [ADR 0014](adr/0014-windows-sessions.md)
+timed out on `127.0.0.1` and on the machine's own LAN address alike, and the
+sccache client it ran panicked reading its own configuration before it got that
+far. A client that cannot reach a server is a `RUSTC_WRAPPER` that fails every
+build rather than one that misses a cache, so the server never looks for an
+sccache on that platform, never sets `RUSTC_WRAPPER`, and starts no compile
+server for one to reach. What a Windows session does get is the other half
+whole: the shared cache directory granted to its container read-write, with
+`CARGO_HOME` inside it, so a crate is still downloaded once for the machine and
+only the *compiling* is per session. The settings page says so where somebody
+would otherwise wonder why a Windows build is slower than a Linux one.
 
 A session's GitHub auth and the author of its commits are two of those settings
 rather than anything found in a home directory. Put a token in `secrets.yaml`
@@ -182,7 +195,7 @@ what the settings page saves through:
 $ curl http://127.0.0.1:8422/api/ui/settings
 {"git_author":{"name":"","email":""},"github_token":null,
  "rust_build_cache":{"enabled":true,"size":"30G","size_configured":false,
-   "compiles_cached":true},
+   "compiles":"Cached"},
  "cleanup":{"trim":{"enabled":true,"days":3,"days_configured":false},
    "delete":{"enabled":false,"days":30,"days_configured":false}},
  "conflict_resolution":"Merge",
@@ -201,7 +214,7 @@ $ curl -X POST -H 'Content-Type: application/json' \
 {"settings":{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
   "github_token":{"last_four":"cdef","at":"2026-08-23T08:23:15.041950412Z"},
   "rust_build_cache":{"enabled":true,"size":"30G","size_configured":false,
-    "compiles_cached":true},
+    "compiles":"Cached"},
   "cleanup":{"trim":{"enabled":true,"days":3,"days_configured":false},
     "delete":{"enabled":false,"days":30,"days_configured":false}},
   "conflict_resolution":"Merge",
@@ -222,12 +235,15 @@ will not show it again, and a network that was briefly down is no reason to send
 somebody back for another. `"missing"` beside the account is the scopes
 Verkstead needs that GitHub says the token has not been given — `gist`, which
 publishing a share writes with, and empty on a token that carries it or on a
-fine-grained one GitHub named no scopes for at all. `"github_token"` is `"Keep"`
-to leave the configured one alone, which is what a save of the author fields
-sends, and `"Clear"` to take it away. `"rust_build_cache"` is a pair of values
-rather than an action: an empty `"size"` is no size configured, which puts the
-default back, and `"compiles_cached"` is read-only — it says whether the server
-found an `sccache`, which is its own environment rather than anybody's setting.
+fine-grained one GitHub named no scopes for at all. `"github_token"` is
+`"Keep"` to leave the configured one alone, which is what a save of the author
+fields sends, and `"Clear"` to take it away. `"rust_build_cache"` is a pair of
+values rather than an action: an empty `"size"` is no size configured, which
+puts the default back, and `"compiles"` is read-only — `"Cached"` where the
+server found an `sccache`, `"NoSccache"` where it did not, and
+`"NotThroughAContainer"` on a Windows server, where no session could reach one
+however many are installed. Its own environment and its own platform rather
+than anybody's setting.
 
 `"watched_paths"` and `"sandbox_binds"` are the two lists `config.yaml` holds,
 sent as values in the grammar the flags use — so a Verkstead started with no
@@ -569,7 +585,9 @@ own, with a PowerShell script where claude goes — and
 `terminal.rs`, asking `mode con` what `stty` is asked there. Both are
 `cfg(windows)`, so a Linux or a Mac checkout compiles neither: the
 `windows-2025` job is where they run, and it installs an `sccache` on the
-runner for the two of them that are about the Compile Server.
+runner for the two of them that are about the build cache — both of which prove
+a negative, that a machine which *has* one still starts no Compile Server and
+still hands a session no `RUSTC_WRAPPER`.
 
 And in `web/`, which is the Solid viewer
 ([ADR 0003](adr/0003-solid-spa-viewer.md)):

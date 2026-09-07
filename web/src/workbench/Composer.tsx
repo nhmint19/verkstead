@@ -83,7 +83,6 @@ import styles from "./Composer.module.css";
 import { refusedOnCreate } from "./composing";
 import { PaneHead } from "./PaneHead";
 import { DRAFT, chosen } from "./naming";
-import { Unsandboxed } from "./sandboxing";
 import { Setup, SetupNotes } from "./Setup";
 import { keeping } from "./settling";
 import { BRIEF_REFUSAL, grillRefusal } from "./Timeline";
@@ -382,11 +381,6 @@ const MISSING = "This needs a brief, and every role picked and working.";
 ///
 /// The server checks every one of the conditions again regardless — the page's
 /// copy is only as fresh as its last read.
-///
-/// **And what the session will be like, above it**, on a Verkstead whose
-/// sessions have no Sandbox around them: the last thing read before the work is
-/// started, which is where a fact about what the work can reach belongs. It
-/// gates nothing — see `sandboxing.tsx`.
 function StartGrilling(props: {
   conversation: ConversationView;
   files: Attaching;
@@ -417,13 +411,6 @@ function StartGrilling(props: {
 
   return (
     <div class={styles.startGrilling}>
-      {/* Above the press rather than under it: what a session can reach is
-          something to know before starting one. */}
-      <Unsandboxed
-        conversation={props.conversation}
-        class={styles.unsandboxed}
-      />
-
       {/* The paperclip at the near edge and the start at the far one, in the
           row the compose page's two presses stand in — pushed apart by the
           paperclip's own margin, the way the roadmap dropdown is. */}

@@ -50,6 +50,20 @@ pub struct Closing {
     /// The files joined into a session's profile by a hard link, the account's
     /// own path first and the name inside the profile second.
     linked: Vec<(PathBuf, PathBuf)>,
+
+    /// And the AppContainer the session is running inside, held for as long as
+    /// it runs.
+    ///
+    /// **Held rather than seen to**, and held here as well as by the module
+    /// that owns it. A container's life is its Conversation's — granted at the
+    /// first session, taken back with the Worktree, swept for at startup (see
+    /// [`super::container`] and [`crate::containers`]) — so what this adds is
+    /// the one thing that lifetime cannot say on its own: a session is still
+    /// running. A close that arrives while one is takes the container out of
+    /// the module's hands and finds this one still holding it, and the profile
+    /// goes when the session does rather than out from under it.
+    #[cfg(windows)]
+    inside: Option<std::sync::Arc<super::container::Container>>,
 }
 
 impl Closing {
@@ -61,13 +75,33 @@ impl Closing {
     /// and a constructor that is the answer on two platforms is not a thing to
     /// hide on the third.
     pub fn nothing() -> Closing {
-        Closing { linked: Vec::new() }
+        Closing {
+            linked: Vec::new(),
+            #[cfg(windows)]
+            inside: None,
+        }
     }
 
     /// And the files a rendering joined in by hard link, each as the account's
     /// own path and the name a session found it under.
     pub(crate) fn of_links(linked: Vec<(PathBuf, PathBuf)>) -> Closing {
-        Closing { linked }
+        Closing {
+            linked,
+            #[cfg(windows)]
+            inside: None,
+        }
+    }
+
+    /// The same, holding the AppContainer the session runs inside — see the
+    /// field, which is where the whole of what holding it means is.
+    #[cfg(windows)]
+    pub(crate) fn inside(
+        mut self,
+        container: std::sync::Arc<super::container::Container>,
+    ) -> Closing {
+        self.inside = Some(container);
+
+        self
     }
 
     /// The names inside the profile this has anything left to do about — none

@@ -57,7 +57,20 @@ const UNSET = unset as SettingsView;
 function compiling(standing: SettingsView): SettingsView {
   return {
     ...standing,
-    rust_build_cache: { ...standing.rust_build_cache, compiles_cached: true },
+    rust_build_cache: { ...standing.rust_build_cache, compiles: "Cached" },
+  };
+}
+
+/// And the same settings on a server whose sessions could not reach an sccache
+/// however many are installed, which is what a Windows one is: the boundary
+/// there is an AppContainer, and an AppContainer is refused the loopback.
+function contained(standing: SettingsView): SettingsView {
+  return {
+    ...standing,
+    rust_build_cache: {
+      ...standing.rust_build_cache,
+      compiles: "NotThroughAContainer",
+    },
   };
 }
 
@@ -187,6 +200,20 @@ describe("the card", () => {
 
     await waitFor(() => screen.getByText(/downloaded/));
     expect(screen.queryByText(/No sccache is installed/)).toBeNull();
+  });
+
+  /// And where no session could reach one, why — rather than an instruction
+  /// that would change nothing. A Windows session is inside an AppContainer,
+  /// which is refused the loopback an sccache client talks to its server over,
+  /// so installing one is not what is missing.
+  it("says why compiles are uncached where nothing could reach an sccache", async () => {
+    theSettings(contained(UNSET));
+    const { container } = mountCard();
+
+    await waitFor(() => screen.getByText(/cannot\s+reach a compile server/));
+
+    expect(container.querySelector(`.${styles.warning}`)).not.toBeNull();
+    expect(screen.queryByText(/Install\s+sccache/)).toBeNull();
   });
 
   it("opens the pane when it is pressed", async () => {

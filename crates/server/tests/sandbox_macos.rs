@@ -718,9 +718,12 @@ file() {
 /// them is about.
 fn probe(sandbox: &Sandbox, script: &str) -> BTreeMap<String, String> {
     let whole = format!("{PROBE}\n{script}\n");
-    let (rendering, _) = sandbox.command(&[SH, "-c", &whole]);
+    let (rendering, _) = sandbox
+        .command(&[SH, "-c", &whole])
+        .expect("a rendering on a platform with no identity to make");
 
-    let output = Command::from(&rendering)
+    let output = Command::try_from(&rendering)
+        .expect("a rendering with no container")
         .stdin(Stdio::null())
         .output()
         .expect("sandbox-exec is part of macOS");

@@ -112,7 +112,11 @@ const SECRET_MODE: u32 = 0o600;
 
 /// And what `config.yaml` is written as, which is the ordinary thing: a name and
 /// an email address are on every commit either of them ever makes.
-const ORDINARY_MODE: u32 = 0o644;
+///
+/// What everything else Verkstead writes under the Data Directory is written as
+/// too — see [`write_atomically`], whose one caller outside this module is the
+/// record a container is swept by.
+pub(crate) const ORDINARY_MODE: u32 = 0o644;
 
 /// Where the settings files are: the Data Directory, and nothing else to hold.
 ///
@@ -248,7 +252,14 @@ fn yaml<T: Serialize>(value: &T) -> std::io::Result<String> {
 /// to be recognised for what it is, and the alternative — unwinding on the way
 /// out of an error — is more that can go wrong on the path where something
 /// already has.
-fn write_atomically(path: &Path, text: &str, mode: u32) -> std::io::Result<()> {
+///
+/// **Reachable from the rest of the crate**, because the settings files are not
+/// the only thing under the Data Directory a half of would be worse than
+/// nothing. The record a Conversation's AppContainer is swept by is the other:
+/// it is read by a server that did not write it, and one that will not parse is
+/// a boundary nothing will ever take off the human's own directories — see
+/// [`crate::sandbox::granting::remembering`].
+pub(crate) fn write_atomically(path: &Path, text: &str, mode: u32) -> std::io::Result<()> {
     let name = path
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())

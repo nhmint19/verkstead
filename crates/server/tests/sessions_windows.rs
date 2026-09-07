@@ -6,9 +6,9 @@
 //! of its own rather than by making that one portable. `tests/sessions.rs`
 //! stands on a mount namespace, a `/bin/sh` probe and a `stty`, and what is
 //! being proved here is a different machine: a console rather than a
-//! pseudo-terminal, a rendering with no boundary in it, a profile joined
-//! together out of junctions and hard links, and a prompt that is not on the
-//! command line at all.
+//! pseudo-terminal, a boundary that is an identity the process carries rather
+//! than a wall in front of it, a profile joined together out of junctions and
+//! hard links, and a prompt that is not on the command line at all.
 //!
 //! **Everything here is real except the agent.** The repository is a
 //! repository, the worktree is one git made, the console is Verkstead's own
@@ -65,6 +65,7 @@ use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::platform::Platform;
+use verkstead_server::sandbox::container;
 use verkstead_server::sandbox::{Executable, Homes, Reachable, SandboxConfig};
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
@@ -101,6 +102,15 @@ const THE_AUTHOR: &str = "git_author:\n  name: Verkstead Test\n  email: test@ver
 /// anything at all, and nothing that is going to say something comes near it.
 const PATIENCE: Duration = Duration::from_secs(180);
 
+/// And how long a thing that was going to happen has had to happen in — which
+/// is what the one test here about something *not* happening waits out.
+///
+/// Short, because what it is waiting on is already over: what would have
+/// started a compile server starts it before it returns, so this is slack for a
+/// loaded runner rather than a race being sat out. See
+/// [`no_compile_server_comes_up_on_this_platform`].
+const SETTLED: Duration = Duration::from_secs(5);
+
 /// What the stand-in is started as: Windows PowerShell, which every machine
 /// carries, running a script file.
 ///
@@ -127,7 +137,30 @@ const POWERSHELL: [&str; 4] = ["powershell.exe", "-NoProfile", "-ExecutionPolicy
 /// file never reads half of one. `Say` prints a line on the console, which is
 /// what reaches the Capture. `Idle` is a session that has said what it has to
 /// say and is not going to exit, which is what the tests about a *running*
-/// session need.
+/// session need. `Under` joins a name onto a directory, `Here` is the directory
+/// the session was started in, and `Waiting` is a pause.
+///
+/// **Not one cmdlet in any of it**, which is a rule rather than a style and is
+/// the rule `tests/container_windows.rs` and `tests/sandbox_windows.rs` are
+/// already written under. A session runs inside an AppContainer from this stage
+/// on, and Windows PowerShell starting in there parses and runs what it is
+/// given without the commands it would ordinarily import from a module as it
+/// starts: the `windows-2025` job answered `CommandNotFoundException` for
+/// `Write-Output` the first time a probe of this shape ran inside one. So every
+/// stand-in here is the language and the framework and nothing else —
+/// `[System.IO.Path]::Combine` rather than `Join-Path`, `[System.IO.File]`
+/// rather than `Set-Content` and `Get-Content`, a `Thread` rather than
+/// `Start-Sleep` — which is what a program has in there whatever the shell
+/// managed to load.
+///
+/// And `Reading` is how the boundary is asked anything: a file read, or the
+/// name of what stopped it. **The name and not a word of the test's own**,
+/// because the two answers that matter here look identical to anything coarser
+/// — a path the boundary refused says `UnauthorizedAccessException` and a path
+/// that was never there says `FileNotFoundException`, and a test that could not
+/// tell them apart would pass just as happily against a description that named
+/// nothing at all. The innermost exception is the one asked, because a .NET
+/// method called from PowerShell arrives wrapped.
 ///
 /// The vector is written down by every stand-in rather than by the one test
 /// that reads it: what `$args[1]` and `$args[2]` are turns on Verkstead having
@@ -137,22 +170,39 @@ const PREAMBLE: &str = r#"
 $ErrorActionPreference = 'Stop'
 $evidence = '{evidence}'
 
+function Under($directory, $name) { return [System.IO.Path]::Combine($directory, $name) }
+
+function Here { return [System.IO.Directory]::GetCurrentDirectory() }
+
+function Waiting($milliseconds) { [System.Threading.Thread]::Sleep($milliseconds) }
+
 function Note($name, $value) {
-    $to = Join-Path $evidence $name
-    Set-Content -LiteralPath ($to + '.writing') -Value ([string]$value) -NoNewline
-    Move-Item -LiteralPath ($to + '.writing') -Destination $to -Force
+    $to = Under $evidence $name
+    $writing = $to + '.writing'
+    [System.IO.File]::WriteAllText($writing, [string]$value)
+    if ([System.IO.File]::Exists($to)) { [System.IO.File]::Delete($to) }
+    [System.IO.File]::Move($writing, $to)
 }
 
 function Say($said) { [Console]::Out.WriteLine($said) }
 
-function Idle { while ($true) { Start-Sleep -Milliseconds 50 } }
+function Idle { while ($true) { Waiting 50 } }
+
+function Reading($path) {
+    try { return 'read: ' + [System.IO.File]::ReadAllText($path) }
+    catch {
+        $why = $_.Exception
+        while ($why.InnerException) { $why = $why.InnerException }
+        return 'failed: ' + $why.GetType().FullName
+    }
+}
 
 Note 'args' ($args -join "`n")
 
 $model = $args[1]
 $line = $args[2]
 $named = [regex]::Match($line, '`([^`]+)`').Groups[1].Value
-$prompt = if ($named) { Get-Content -Raw -LiteralPath $named } else { '' }
+$prompt = if ($named) { [System.IO.File]::ReadAllText($named) } else { '' }
 "#;
 
 /// The server's own log, printed under whichever test was reading when it gave
@@ -224,6 +274,43 @@ static UNHURRIED: LazyLock<Pace> = LazyLock::new(|| Pace {
     merges: Duration::from_secs(600),
     cleanup: Duration::from_secs(600),
 });
+
+/// Where every directory this suite makes goes: the machine's temporary
+/// directory, spelled the way the filesystem holds it.
+///
+/// **Because a container cannot expand a short name.** The `windows-2025`
+/// runner hands `%TEMP%` out in its 8.3 spelling, the account `runneradmin`
+/// reached as `RUNNER~1` — and expanding one of those means listing `C:\Users`,
+/// which is the human's own profile and is exactly what a session inside an
+/// AppContainer is refused. So a program in there that hands .NET a path with a
+/// `~` in it is told the path is denied, which is the whole of what
+/// `[System.IO.Directory]::GetCurrentDirectory()` did the day this suite first
+/// ran inside one.
+///
+/// **And nothing Verkstead composes is spelled that way.** A Data Directory is
+/// under `%LOCALAPPDATA%` and a Worktree under it, both of which the shell
+/// answers in full — so the short name here is the runner's own and not
+/// anything a session would meet, and resolving it once is what gives this
+/// suite's directories the shape the product's have.
+///
+/// The verbatim prefix `canonicalize` answers with is taken off again: `\\?\`
+/// turns off the normalization every path a program is handed goes through, and
+/// a `USERPROFILE` spelled that way is not one anything expects.
+static SOMEWHERE: LazyLock<PathBuf> = LazyLock::new(|| {
+    let temporary = std::env::temp_dir();
+    let resolved = std::fs::canonicalize(&temporary).unwrap_or(temporary);
+    let spelled = resolved.display().to_string();
+
+    PathBuf::from(spelled.strip_prefix(r"\\?\").unwrap_or(&spelled))
+});
+
+/// One of them made, which is every temporary directory in this file — for the
+/// reason above.
+fn somewhere() -> tempfile::TempDir {
+    tempfile::Builder::new()
+        .tempdir_in(&*SOMEWHERE)
+        .expect("a directory under the machine's own temporary one")
+}
 
 /// A Conversation with a session running under a stand-in agent, and everything
 /// holding its directories open.
@@ -324,7 +411,9 @@ impl Grilling {
 
             assert!(
                 Instant::now() < deadline,
-                "the session never printed {said:?}. It printed: {capture:?}",
+                "the session never printed {said:?}. It printed: {capture:?}. \
+                 And what it was behind was: {}",
+                self.reach(),
             );
 
             pause(Duration::from_millis(25)).await;
@@ -366,8 +455,10 @@ impl Grilling {
                 panic!(
                     "the session never wrote {name}. It printed: {}. A Timeline \
                      with no session on it at all is one that was refused, and \
-                     the server's log above says which refusal that was",
+                     the server's log above says which refusal that was. And \
+                     what it was behind was: {}",
                     self.said_by_each(&view).await,
+                    self.reach(),
                 );
             }
 
@@ -381,6 +472,48 @@ impl Grilling {
             self.until(|view| view.worktree.as_ref().map(|worktree| worktree.path.clone()))
                 .await,
         )
+    }
+
+    /// What the machine says about the boundary this Conversation's sessions
+    /// run behind, at the moment a test gives up on one.
+    ///
+    /// **Said in the failure rather than worked out afterwards.** The
+    /// `windows-2025` job is the only machine that enforces any of this, so a
+    /// session refused something its description granted is a failure nobody
+    /// can read a second time: what Verkstead wrote down that it granted, and
+    /// what the machine's own listing says is really on the Worktree, are the
+    /// two halves of that reading and neither of them survives the run.
+    ///
+    /// The Worktree by way of the directory that holds them rather than off the
+    /// view, because this is called from a failure: a Conversation with no
+    /// worktree row to read is exactly the shape a session refused at its start
+    /// leaves behind, and a helper that waited for one would hang instead of
+    /// saying so.
+    fn reach(&self) -> String {
+        let record = self
+            .state
+            .path()
+            .join("containers")
+            .join(self.id.to_string());
+
+        let mut said = format!(
+            "\n  written down: {}",
+            std::fs::read_to_string(&record)
+                .unwrap_or_else(|error| format!("{}: {error}", record.display())),
+        );
+
+        let worktrees = self.state.path().join("worktrees");
+
+        match std::fs::read_dir(&worktrees) {
+            Ok(listing) => {
+                for entry in listing.flatten() {
+                    said.push_str(&format!("\n  {}", listed(&entry.path())));
+                }
+            }
+            Err(error) => said.push_str(&format!("\n  {}: {error}", worktrees.display())),
+        }
+
+        said
     }
 
     /// This Conversation's handoff directory on the host, which is where the
@@ -455,10 +588,10 @@ async fn grilling(script: &str) -> Grilling {
     grilling_caching(script, None).await
 }
 
-/// The same, with a shared build cache behind it — which is what the tests
-/// about the sccache need and what nothing else here wants: a cache is a
-/// `RUSTC_WRAPPER` in every session's environment, and every other test in this
-/// file is about a session that builds nothing.
+/// The same, with a shared build cache behind it — which is what the test about
+/// the cache needs and what nothing else here wants: a cache is a `CARGO_HOME`
+/// and a granted directory in every session's environment, and every other test
+/// in this file is about a session that builds nothing.
 async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
     // Before the server exists, because what is worth reading is what it says
     // as it starts a session — see [`LOGGING`].
@@ -472,25 +605,52 @@ async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
         .await
         .expect("the suite's room is never closed");
 
-    let watched = tempfile::tempdir().unwrap();
-    let state = tempfile::tempdir().unwrap();
-    let scripts = tempfile::tempdir().unwrap();
-    let evidence = tempfile::tempdir().unwrap();
+    let watched = somewhere();
+    let state = somewhere();
+    let scripts = somewhere();
+    let evidence = somewhere();
 
     std::fs::write(state.path().join("config.yaml"), THE_AUTHOR).unwrap();
 
     let database = state.path().join("verkstead.db");
     let pool = open_database(&database).await.unwrap();
 
+    // The Agent Profile's account, made before the stand-in is written because
+    // the stand-in is told where it is: what a session may reach of it is one
+    // of the things this suite attempts from inside. See [`account`].
+    let account = account(watched.path());
+
+    // And the home of whoever is running the server, with something private in
+    // it that no description ever names. A directory of the fixture's own
+    // rather than the machine's real profile: what a session may reach is
+    // measured against the home this server was given, so this *is* the
+    // human's own here, and asking about it costs nobody a file in their real
+    // Documents.
+    let humans = state.path().join("nobody");
+    std::fs::create_dir_all(humans.join("Documents")).unwrap();
+    std::fs::write(humans.join("Documents").join("private.txt"), THE_HUMANS).unwrap();
+
+    let skills =
+        Skills::installed(Platform::HERE, state.path()).expect("this binary carries skills");
+    let skills_inside = skills.inside().to_owned();
+
+    // Where the Repo will be and where its git directory will be — both said
+    // before either exists, because the stand-in is written first and the two
+    // are a path rather than a thing. See [`repository`], which makes them.
+    let repo = watched.path().join("verkstead");
+
     let stand_in = scripts.path().join("agent.ps1");
     std::fs::write(
         &stand_in,
-        format!(
-            "{}\n{script}\n",
-            PREAMBLE.replace(
-                "{evidence}",
-                &evidence.path().display().to_string().replace('\'', "''"),
-            ),
+        said(
+            &format!("{PREAMBLE}\n{script}\n"),
+            &[
+                ("{evidence}", evidence.path()),
+                ("{git}", &repo.join(".git")),
+                ("{skills}", &skills_inside),
+                ("{documents}", &humans.join("Documents")),
+                ("{their-skills}", &account.join(".claude").join("skills")),
+            ],
         ),
     )
     .unwrap();
@@ -500,10 +660,6 @@ async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
         .map(|word| (*word).to_owned())
         .chain(["-File".to_owned(), stand_in.display().to_string()])
         .collect();
-
-    let skills =
-        Skills::installed(Platform::HERE, state.path()).expect("this binary carries skills");
-    let skills_inside = skills.inside().to_owned();
 
     let build_cache = match cache {
         Some(dir) => BuildCache::resolve(Some(dir), state.path()).expect("a cache to resolve"),
@@ -515,12 +671,24 @@ async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
         // The server's own home, which this platform never hands a session:
         // every Conversation here gets one of its own under the Data
         // Directory. See `Homes::for_conversation`.
-        Homes::on(Platform::HERE, state.path().join("nobody"), state.path()),
+        Homes::on(Platform::HERE, humans.clone(), state.path()),
         Reachable::at(LISTENING),
-        // No configured binds: a Windows path is not one `--bind` takes, and
-        // there is nothing for one to do on a platform whose rendering binds
-        // nothing.
-        SandboxConfig::default(),
+        // The two directories this suite's own machinery lives in, configured
+        // as binds the way a human configures a build cache.
+        //
+        // **They have to be said, and that is the stage landing rather than a
+        // fixture growing a wart.** A session runs inside an AppContainer now,
+        // which reaches what its identity has been granted and nothing else —
+        // so a stand-in script under the machine's temporary directory is a
+        // file a session cannot read, and an evidence directory beside it is
+        // one it cannot write. Both are outside the description a session gets,
+        // exactly as they should be; what puts them inside is the same thing
+        // that puts a human's build cache inside.
+        SandboxConfig::resolve(&[
+            scripts.path().display().to_string(),
+            evidence.path().display().to_string(),
+        ])
+        .expect("two directories that are really there"),
         build_cache,
         skills,
         Executable::of_the_server(state.path()),
@@ -544,7 +712,7 @@ async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
         ]),
     );
 
-    let repo = repository(watched.path().join("verkstead"));
+    let repo = repository(repo);
     let registered: Registered =
         post(&app, "/api/ui/repos", &serde_json::json!({ "path": repo })).await;
     assert_eq!(registered, Registered::Added);
@@ -561,8 +729,6 @@ async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
     let Started::Started { id } = started else {
         panic!("expected the Conversation to start, got {started:?}");
     };
-
-    let account = account(watched.path());
 
     for role in ["grilling", "implementation", "review"] {
         let profile = profile(&app, &account, role).await;
@@ -631,11 +797,45 @@ fn account(watched: &Path) -> PathBuf {
     std::fs::write(account.join(".claude").join("marker.txt"), THE_ACCOUNTS).unwrap();
     std::fs::write(account.join(".claude.json"), "{}\n").unwrap();
 
+    // And the skills that account has of its own, which are the one thing
+    // inside it a session is meant to find nothing at — see the description's
+    // `Access::Nothing`, and the test below that attempts to read this file
+    // from inside a session's container.
+    std::fs::create_dir_all(account.join(".claude").join("skills")).unwrap();
+    std::fs::write(
+        account.join(".claude").join("skills").join("theirs.md"),
+        THEIR_SKILL,
+    )
+    .unwrap();
+
     account
 }
 
 /// What is in that file, which is a thing only the Profile's own account holds.
 const THE_ACCOUNTS: &str = "the account the Profile named";
+
+/// And the two files a session is meant not to be able to read at all: one the
+/// account keeps beside the pair Verkstead joins in, and one the human keeps in
+/// their own home.
+const THEIR_SKILL: &str = "a skill the account added for itself";
+const THE_HUMANS: &str = "something of the human's that no description names";
+
+/// `text` with each placeholder in `named` replaced by the path beside it, in
+/// the spelling a single-quoted PowerShell string takes.
+///
+/// The one escaping a Windows path needs there: a backslash is an ordinary
+/// character inside single quotes and a quote is doubled to mean itself. Which
+/// is why the stand-in reads these out of variables rather than having them
+/// spliced into a command line.
+fn said(text: &str, named: &[(&str, &Path)]) -> String {
+    let mut said = text.to_owned();
+
+    for (placeholder, path) in named {
+        said = said.replace(placeholder, &path.display().to_string().replace('\'', "''"));
+    }
+
+    said
+}
 
 /// An Agent Profile saved over that account, on models that are worth reading
 /// back.
@@ -803,10 +1003,11 @@ fn read<T: DeserializeOwned>(body: &str) -> T {
 /// Two paths compared as the filesystem has them rather than as they are
 /// spelled.
 ///
-/// Which matters on this platform twice over: a temporary directory is reached
-/// through a short name (`RUNNER~1`) and a session's handoff directory is
-/// reached through a junction, so two names for one file are the ordinary case
-/// rather than the corner.
+/// Which matters on this platform: a session's handoff directory is reached
+/// through a junction and its profile is joined together out of them, so two
+/// names for one file are the ordinary case rather than the corner. What is no
+/// longer among the reasons is the short name a temporary directory is reached
+/// through — see [`SOMEWHERE`], which is why this suite's are spelled in full.
 fn the_same_file(one: &Path, another: &Path) {
     assert_eq!(
         std::fs::canonicalize(one)
@@ -854,7 +1055,7 @@ async fn a_session_runs_the_grilling_profiles_agent_on_the_brief_in_the_worktree
     let fixture = grilling(
         r#"
         Note 'model' $model
-        Note 'where' (Get-Location).Path
+        Note 'where' (Here)
         Note 'prompt' $prompt
         Say 'read the brief'
         "#,
@@ -1059,7 +1260,7 @@ async fn resizing_a_watchers_window_resizes_the_session() {
         r#"
         while ($true) {
             Say ('width=' + [Console]::WindowWidth)
-            Start-Sleep -Milliseconds 300
+            Waiting 300
         }
         "#,
     )
@@ -1133,11 +1334,11 @@ async fn what_a_watcher_types_reaches_the_session() {
 async fn force_stop_ends_a_session_where_it_stands() {
     let fixture = grilling(
         r#"
-        $ticks = Join-Path $evidence 'ticks'
+        $ticks = Under $evidence 'ticks'
         Say 'working'
         while ($true) {
-            Add-Content -LiteralPath $ticks -Value 'tick' -NoNewline
-            Start-Sleep -Milliseconds 50
+            [System.IO.File]::AppendAllText($ticks, 'tick')
+            Waiting 50
         }
         "#,
     )
@@ -1174,6 +1375,19 @@ async fn force_stop_ends_a_session_where_it_stands() {
 /// really there; what a session throws away lands in it; and the account the
 /// Profile named is really there, joined in by the junction and the hard link
 /// the open rendering makes.
+///
+/// **Two of the five are the value Verkstead composed and three of them are
+/// not.** Windows stamps its own `LOCALAPPDATA`, `TEMP` and `TMP` over what a
+/// process inside an AppContainer was handed: a container has a private folder
+/// of its own, at `Packages\<the profile's name>\AC` under whatever local half
+/// the process was started with, and it is told that folder for the local half
+/// and the `Temp` inside it for the other two. Which is all still inside this
+/// Conversation's own profile, and so still goes when the profile does — the
+/// fresh profile's whole claim, and where what a session throws away really
+/// lands, rather than the temporary directory the description makes beside it.
+/// It is asserted here rather than allowed for, because a container whose
+/// private folder landed in the human's own local half would be a different
+/// fact entirely.
 #[tokio::test]
 async fn a_session_runs_in_a_profile_of_the_conversations_own() {
     let fixture = grilling(
@@ -1185,10 +1399,10 @@ async fn a_session_runs_in_a_profile_of_the_conversations_own() {
         Note 'temp' $env:TEMP
         Note 'tmp' $env:TMP
 
-        Set-Content -LiteralPath (Join-Path $env:TEMP 'thrown-away.txt') -Value 'gone with it'
+        [System.IO.File]::WriteAllText((Under $env:TEMP 'thrown-away.txt'), 'gone with it')
 
-        Note 'marker' (Get-Content -Raw -LiteralPath (Join-Path $env:USERPROFILE '.claude\marker.txt'))
-        Note 'config' (Get-Content -Raw -LiteralPath (Join-Path $env:USERPROFILE '.claude.json'))
+        Note 'marker' ([System.IO.File]::ReadAllText((Under $env:USERPROFILE '.claude\marker.txt')))
+        Note 'config' ([System.IO.File]::ReadAllText((Under $env:USERPROFILE '.claude.json')))
 
         Say 'read the account'
         Idle
@@ -1199,7 +1413,18 @@ async fn a_session_runs_in_a_profile_of_the_conversations_own() {
     let profile = fixture.profile();
     let roaming = profile.join("AppData").join("Roaming");
     let local = profile.join("AppData").join("Local");
-    let temporary = local.join("Temp");
+
+    // And the container's own private folder inside that local half, which is
+    // what Windows tells a session `LOCALAPPDATA` is, with the temporary
+    // directory it is told about inside that — see this test's own
+    // documentation. Named off the same function the rendering makes the
+    // container under, because what the folder is called is what the profile is
+    // called.
+    let its_own = local
+        .join("Packages")
+        .join(container::profile(fixture.state.path(), fixture.id))
+        .join("AC");
+    let temporary = its_own.join("Temp");
 
     // Compared as they are spelled rather than as the filesystem has them,
     // which is the stricter of the two here: every one of these is built out of
@@ -1209,7 +1434,7 @@ async fn a_session_runs_in_a_profile_of_the_conversations_own() {
         ("userprofile", profile.clone()),
         ("home", profile.clone()),
         ("appdata", roaming.clone()),
-        ("localappdata", local.clone()),
+        ("localappdata", its_own),
         ("temp", temporary.clone()),
         ("tmp", temporary.clone()),
     ] {
@@ -1224,8 +1449,9 @@ async fn a_session_runs_in_a_profile_of_the_conversations_own() {
 
     landed(
         &temporary.join("thrown-away.txt"),
-        "what a session writes to its temporary directory lands under the \
-         profile it was given, which is what makes it thrown away with it",
+        "what a session writes to the temporary directory it was told about \
+         lands under the profile it was given, which is what makes it thrown \
+         away with it",
     )
     .await;
 
@@ -1265,31 +1491,86 @@ async fn a_session_runs_in_a_profile_of_the_conversations_own() {
     );
 }
 
-/// And the Conversation says, in the one value three places on the workbench
-/// read, that none of this is sandboxed.
+/// What a session may reach and what it may not, asked from inside the
+/// container by attempting each of them.
 ///
-/// The trade this whole stage is: a Windows session runs, and it runs with the
-/// reach of the account running the server until the sandbox stage lands. What
-/// is asserted here is the server's half — that the value the composer, the
-/// session pane and the terminal pane all draw from is true on the platform it
-/// is about, and that a session ran under it all the same.
+/// **Asked by attempting rather than by reading the entries back.** The
+/// boundary is what is being tested, and a test that read the access-control
+/// list would be asserting itself: it would go on passing while Windows changed
+/// what an entry meant. So the session opens each path and says what the
+/// machine said, and this reads those words.
+///
+/// The four the description names, and the two it does not. The second pair is
+/// the whole point of there being a boundary at all: the human's own Documents,
+/// which nothing in a description ever mentions, and the account's own skills,
+/// which a description mentions in order to say a session finds nothing there.
+/// Both are refused rather than missing, and this tells the two apart — see
+/// [`PREAMBLE`]'s `Reading`, which is why the answers are exception names.
 #[tokio::test]
-async fn a_windows_conversation_says_its_sessions_are_not_sandboxed() {
+async fn a_session_reaches_what_the_description_names_and_is_refused_what_it_does_not() {
     let fixture = grilling(
         r#"
-        Say 'reading the brief'
+        Note 'worktree' (Reading (Under (Here) 'README.md'))
+        Note 'git' (Reading (Under '{git}' 'HEAD'))
+        Note 'account' (Reading (Under $env:USERPROFILE '.claude\marker.txt'))
+        Note 'skills' (Reading (Under '{skills}' 'grilling\SKILL.md'))
+
+        Note 'documents' (Reading (Under '{documents}' 'private.txt'))
+        Note 'their-skills' (Reading (Under '{their-skills}' 'theirs.md'))
+
+        Say 'asked the boundary'
         Idle
         "#,
     )
     .await;
 
-    let event = fixture.running().await;
-    fixture.printed(event, "reading the brief").await;
+    for (name, what) in [
+        ("worktree", "the Conversation's own checkout"),
+        ("git", "the Repo's git directory behind it"),
+        ("account", "the Profile's account, through the junction"),
+        ("skills", "the skills it is grilled by"),
+    ] {
+        let said = fixture.written(name).await;
 
-    assert!(
-        fixture.view().await.unsandboxed,
-        "a Conversation on this platform is one whose sessions run unsandboxed, \
-         and the view is what says so",
+        assert!(
+            said.starts_with("read: "),
+            "{what} is in the description, so a session inside its container \
+             reaches it — and it said: {said:?}",
+        );
+    }
+
+    for (name, what) in [
+        (
+            "documents",
+            "the human's own Documents, which no description names",
+        ),
+        (
+            "their-skills",
+            "the account's own skills, which the description names as nothing \
+             at all",
+        ),
+    ] {
+        assert_eq!(
+            fixture.written(name).await,
+            "failed: System.UnauthorizedAccessException",
+            "{what} is refused from inside — refused rather than absent, the \
+             machine being there and denied",
+        );
+    }
+
+    // And from the host, which is the other half of the same claim: both files
+    // are still where they were and still say what they said. A boundary that
+    // worked by taking something away would be no boundary.
+    assert_eq!(
+        std::fs::read_to_string(
+            fixture
+                .account
+                .join(".claude")
+                .join("skills")
+                .join("theirs.md")
+        )
+        .expect("the account's own skills are the account's"),
+        THEIR_SKILL,
     );
 }
 
@@ -1375,40 +1656,58 @@ async fn a_terminal_runs_powershell_in_the_conversations_worktree() {
     // grid: what a Windows path is spelled like is not one answer — a short
     // name, a long one, and whichever case each end of it chose — so a file
     // that turns up in the Worktree is the claim without the spelling.
+    //
+    // Written with the framework rather than with `Set-Content`, for the reason
+    // every stand-in in this file is — see [`PREAMBLE`]. A Conversation Terminal
+    // is a shell inside the same container a session runs in, so what it can be
+    // typed is what a shell in there has whatever it managed to load.
     watcher
-        .types("Set-Content -LiteralPath 'stood-here.txt' -Value 'here'\r")
+        .types(
+            "[System.IO.File]::WriteAllText([System.IO.Path]::Combine(\
+             [System.IO.Directory]::GetCurrentDirectory(), 'stood-here.txt'), 'here')\r",
+        )
         .await;
 
     until_there(&worktree.join("stood-here.txt")).await;
 }
 
-/// The shared compile server comes up on this platform too, as a plain process.
+/// No compile server comes up on this platform, however many sccaches are
+/// installed on it.
 ///
-/// The one thing the open rendering runs that is not a session: an sccache
-/// server, in a sandbox of its own, that every session's `rustc` goes through.
-/// Asked of the machine rather than of Verkstead — a process id `tasklist` can
-/// see is a process that is really running — because what is being proved is
-/// that the rendering starts something outside this process.
+/// **The runner has one**, which is what the workflow installs and what makes
+/// this worth asking: a machine with no sccache would start no compile server
+/// for want of a binary, and would prove nothing at all about the rule under
+/// test. What is being proved is that a server which can see one still starts
+/// none, because a session inside an AppContainer is refused the loopback a
+/// client reaches it over — see
+/// [`verkstead_server::build_cache::compiles_through_an_sccache`].
 ///
-/// **The runner needs an sccache**, which is what the workflow installs: this
-/// is the case that only exists where one is on the server's `PATH`, and a
-/// machine without one has nothing here to prove.
+/// Asked of the machine rather than of Verkstead — the process ids `tasklist`
+/// can see — because what a rendering starts is a process outside this one, and
+/// the absence of one is the same question the other way round.
 #[tokio::test]
-async fn the_shared_compile_server_comes_up_as_a_plain_process() {
-    // The one test here that builds no fixture, and the compile server has as
-    // much to say for itself as a session does — see [`LOGGING`].
+async fn no_compile_server_comes_up_on_this_platform() {
+    // The one test here that builds no fixture, and what the cache says as it
+    // resolves is the whole of the reason — see [`LOGGING`].
     LazyLock::force(&LOGGING);
 
-    let state = tempfile::tempdir().unwrap();
-    let cache = tempfile::tempdir().unwrap();
+    let state = somewhere();
+    let cache = somewhere();
+
+    on_the_path("sccache").unwrap_or_else(|| {
+        panic!(
+            "this machine has no sccache on the server's PATH, so a server that \
+             started none would prove nothing: install one, as the Windows job does"
+        )
+    });
 
     let build_cache =
         BuildCache::resolve(Some(cache.path()), state.path()).expect("a cache to resolve");
 
     assert!(
-        build_cache.caches_compiles(),
-        "this machine has no sccache on the server's PATH, so there is no \
-         compile server to come up: install one, as the Windows job does",
+        !build_cache.caches_compiles(),
+        "an sccache is on this machine's PATH and the server still has none to \
+         hand out, because no session here could reach one",
     );
 
     let already = servers();
@@ -1416,70 +1715,97 @@ async fn the_shared_compile_server_comes_up_as_a_plain_process() {
 
     build_cache.compiling(settings.rust_build_cache());
 
-    let deadline = Instant::now() + PATIENCE;
+    // Long enough that one which was going to come up has: `compiling` spawns
+    // the process before it returns, so anything after that moment is slack
+    // rather than a race being waited out.
+    pause(SETTLED).await;
 
-    loop {
-        let started: BTreeSet<u32> = servers().difference(&already).copied().collect();
+    let started: BTreeSet<u32> = servers().difference(&already).copied().collect();
 
-        if !started.is_empty() {
-            break;
-        }
-
-        assert!(
-            Instant::now() < deadline,
-            "the compile server never came up: {already:?} were running before, \
-             and {:?} are now",
-            servers(),
-        );
-
-        pause(Duration::from_millis(200)).await;
-    }
+    assert!(
+        started.is_empty(),
+        "a compile server came up on a platform where nothing could reach it: \
+         {already:?} were running before, and {started:?} are new",
+    );
 }
 
-/// And a session whose server has one is told where it is.
+/// And a session in a Rust repo gets the shared cache and no wrapper: its
+/// downloads land in the one `CARGO_HOME` this machine shares, and nothing
+/// points its `rustc` at a server it could not talk to.
 ///
-/// The far end of the same fact: a session compiles through the server above,
-/// and what points it there is `RUSTC_WRAPPER`. On this platform that names the
-/// sccache where it really is — nothing is joined into a Windows sandbox, and
-/// a name with the extension taken off it would be one nothing there can start.
+/// **Both halves attempted rather than read.** That `RUSTC_WRAPPER` is unset is
+/// a variable the session prints, but that its `CARGO_HOME` is *writable* is
+/// only answered by writing there — the directory is granted to the container's
+/// identity like any other `Own`, and a grant that had not been written would
+/// look exactly the same from out here.
+///
+/// The cargo half is what the whole of the cache comes to on this platform:
+/// a crate is downloaded once for the machine, and compiled once per session.
 #[tokio::test]
-async fn a_session_is_told_where_the_sccache_it_compiles_through_is() {
-    let cache = tempfile::tempdir().unwrap();
+async fn a_session_gets_the_shared_cargo_home_and_no_compiler_wrapper() {
+    let cache = somewhere();
 
     let fixture = grilling_caching(
         r#"
         Note 'wrapper' $env:RUSTC_WRAPPER
         Note 'cargo-home' $env:CARGO_HOME
+
+        [void][System.IO.Directory]::CreateDirectory($env:CARGO_HOME)
+        [System.IO.File]::WriteAllText((Under $env:CARGO_HOME 'downloaded.crate'), 'here')
         "#,
         Some(cache.path()),
     )
     .await;
 
-    let sccache = on_the_path("sccache").unwrap_or_else(|| {
-        panic!(
-            "this machine has no sccache on the server's PATH, so a session has \
-             nothing to be told about: install one, as the Windows job does"
-        )
-    });
-
-    the_same_file(
-        Path::new(&fixture.written("wrapper").await),
-        Path::new(&sccache),
+    assert_eq!(
+        fixture.written("wrapper").await,
+        "",
+        "nothing on this platform compiles through an sccache, so a session is \
+         pointed at none: a RUSTC_WRAPPER here would be every Rust build inside \
+         failing rather than one running uncached",
     );
 
-    // Spelled rather than resolved, which is the one comparison here that has
-    // to be: `CARGO_HOME` is a directory the first `cargo` to run under it
-    // makes, and nothing in this test runs one — so what is being asked is that
-    // the server composed the name out of the cache directory it was handed,
-    // and a name is all there is to compare. The line above is the other way
-    // round: an sccache found on the `PATH` is a real file spelled however
-    // `where.exe` spells it.
+    // Spelled rather than resolved: `CARGO_HOME` is a directory the first
+    // `cargo` to run under it makes, and nothing in this test runs one — so
+    // what is being asked is that the server composed the name out of the cache
+    // directory it was handed, and a name is all there is to compare.
     assert_eq!(
         fixture.written("cargo-home").await,
         cache.path().join("cargo").display().to_string(),
         "a session's cargo downloads go under the shared cache the server was \
          given, which is what makes them shared",
     );
+
+    let downloaded = cache.path().join("cargo").join("downloaded.crate");
+
+    until_there(&downloaded).await;
+
+    assert_eq!(
+        std::fs::read_to_string(&downloaded).unwrap().trim(),
+        "here",
+        "and the session really wrote it, from inside its container",
+    );
+}
+
+/// What a path's access-control list says, as the machine's own tool prints it
+/// — see [`Grilling::reach`], the one caller.
+///
+/// `icacls` rather than a reading of this suite's own, for the reason
+/// `tests/sandbox_windows.rs` asks it that way: what is wanted is the list
+/// Windows really holds, and a reader written here would be this file agreeing
+/// with itself.
+fn listed(path: &Path) -> String {
+    let listed = Command::new("icacls")
+        .arg(path)
+        .stdin(Stdio::null())
+        .output()
+        .expect("icacls is part of Windows");
+
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&listed.stdout),
+        String::from_utf8_lossy(&listed.stderr),
+    )
 }
 
 /// Where a program is on this machine, asked the way this machine answers —

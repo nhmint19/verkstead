@@ -2,10 +2,18 @@
 //!
 //! A [`Surface`](super::surface::Surface) is what a session may reach and a
 //! rendering is how this machine makes that true — bubblewrap's flags, Apple's
-//! policy, or nothing at all where there is no boundary yet — and what each of
-//! them ends at is the same four things: a program,
-//! its arguments, the environment it is handed and the directory it starts in.
-//! This is those four, said once, and it is what every renderer returns.
+//! policy, or Windows' own identity for a process — and what each of them ends
+//! at is the same four things: a program, its arguments, the environment it is
+//! handed and the directory it starts in. This is those four, said once, and it
+//! is what every renderer returns.
+//!
+//! **And a fifth on the platform whose boundary is not a wrapper.** A Linux
+//! rendering runs `bwrap` and a Mac's runs `sandbox-exec`, so what makes the
+//! boundary is in the vector; a Windows one runs the session's own program
+//! inside an AppContainer, which is an identity on its token rather than a word
+//! on its command line. So a rendering names the container it is started inside
+//! — see [`Rendering::inside`] — and the two platforms with a wrapper name
+//! none.
 //!
 //! **A description rather than a way of spawning.** It used to be a
 //! `std::process::Command`, which is a description with a decision already
@@ -40,6 +48,15 @@ pub struct Rendering {
     /// and a directory said out here as well would be one the wrapper was asked
     /// to be in rather than the session.
     chdir: Option<PathBuf>,
+
+    /// The container it is started inside, as the SID that names one — see
+    /// [`Rendering::inside`].
+    ///
+    /// `None` everywhere but the Windows rendering, and a field rather than a
+    /// `cfg` for the reason [`crate::platform::Platform`] is a value: a
+    /// description is portable and only the boundary is not, so a Windows
+    /// rendering is a thing the suite can build and read on any machine.
+    inside: Option<String>,
 }
 
 impl Rendering {
@@ -50,6 +67,7 @@ impl Rendering {
             argv: Vec::new(),
             env: Vec::new(),
             chdir: None,
+            inside: None,
         }
     }
 
@@ -84,6 +102,21 @@ impl Rendering {
         self
     }
 
+    /// And the container it runs inside, named by the SID that *is* one — see
+    /// `sandbox::container::Container::sid`, which is where a session's
+    /// comes from.
+    ///
+    /// **The identity travels rather than the profile.** What a process is
+    /// started with is a SID and nothing else, and a rendering is a description
+    /// that is copied, compared and read on machines that have no such thing —
+    /// so what crosses the seam is the name of the identity, and what created
+    /// the profile goes on holding it for as long as the session runs.
+    pub fn inside(&mut self, container: impl Into<String>) -> &mut Rendering {
+        self.inside = Some(container.into());
+
+        self
+    }
+
     /// What runs.
     pub fn program(&self) -> &OsStr {
         &self.program
@@ -106,6 +139,12 @@ impl Rendering {
     pub fn chdir(&self) -> Option<&Path> {
         self.chdir.as_deref()
     }
+
+    /// The container it is started inside, and nothing where it is started
+    /// inside none — see [`Rendering::inside`].
+    pub fn container(&self) -> Option<&str> {
+        self.inside.as_deref()
+    }
 }
 
 /// And the same thing as the standard library starts one, for everything that
@@ -115,8 +154,25 @@ impl Rendering {
 /// The one direction of the seam that does decide how to spawn. What a session
 /// gets instead is [`crate::terminal::Terminal::spawn`], which decides
 /// differently on each platform and is the whole reason the description exists.
-impl From<&Rendering> for Command {
-    fn from(rendering: &Rendering) -> Command {
+///
+/// **It can refuse, which is what the `Try` is for.** A rendering that names a
+/// container is a process to be started inside an AppContainer, and that is an
+/// attribute on a `CreateProcessW` — the one thing a `Command` has no way to
+/// carry. A conversion that quietly dropped it would hand back a command that
+/// starts the same session outside its boundary and says nothing, which is the
+/// one thing ADR-0014 refuses. So it is an error here, and what starts such a
+/// rendering is `sandbox::off_a_console` or the terminal's own spawn.
+impl TryFrom<&Rendering> for Command {
+    type Error = std::io::Error;
+
+    fn try_from(rendering: &Rendering) -> Result<Command, std::io::Error> {
+        if let Some(container) = rendering.container() {
+            return Err(std::io::Error::other(format!(
+                "this rendering runs inside the AppContainer {container}, which the standard \
+                 library has no way to start a process in — see `sandbox::off_a_console`"
+            )));
+        }
+
         let mut command = Command::new(rendering.program());
 
         command.args(rendering.argv());
@@ -133,6 +189,44 @@ impl From<&Rendering> for Command {
             command.current_dir(chdir);
         }
 
-        command
+        Ok(command)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The refusal at the seam, which is what says a boundary is never lost by
+    /// a conversion — see the [`TryFrom`] above.
+    ///
+    /// Asked on every platform, because the description is portable: a Windows
+    /// rendering built on a Linux machine names the same container, and what
+    /// the standard library will do with it is the same nothing.
+    #[test]
+    fn a_rendering_inside_a_container_is_not_a_command_the_standard_library_can_start() {
+        let mut rendering = Rendering::running("cmd.exe");
+        rendering.inside("S-1-15-2-1-2-3");
+
+        let refused = Command::try_from(&rendering)
+            .expect_err("a rendering naming a container should not convert to a command");
+
+        assert!(
+            refused.to_string().contains("S-1-15-2-1-2-3"),
+            "the refusal should say which container was asked for, and it said: {refused}"
+        );
+    }
+
+    /// And one naming none, which is every rendering on the platforms with a
+    /// wrapper to hide behind.
+    #[test]
+    fn a_rendering_outside_one_is_the_command_it_describes() {
+        let mut rendering = Rendering::running("echo");
+        rendering.arg("hello").set("HOME", "/nowhere");
+
+        let command = Command::try_from(&rendering).expect("a rendering with no container");
+
+        assert_eq!(command.get_program(), "echo");
+        assert_eq!(command.get_args().collect::<Vec<_>>(), ["hello"]);
     }
 }
