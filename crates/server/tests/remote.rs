@@ -23,6 +23,13 @@
 //! started the server. So the dialog is a handle here too, the way `tailscale`
 //! is: see [`Dialog`], which is one somebody answers and one somebody dismisses.
 //!
+//! And the last of it is not about Tailscale at all: the login link, which is
+//! the served address with the Workbench Key on the end of it, and **Reset
+//! key**, which is the press that changes what that end says. Those two need a
+//! sixth server — one standing behind its own gate, see [`app_keyed`] — because
+//! what says a key was re-issued is the old one being refused, and every other
+//! server here answers whoever asks.
+//!
 //! Unix only, for that reason and no other: the cases are shapes of stdout
 //! rather than anything about a platform, and a Windows run would be a second
 //! machine reading the same JSON.
@@ -36,12 +43,24 @@ use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 use verkstead_render::{RemoteView, ServePress};
+use verkstead_server::key::WorkbenchKey;
 use verkstead_server::remote::{Elevate, Raised, Tailscale};
-use verkstead_server::{open_database, router_reading_tailscale};
+use verkstead_server::{open_database, router_reading_tailscale, router_reading_tailscale_keyed};
 
 /// The port the workbench is served on in this suite, and so the port a serve
 /// has to be proxying to for the pane to call it this workbench's.
 const PORT: u16 = 8422;
+
+/// The Workbench Key every server here holds, stated rather than invented for
+/// the reason [`WHO`] is: the login link the pane draws is the served address
+/// with this on the end of it, and a suite whose expected link came out of
+/// thirty-two random bytes would be a suite pinning nothing.
+const KEY: &str = "a-stated-workbench-key";
+
+/// And the link that makes, which is what a served machine reads back.
+fn login_link() -> String {
+    format!("https://workbench.tailnet-name.ts.net/?key={KEY}")
+}
 
 /// A machine on a tailnet, serving the workbench: `tailscale status` says the
 /// daemon is running and names this node, and `tailscale serve status` says
@@ -92,7 +111,10 @@ async fn app_reading(script: &str) -> (tempfile::TempDir, Router) {
             "tailscale".to_owned(),
         ],
         PORT,
-    );
+    )
+    // Keyed, because the login link the pane draws is the served address with
+    // the Workbench Key on the end of it — see [`KEY`].
+    .keyed(WorkbenchKey::stated(dir.path(), KEY).unwrap());
 
     (dir, router_reading_tailscale(pool, tailscale))
 }
@@ -105,7 +127,8 @@ async fn app_without_tailscale() -> (tempfile::TempDir, Router) {
         .await
         .unwrap();
 
-    let tailscale = Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], PORT);
+    let tailscale = Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], PORT)
+        .keyed(WorkbenchKey::stated(dir.path(), KEY).unwrap());
 
     (dir, router_reading_tailscale(pool, tailscale))
 }
@@ -187,6 +210,7 @@ async fn a_machine_that_is_up_and_serving_names_the_node_and_the_address() {
             serve: verkstead_render::ServeView::On {
                 address: "https://workbench.tailnet-name.ts.net".to_owned(),
             },
+            link: Some(login_link()),
         }
     );
 }
@@ -202,6 +226,7 @@ async fn a_machine_that_is_up_and_serving_nothing_reads_as_off() {
         RemoteView::Up {
             node: "workbench.tailnet-name.ts.net".to_owned(),
             serve: verkstead_render::ServeView::Off,
+            link: None,
         }
     );
 }
@@ -320,7 +345,8 @@ async fn app_asking(
         ],
         PORT,
     )
-    .as_user(WHO.to_owned());
+    .as_user(WHO.to_owned())
+    .keyed(WorkbenchKey::stated(dir.path(), KEY).unwrap());
 
     let tailscale = match escalation {
         Some(escalation) => tailscale.escalating(escalation),
@@ -440,6 +466,7 @@ async fn a_serve_switched_on_makes_the_address_readable() {
         RemoteView::Up {
             node: "workbench.tailnet-name.ts.net".to_owned(),
             serve: verkstead_render::ServeView::Off,
+            link: None,
         },
         "nothing is served until the switch is pressed"
     );
@@ -452,6 +479,7 @@ async fn a_serve_switched_on_makes_the_address_readable() {
                 serve: verkstead_render::ServeView::On {
                     address: "https://workbench.tailnet-name.ts.net".to_owned(),
                 },
+                link: Some(login_link()),
             },
         }
     );
@@ -465,6 +493,7 @@ async fn a_serve_switched_on_makes_the_address_readable() {
             serve: verkstead_render::ServeView::On {
                 address: "https://workbench.tailnet-name.ts.net".to_owned(),
             },
+            link: Some(login_link()),
         }
     );
 }
@@ -494,6 +523,7 @@ async fn a_serve_switched_off_takes_the_address_away() {
             reading: RemoteView::Up {
                 node: "workbench.tailnet-name.ts.net".to_owned(),
                 serve: verkstead_render::ServeView::Off,
+                link: None,
             },
         }
     );
@@ -525,6 +555,7 @@ async fn a_refused_serve_reads_back_the_grant_and_the_next_press_serves() {
         RemoteView::Up {
             node: "workbench.tailnet-name.ts.net".to_owned(),
             serve: verkstead_render::ServeView::Off,
+            link: None,
         }
     );
 
@@ -540,6 +571,7 @@ async fn a_refused_serve_reads_back_the_grant_and_the_next_press_serves() {
                 serve: verkstead_render::ServeView::On {
                     address: "https://workbench.tailnet-name.ts.net".to_owned(),
                 },
+                link: Some(login_link()),
             },
         }
     );
@@ -576,6 +608,7 @@ async fn a_dialog_somebody_answered_takes_the_grant_and_serves() {
                 serve: verkstead_render::ServeView::On {
                     address: "https://workbench.tailnet-name.ts.net".to_owned(),
                 },
+                link: Some(login_link()),
             },
         }
     );
@@ -625,6 +658,7 @@ async fn a_dialog_somebody_dismissed_leaves_the_switch_off_and_the_line_shown() 
         RemoteView::Up {
             node: "workbench.tailnet-name.ts.net".to_owned(),
             serve: verkstead_render::ServeView::Off,
+            link: None,
         }
     );
 }
@@ -652,4 +686,166 @@ async fn a_serve_still_refused_after_the_grant_reads_back_the_line() {
     // the same press would be the app asking for something it has just been
     // given.
     assert_eq!(dialog.asked().len(), 1);
+}
+
+/// A server on the serving machine above, standing behind its own key: what the
+/// half of this suite about **Reset key** stands up.
+///
+/// Gated where every other server here is open, because the press is about the
+/// gate: what says a key was re-issued is the old one being refused, and a
+/// router nothing is refused by could not say it. Requests to it carry the
+/// cookie a browser would — see [`with_cookie`].
+async fn app_keyed() -> (tempfile::TempDir, Router, WorkbenchKey) {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let key = WorkbenchKey::stated(dir.path(), KEY).unwrap();
+
+    let tailscale = Tailscale::running(
+        vec![
+            "/bin/sh".to_owned(),
+            "-c".to_owned(),
+            SERVING.to_owned(),
+            "tailscale".to_owned(),
+        ],
+        PORT,
+    )
+    .keyed(key.clone());
+
+    let app = router_reading_tailscale_keyed(pool, tailscale, key.clone());
+
+    (dir, app, key)
+}
+
+/// Ask for something as a browser holding `cookie` would.
+async fn with_cookie(
+    app: &Router,
+    method: &str,
+    path: &str,
+    cookie: &str,
+) -> axum::http::Response<Body> {
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method(method)
+                .uri(path)
+                .header("cookie", cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+}
+
+/// **Reset key** re-issues the secret, and the link the pane draws redraws on
+/// the new one.
+///
+/// Which is the whole of what the press is for: the QR code and the copyable
+/// link beside it are that field, so a link that came back unchanged would be a
+/// pane drawing a code for a key that no longer opens anything.
+#[tokio::test]
+async fn resetting_the_key_redraws_the_link_on_a_new_one() {
+    let (_dir, app, key) = app_keyed().await;
+
+    let before = key.cookie();
+
+    assert_eq!(
+        remote_as(&app, &before).await,
+        RemoteView::Up {
+            node: "workbench.tailnet-name.ts.net".to_owned(),
+            serve: verkstead_render::ServeView::On {
+                address: "https://workbench.tailnet-name.ts.net".to_owned(),
+            },
+            link: Some(login_link()),
+        }
+    );
+
+    let response = with_cookie(&app, "POST", "/api/ui/remote/key", &before).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // The browser that pressed it is let back in by the answer. A reset made
+    // from the phone on the tailnet is a reset made from the only device that
+    // could reach this server at all, and one that logged that device out with
+    // the rest would lock somebody out of their own workbench.
+    let admitted = response
+        .headers()
+        .get("set-cookie")
+        .expect("the browser that pressed it is handed the key it just made")
+        .to_str()
+        .unwrap()
+        .to_owned();
+
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let redrawn: RemoteView = serde_json::from_slice(&bytes).unwrap();
+
+    let RemoteView::Up { link, .. } = redrawn else {
+        panic!("the press answers with the machine read again");
+    };
+    let link = link.expect("a served machine reads back a login link");
+
+    assert_ne!(link, login_link(), "the link is on the new key");
+    assert!(
+        link.starts_with("https://workbench.tailnet-name.ts.net/?key="),
+        "and it is still this machine's address: {link}"
+    );
+
+    // And the address the QR now carries opens a logged-in workbench, which is
+    // the handshake the gate does with it.
+    let after = admitted
+        .split(';')
+        .next()
+        .expect("a Set-Cookie starts with the pair it sets")
+        .to_owned();
+
+    assert_eq!(
+        format!("workbench_key={}", link.rsplit_once('=').unwrap().1),
+        after,
+        "the cookie the answer sets is the key the link hands over"
+    );
+}
+
+/// And a device holding the previous key gets 401 on its next request, which is
+/// the half that makes a lost phone recoverable.
+#[tokio::test]
+async fn a_device_holding_the_previous_key_is_refused() {
+    let (_dir, app, key) = app_keyed().await;
+
+    let phone = key.cookie();
+
+    // It was let in a moment ago, which is what makes the refusal below about
+    // the reset rather than about the cookie having always been wrong.
+    assert_eq!(
+        with_cookie(&app, "GET", "/api/ui/remote", &phone)
+            .await
+            .status(),
+        StatusCode::OK
+    );
+
+    assert_eq!(
+        with_cookie(&app, "POST", "/api/ui/remote/key", &phone)
+            .await
+            .status(),
+        StatusCode::OK
+    );
+
+    assert_eq!(
+        with_cookie(&app, "GET", "/api/ui/remote", &phone)
+            .await
+            .status(),
+        StatusCode::UNAUTHORIZED,
+        "everything holding the old key is out"
+    );
+}
+
+/// The reading, asked for as a browser holding `cookie`.
+async fn remote_as(app: &Router, cookie: &str) -> RemoteView {
+    let response = with_cookie(app, "GET", "/api/ui/remote", cookie).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&bytes).unwrap()
 }

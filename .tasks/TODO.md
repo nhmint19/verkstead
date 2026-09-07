@@ -23,6 +23,6 @@ Roadmap stage: [02: The workbench key, and Remote access](docs/roadmaps/onboardi
 - [x] 03: Remote access — the pane that reads — [details](03-remote-access-pane.md)
 - [x] 04: The serve switch and the operator grant — [details](04-serve-switch-and-operator-grant.md)
 - [x] 05: The desktop's graphical sudo — [details](05-desktop-graphical-sudo.md)
-- [ ] 06: The QR, the copyable link, and Reset key — [details](06-qr-link-and-reset-key.md)
+- [x] 06: The QR, the copyable link, and Reset key — [details](06-qr-link-and-reset-key.md)
 - [ ] 07: The banner — [details](07-grilling-banner.md)
 - [ ] 08: Docs and vocabulary — [details](08-docs-and-vocabulary.md)

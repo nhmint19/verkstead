@@ -136,3 +136,116 @@
     color: var(--accent-deep);
   }
 }
+
+/* How a phone gets in, under the readings it is made of: the code, the link
+   beside it, and the press that takes both back.
+
+   A rule above it rather than a card of its own, because it is the same
+   section — what is above is what the machine is, and this is what to do with
+   it. */
+.reach {
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--edge);
+}
+
+.reach h3 {
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
+}
+
+/* The code and the link, side by side where there is room and stacked where
+   there is not: this pane is read on a phone as often as on the machine it is
+   about, and a QR is not what somebody scans on the screen they are holding. */
+.letIn {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+}
+
+/* The code itself, on its own white ground: the modules are black on white
+   whatever the page is — see `Qr.tsx` — so the padding round them is the quiet
+   zone's own colour rather than the pane's. */
+.code {
+  flex: none;
+  padding: 0.5rem;
+  background: #fff;
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+  line-height: 0;
+}
+
+.code svg {
+  display: block;
+  width: 9.5rem;
+  height: 9.5rem;
+}
+
+/* And the link beside it, which is the same thing for everything that is not a
+   camera. */
+.beside {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+.link {
+  margin: 0 0 0.5rem;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+/* The copy button, quiet beside the link it is about, the way the Share pane
+   draws its own. */
+.copy {
+  padding: 0.15rem 0.5rem;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  background: transparent;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+/* And Reset key, which is the one press on this page that takes something away.
+
+   Drawn as what it is rather than as a warning: the sentence under it is what
+   says what it costs, and a button coloured like a mistake would be one nobody
+   presses when they need to. */
+.reset {
+  margin: 1.25rem 0 0;
+  padding: 0.4rem 0.9rem;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--stopped);
+  background: transparent;
+  border: 1px solid var(--stopped);
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+.reset:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.reach .reset + p {
+  margin-top: 0.5rem;
+}
+
+@media (hover: hover) {
+  .copy:hover {
+    color: var(--ink);
+    background: var(--card);
+  }
+
+  .reset:not(:disabled):hover {
+    color: var(--card);
+    background: var(--stopped);
+  }
+}

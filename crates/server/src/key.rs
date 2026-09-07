@@ -131,6 +131,52 @@ impl WorkbenchKey {
         })
     }
 
+    /// The key a fixture states, so that a login link written into one reads
+    /// the same on every machine that writes it.
+    ///
+    /// The same file in the same place, written rather than invented — a key is
+    /// a key whatever made it, and a suite that had to filter a random secret
+    /// out of a payload would be a suite pinning everything but the field it is
+    /// about. See `Tailscale::as_user`, which is here for the same reason.
+    pub fn stated(data_dir: &Path, secret: &str) -> std::io::Result<WorkbenchKey> {
+        let path = data_dir.join(KEY_FILE);
+
+        write_atomically(&path, &format!("{secret}\n"), KEY_MODE)?;
+
+        Ok(WorkbenchKey {
+            path,
+            secret: Arc::new(RwLock::new(secret.to_owned())),
+        })
+    }
+
+    /// A new secret over the old one, which is **Reset key** on the Remote
+    /// access pane.
+    ///
+    /// Everything holding the old one is logged out by this and nothing else:
+    /// there is no list of devices and no expiry, so re-issuing is the whole of
+    /// taking a link back — a phone that was lost, a QR somebody photographed
+    /// over a shoulder, a link pasted where it should not have been.
+    ///
+    /// The file first and the memory after it, so that a write that failed
+    /// leaves every device holding a key that still works rather than a server
+    /// admitting one nothing on disk agrees with.
+    ///
+    /// Every handle on this key sees it: the desktop app and the server share
+    /// one — see [`crate::Config::workbench_key`] — so the tray's Open opens on
+    /// the new link without the app having been told anything.
+    pub fn reissue(&self) -> std::io::Result<()> {
+        let fresh = invented()?;
+
+        write_atomically(&self.path, &format!("{fresh}\n"), KEY_MODE)?;
+
+        *self
+            .secret
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = fresh;
+
+        Ok(())
+    }
+
     /// What a cookie has to carry, and what the link hands over.
     pub fn secret(&self) -> String {
         self.secret
@@ -146,6 +192,25 @@ impl WorkbenchKey {
     /// spelling, and so is what a test standing where the browser stands sends.
     pub fn cookie(&self) -> String {
         format!("{COOKIE_NAME}={}", self.secret())
+    }
+
+    /// And the whole `Set-Cookie` that puts it in a browser.
+    ///
+    /// The cookie is not `Secure`. The workbench is served over plain HTTP on
+    /// the loopback and over HTTPS through `tailscale serve`, and a cookie the
+    /// loopback could not set would be a desktop that could never log itself
+    /// in. `HttpOnly` because no script here has any business reading it, and
+    /// `SameSite=Lax` so that following a link from somewhere else — a QR
+    /// code's browser, a chat message — arrives logged in.
+    ///
+    /// Said once, because two places set it: the handshake a link goes through,
+    /// and the re-issue that hands the browser that asked for it the key it
+    /// just made.
+    pub fn set_cookie(&self) -> String {
+        format!(
+            "{}; Path=/; Max-Age={FOR_GOOD}; HttpOnly; SameSite=Lax",
+            self.cookie()
+        )
     }
 
     /// Where the file is, which is what says so on a settings page and in a
@@ -230,6 +295,15 @@ impl Gate {
     /// And one that answers 401 to anything that has not shown `key`.
     pub(crate) fn keyed(key: WorkbenchKey) -> Gate {
         Gate(Some(key))
+    }
+
+    /// The key this gate stands on, where it stands on one.
+    ///
+    /// What the state behind it is given, so that **Reset key** has the same
+    /// handle to re-issue that the gate is checking against — a re-issue
+    /// through a second handle would be a gate still admitting the old secret.
+    pub(crate) fn held(&self) -> Option<WorkbenchKey> {
+        self.0.clone()
     }
 
     /// Put it in front of everything in `router`.
@@ -334,12 +408,8 @@ fn same(offered: &str, secret: &str) -> bool {
 /// `See Other` rather than `Found`, which says in the status what the redirect is
 /// for: the resource asked for is over there, and it is fetched with a GET.
 ///
-/// The cookie is not `Secure`. The workbench is served over plain HTTP on the
-/// loopback and over HTTPS through `tailscale serve`, and a cookie the loopback
-/// could not set would be a desktop that could never log itself in. `HttpOnly`
-/// because no script here has any business reading it, and `SameSite=Lax` so
-/// that following a link from somewhere else — a QR code's browser, a chat
-/// message — arrives logged in.
+/// What the cookie is set with is [`WorkbenchKey::set_cookie`], which the
+/// re-issue sets the same one from.
 fn welcomed(key: &WorkbenchKey, uri: &Uri) -> Response {
     let kept: Vec<&str> = uri
         .query()
@@ -355,16 +425,7 @@ fn welcomed(key: &WorkbenchKey, uri: &Uri) -> Response {
 
     (
         StatusCode::SEE_OTHER,
-        [
-            (
-                SET_COOKIE,
-                format!(
-                    "{}; Path=/; Max-Age={FOR_GOOD}; HttpOnly; SameSite=Lax",
-                    key.cookie()
-                ),
-            ),
-            (LOCATION, landing),
-        ],
+        [(SET_COOKIE, key.set_cookie()), (LOCATION, landing)],
     )
         .into_response()
 }

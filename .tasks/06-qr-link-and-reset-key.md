@@ -22,8 +22,8 @@ standing in — so it reads as a press with consequences rather than a tidy-up.
 
 ## Acceptance criteria
 
-- [ ] The pane draws a QR of the login link as inline SVG, fetching nothing, and
+- [x] The pane draws a QR of the login link as inline SVG, fetching nothing, and
       a phone reading it lands in a logged-in workbench.
-- [ ] The link beside it copies.
-- [ ] **Reset key** re-issues the secret, and the QR and the link redraw on it.
-- [ ] A device holding the previous key gets 401 on its next request.
+- [x] The link beside it copies.
+- [x] **Reset key** re-issues the secret, and the QR and the link redraw on it.
+- [x] A device holding the previous key gets 401 on its next request.

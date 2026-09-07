@@ -23,7 +23,7 @@
 use axum::Json;
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::StatusCode;
-use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
+use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE, SET_COOKIE};
 use axum::response::{IntoResponse, Response as HttpResponse};
 use axum::routing::{delete, get, post};
 use time::OffsetDateTime;
@@ -398,6 +398,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // read, because it is the one half of the section that changes the
         // machine — and what it answers with is that read, made again.
         .route("/api/ui/remote/serve", post(press_serve))
+        // And the other thing on it that is pressed, which is the key the link
+        // hands over: re-issued, so that everything holding the old one is out.
+        // Under the section it is drawn in rather than under a namespace of its
+        // own, because that is the one place it is pressed from.
+        .route("/api/ui/remote/key", post(reset_key))
 }
 
 /// `GET /api/ui/sets/{id}` — one Set, rendered, with where it stands.
@@ -4203,6 +4208,56 @@ async fn press_serve(State(state): State<AppState>, Json(edit): Json<ServeEdit>)
     let pressed: ServePress = state.remote.press(edit.on).await;
 
     Json(pressed).into_response()
+}
+
+/// `POST /api/ui/remote/key` — a new Workbench Key over the old one, which is
+/// **Reset key** on the Remote access pane.
+///
+/// The whole of taking a link back. There is no list of devices and no expiry,
+/// so what logs a lost phone out is the secret it holds ceasing to be the
+/// secret: everything that was let in by the old link meets a 401 on its next
+/// request, and the QR code and the copyable link on the pane redraw on the
+/// new one.
+///
+/// **The browser that pressed it is let back in by the answer**, which is what
+/// the `Set-Cookie` is for. A reset made from a phone on the tailnet is a reset
+/// made from the only device that could reach this server at all, and one that
+/// logged that device out along with the rest would be a press that locks
+/// somebody out of their own workbench with nothing but the Data Directory to
+/// get back in through. Every *other* device is out, which is what the press is
+/// for.
+///
+/// What comes back is the machine read again, exactly as the serve switch's
+/// press answers — the link is a field of that reading, so the pane draws the
+/// new one from the answer rather than asking a second time.
+///
+/// A router standing behind no gate has no key to re-issue, which is every
+/// router but the served one: it is refused rather than quietly answering a
+/// reading, because a Reset that reset nothing is the one answer this press
+/// must never give. See [`crate::key`].
+async fn reset_key(State(state): State<AppState>) -> HttpResponse {
+    let Some(key) = state.key.clone() else {
+        return unavailable("this server holds no workbench key to reset");
+    };
+
+    // Off the runtime's own threads, the way every other write to the Data
+    // Directory is: it is a read of the operating system's randomness and a
+    // write to a file, and neither of them is anything to hold an executor on.
+    let written = tokio::task::spawn_blocking({
+        let key = key.clone();
+
+        move || key.reissue()
+    })
+    .await;
+
+    if !matches!(written, Ok(Ok(()))) {
+        tracing::error!(outcome = ?written, "re-issuing the workbench key failed");
+        return unavailable("the workbench key could not be re-issued");
+    }
+
+    let view: RemoteView = state.remote.reading().await;
+
+    ([(SET_COOKIE, key.set_cookie())], Json(view)).into_response()
 }
 
 /// `GET /api/ui/update` — whether a newer Verkstead has been released than

@@ -958,6 +958,19 @@ export function pressServe(edit: ServeEdit): Promise<ServePress> {
   return post<ServePress>("/api/ui/remote/serve", edit);
 }
 
+/// A new Workbench Key over the old one, which logs every other device out.
+///
+/// What comes back is the machine read again, the way a serve press answers:
+/// the login link is a field of that reading, so the QR code and the copyable
+/// link redraw on the new key from this answer rather than from a second ask.
+///
+/// The browser that pressed it stays logged in — the answer carries the cookie
+/// for the key it just made — because a reset made from the phone on the
+/// tailnet is a reset made from the only device that can reach this server.
+export function resetKey(): Promise<RemoteView> {
+  return post<RemoteView>("/api/ui/remote/key");
+}
+
 /// Whether a newer Verkstead has been released than the one serving this page.
 ///
 /// The server is the side that asks GitHub, once a day, and this hands over

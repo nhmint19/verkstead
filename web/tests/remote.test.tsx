@@ -13,12 +13,20 @@
 //! middle pane saying how things stand, and the whole of what the machine said
 //! in the details pane it opens.
 //!
+//! And the last of it is about the way in rather than about the machine: the
+//! login link, drawn as a QR code and offered to copy, with **Reset key** under
+//! it. The code is read back the way a camera reads one — see [`scanned`] —
+//! because what is being asked about there is the drawing rather than the
+//! encoding: a grid written out transposed encodes perfectly and scans as
+//! nothing.
+//!
 //! The reads are fixtures the server's own tests wrote, so what the page is
 //! drawn from is the shape the endpoint really answers with — see
 //! `crates/server/tests/remote.rs`, whose subject those shapes are.
 
 import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
+import jsQR from "jsqr";
 import type { JSX } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -31,7 +39,7 @@ import unreadableServe from "./fixtures/remote-serve-unreadable.json" with { typ
 import serving from "./fixtures/remote-serving.json" with { type: "json" };
 import done from "./fixtures/serve-done.json" with { type: "json" };
 import ungranted from "./fixtures/serve-ungranted.json" with { type: "json" };
-import { json, whenever, serving as stubbing } from "./serving";
+import { askedFor, json, whenever, serving as stubbing } from "./serving";
 
 /// The five machines: no Tailscale at all, one whose daemon is not answering,
 /// one that is up and serving the workbench, one that is up and serving
@@ -329,3 +337,205 @@ describe("the serve switch", () => {
     ).toBeNull();
   });
 });
+
+describe("the login link", () => {
+  /// The address by itself lets nobody in — the workbench answers 401 without
+  /// the key — so what the code carries is the link, which is the address with
+  /// the key on it.
+  it("draws the login link as a code and beside it as text", async () => {
+    mountPane(SERVING);
+
+    const code = await waitFor(() =>
+      screen.getByRole("img", { name: "The login link for this workbench" }),
+    );
+
+    // Drawn here rather than fetched: a workbench standing behind a secret has
+    // no business asking a third party to render it, and an install on a
+    // tailnet may have nowhere to fetch from. So it is an inline SVG with the
+    // modules in it, and nothing on the wire.
+    expect(code.tagName.toLowerCase()).toBe("svg");
+    expect(code.querySelector("path")?.getAttribute("d")).toMatch(/^M\d/);
+    expect(code.querySelector("image")).toBeNull();
+
+    expect(
+      screen.getByText(
+        "https://workbench.tailnet-name.ts.net/?key=a-stated-workbench-key",
+      ),
+    ).toBeTruthy();
+  });
+
+  /// And what a phone reading it gets is that link, which is the whole of the
+  /// claim: scanned, it opens the workbench and the key on the end of it is
+  /// what the handshake lets the phone in with.
+  ///
+  /// Read back the way a camera reads it rather than compared against the
+  /// encoder, because what is being asked about is the drawing: a grid written
+  /// out transposed or mirrored encodes perfectly and scans as nothing.
+  it("reads back as the login link when it is scanned", async () => {
+    mountPane(SERVING);
+
+    const code = await waitFor(() =>
+      screen.getByRole("img", { name: "The login link for this workbench" }),
+    );
+
+    expect(scanned(code)).toBe(
+      "https://workbench.tailnet-name.ts.net/?key=a-stated-workbench-key",
+    );
+  });
+
+  /// And the link beside it copies, for every way in that is not a camera: a
+  /// laptop on the same tailnet, a link pasted into a note.
+  it("copies the link", async () => {
+    const written = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText: written } });
+
+    mountPane(SERVING);
+
+    fireEvent.click(await waitFor(() => screen.getByText("Copy")));
+
+    await waitFor(() => expect(screen.getByText("Copied")).toBeTruthy());
+
+    expect(written).toHaveBeenCalledWith(
+      "https://workbench.tailnet-name.ts.net/?key=a-stated-workbench-key",
+    );
+  });
+
+  /// A machine serving nothing has no address to be let in at, so there is
+  /// nothing to point a camera at and nothing for a Reset to take back.
+  it("draws nothing to scan on a machine serving nothing", async () => {
+    mountPane(OFF);
+
+    await waitFor(() =>
+      expect(screen.getByText("Not served to the tailnet.")).toBeTruthy(),
+    );
+
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.queryByText("Reset key")).toBeNull();
+  });
+
+  /// **Reset key** re-issues the secret, and the QR and the link redraw on the
+  /// new one — out of the press's own answer, which is the machine read again.
+  it("redraws the code and the link on a key that was reset", async () => {
+    const fresh = {
+      ...SERVING,
+      link: "https://workbench.tailnet-name.ts.net/?key=the-key-it-was-reset-to",
+    } as RemoteView;
+
+    const fetching = stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      whenever("/api/ui/remote/key", json(fresh), "POST"),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    const was =
+      "https://workbench.tailnet-name.ts.net/?key=a-stated-workbench-key";
+    const drawn = () =>
+      screen
+        .getByRole("img", { name: "The login link for this workbench" })
+        .querySelector("path")
+        ?.getAttribute("d");
+
+    await waitFor(() => expect(screen.getByText(was)).toBeTruthy());
+    const before = drawn();
+
+    fireEvent.click(screen.getByText("Reset key"));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          "https://workbench.tailnet-name.ts.net/?key=the-key-it-was-reset-to",
+        ),
+      ).toBeTruthy(),
+    );
+
+    // The code with it, because the code is the link: one that redrew only the
+    // text would leave a camera being pointed at the key that was just taken
+    // away.
+    expect(drawn()).not.toBe(before);
+
+    // The old one is gone rather than standing beside the new one.
+    expect(screen.queryByText(was)).toBeNull();
+
+    // And the answer is the read, so nothing asked again.
+    expect(askedFor(fetching, "/api/ui/remote")).toBe(1);
+  });
+
+  /// A reset the server would not make is said where it was pressed, and
+  /// nothing on the page moves: the key that was there is still the key.
+  it("says so when a reset was refused", async () => {
+    stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      whenever(
+        "/api/ui/remote/key",
+        () =>
+          Promise.resolve(
+            new Response(
+              JSON.stringify({
+                error: "the workbench key could not be re-issued",
+              }),
+              { status: 500, headers: { "content-type": "application/json" } },
+            ),
+          ),
+        "POST",
+      ),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    fireEvent.click(await waitFor(() => screen.getByText("Reset key")));
+
+    await waitFor(() =>
+      expect(screen.getByText(/could not be re-issued/)).toBeTruthy(),
+    );
+
+    // And nothing on the page moved: the key that was there is still the key,
+    // and the code above it still opens the workbench.
+    expect(
+      screen.getByText(
+        "https://workbench.tailnet-name.ts.net/?key=a-stated-workbench-key",
+      ),
+    ).toBeTruthy();
+  });
+});
+
+/// A drawn QR code, read the way a camera reads one.
+///
+/// The page draws an SVG of exact squares on a grid, so what a photograph of it
+/// would hold can be built from the same two things a scanner works from: how
+/// wide the grid is, and which of its cells are dark. The modules are blown up
+/// so the decoder has more than one pixel of each to work with, the way a phone
+/// held over a screen has.
+///
+/// Nothing of the encoder is consulted. What is asked here is whether the
+/// picture on the page carries the link, which a comparison against the encoder
+/// that drew it could not answer.
+function scanned(code: Element): string | null {
+  const size = Number(code.getAttribute("viewBox")?.split(" ")[2]);
+  const dark = new Set(
+    [...(code.querySelector("path")?.getAttribute("d") ?? "").matchAll(MODULE)]
+      .map(([, x, y]) => `${x},${y}`),
+  );
+
+  // Four pixels a module, which is more than jsQR's own minimum and less than
+  // anything a test should spend on a bitmap.
+  const scale = 4;
+  const width = size * scale;
+  const pixels = new Uint8ClampedArray(width * width * 4);
+
+  for (let y = 0; y < width; y++) {
+    for (let x = 0; x < width; x++) {
+      const on = dark.has(
+        `${Math.floor(x / scale)},${Math.floor(y / scale)}`,
+      );
+      const at = (y * width + x) * 4;
+
+      pixels[at] = pixels[at + 1] = pixels[at + 2] = on ? 0 : 255;
+      pixels[at + 3] = 255;
+    }
+  }
+
+  return jsQR(pixels, width, width)?.data ?? null;
+}
+
+/// One dark module of the path the page draws — see `Qr.tsx`, which writes each
+/// as a one-unit square at its own place on the grid.
+const MODULE = /M(\d+) (\d+)h1v1h-1z/g;

@@ -36,18 +36,40 @@
 //! server has no privilege to raise. So a refused press draws the line that
 //! lifts it — for this machine's own user, as it is to be typed — and the next
 //! press is the re-try.
+//!
+//! **And the address by itself lets nobody in.** The workbench answers 401
+//! without the Workbench Key, so what a phone is actually pointed at is the
+//! login link — the address with the key on it — which is drawn here as a QR
+//! code and offered to copy beside it. The code is drawn in the browser from an
+//! encoder the viewer ships: a workbench standing behind a secret has no
+//! business handing that secret to a third party to render, and an install on a
+//! tailnet may have nowhere to fetch from — see [`Qr`].
+//!
+//! **Reset key sits under them**, because it is what takes that link back. It
+//! re-issues the secret, which logs every other device out: the QR and the link
+//! redraw on the new one out of the answer, and whatever was holding the old one
+//! meets a 401 on its next request. The browser that pressed it stays in — a
+//! reset made from the phone on the tailnet is a reset made from the only device
+//! that could reach this server at all.
+//!
+//! Nothing about it is confirmed twice. This is the human's own machine and the
+//! sentence beside the press is what says what it costs, the way the sandbox
+//! binds say what widening one costs: a press somebody has to acknowledge twice
+//! is one they stop reading.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Match, Show, Switch as Choose, type JSX } from "solid-js";
 
 import { CardButton } from "../CardButton";
+import { Copy } from "../Copy";
 import { PaneSticky } from "../Panes";
 import { Switch } from "../Switch";
-import { loadRemote, pressServe } from "../api/client";
+import { loadRemote, pressServe, resetKey } from "../api/client";
 import type { RemoteView, ServePress, ServeView } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
+import { Qr } from "./Qr";
 import styles from "./Remote.module.css";
 
 /// Where a machine with no Tailscale on it gets one. The one thing this section
@@ -313,6 +335,14 @@ export function RemotePane(props: {
 
                         {served(here.serve)}
                       </dl>
+
+                      {/* And the way in, where there is an address to be let in
+                          at. A machine serving nothing has none — and so has
+                          nothing for a camera to be pointed at, and nothing for
+                          a Reset to take back. */}
+                      <Show when={here.link} keyed>
+                        {(link) => <Reach link={link} />}
+                      </Show>
                     </>
                   )}
                 </Match>
@@ -322,6 +352,73 @@ export function RemotePane(props: {
         </Match>
       </Choose>
     </>
+  );
+}
+
+/// How a phone gets in: the login link as a code to point a camera at, as text
+/// to paste, and the press that takes it back.
+///
+/// Three things about one string, which is why they are one section rather than
+/// three. The QR is for the phone in somebody's hand; the copy is for every
+/// other way a link travels — a laptop on the same tailnet, a note to oneself —
+/// and Reset key is what makes both of them recoverable, because a link handed
+/// out is a link that cannot be taken back any other way.
+///
+/// The press answers with the machine read again, exactly as the serve switch's
+/// does, so it is written straight over the read this pane is drawn from: the
+/// code above redraws on the new key out of the answer rather than out of a
+/// second request.
+function Reach(props: { link: string }): JSX.Element {
+  const queries = useQueryClient();
+
+  const reset = useMutation(() => ({
+    mutationFn: resetKey,
+    onSuccess: (reading: RemoteView) =>
+      queries.setQueryData(["remote"], reading),
+  }));
+
+  return (
+    <section class={styles.reach}>
+      <h3>Open the workbench on a phone</h3>
+
+      <div class={styles.letIn}>
+        <div class={styles.code}>
+          <Qr of={props.link} label="The login link for this workbench" />
+        </div>
+
+        <div class={styles.beside}>
+          <p class={styles.link}>{props.link}</p>
+          <Copy of={props.link} class={styles.copy} />
+        </div>
+      </div>
+
+      <Note>
+        Scanning this opens the workbench on the phone and leaves it logged in.
+        The link carries the workbench key, so anything holding it is in: it is
+        worth as much as the workbench itself.
+      </Note>
+
+      <button
+        type="button"
+        class={styles.reset}
+        disabled={reset.isPending}
+        onClick={() => reset.mutate()}
+      >
+        {reset.isPending ? "Resetting…" : "Reset key"}
+      </button>
+
+      <Note>
+        A new key over the old one, for a phone that was lost or a link that
+        went where it should not have. Every other device is logged out by it,
+        and the code above becomes the way back in.
+      </Note>
+
+      <Show when={reset.isError}>
+        <ErrorLine class={styles.failure}>
+          The key could not be reset: {reset.error?.message}
+        </ErrorLine>
+      </Show>
+    </section>
   );
 }
 

@@ -1,6 +1,7 @@
 {
   "press": "Done",
   "reading": {
+    "link": "https://workbench.tailnet-name.ts.net/?key=a-stated-workbench-key",
     "node": "workbench.tailnet-name.ts.net",
     "serve": {
       "address": "https://workbench.tailnet-name.ts.net",

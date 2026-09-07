@@ -300,6 +300,16 @@ pub(crate) struct AppState {
     /// on the next load rather than on the next restart — see [`remote`].
     remote: remote::Tailscale,
 
+    /// The Workbench Key the gate in front of this router stands on, where it
+    /// stands on one — see [`key`].
+    ///
+    /// Held for the one press that changes it, which is **Reset key** on the
+    /// Remote access pane: the gate reads this handle on every request, so
+    /// re-issuing through it logs every device holding the old secret out at
+    /// once. `None` is a router with no gate over it, where there is no key to
+    /// re-issue and nothing a re-issue would mean.
+    key: Option<key::WorkbenchKey>,
+
     /// The two files the human tells Verkstead their credentials and their
     /// identity in. A handle rather than what is in them: the files are read at
     /// the moment they are wanted, so the settings page and the next session to
@@ -671,6 +681,33 @@ pub fn router_reading_tailscale(pool: SqlitePool, remote: remote::Tailscale) -> 
     )
 }
 
+/// The same, gated on `key` — which is what the half of that suite about the
+/// login link stands up.
+///
+/// Both halves rather than one, because the two are the same fact: the link the
+/// pane draws is the served address with the key on it, and **Reset key** is the
+/// press that changes what every request is checked against. A router reading a
+/// stated machine and holding no key could be asked neither question.
+///
+/// Requests to it carry the cookie, the way a browser's do — see
+/// [`key::WorkbenchKey::cookie`].
+pub fn router_reading_tailscale_keyed(
+    pool: SqlitePool,
+    remote: remote::Tailscale,
+    key: key::WorkbenchKey,
+) -> Router {
+    routed(
+        pool,
+        updates::Updates::nothing_learned(),
+        nothing_bound(),
+        nowhere(),
+        sessions::Sessions::none(),
+        Gh::on_path(),
+        remote,
+        key::Gate::keyed(key),
+    )
+}
+
 /// The Tailscale of a router that was not stood up to be reached from a phone:
 /// the host's own binary, in front of the port the workbench takes when nobody
 /// has said otherwise.
@@ -689,8 +726,16 @@ fn tailnet() -> remote::Tailscale {
 /// One place rather than two, because the two arms are one behaviour: what the
 /// pane does about a refused serve is show the line, and an app that can ask for
 /// the grant asks for it first — see [`remote::Elevate`].
-fn tailnet_over(port: u16, escalation: Option<Arc<dyn remote::Elevate>>) -> remote::Tailscale {
-    let tailscale = remote::Tailscale::on_path(port);
+///
+/// And holding the Workbench Key, because the pane draws more than the serve:
+/// the address a serve puts in front of the workbench is only half of what a
+/// phone needs, and the key on the end of it is the other half — see [`key`].
+fn tailnet_over(
+    port: u16,
+    escalation: Option<Arc<dyn remote::Elevate>>,
+    key: key::WorkbenchKey,
+) -> remote::Tailscale {
+    let tailscale = remote::Tailscale::on_path(port).keyed(key);
 
     match escalation {
         Some(escalation) => tailscale.escalating(escalation),
@@ -768,6 +813,11 @@ fn routed(
         // And the host's `tailscale`, which is the whole of what the Remote access
         // pane reads — see [`remote`].
         remote,
+
+        // And the key the gate below stands on, so that the one press that
+        // re-issues it goes through the very handle every request is checked
+        // against — see [`key::Gate::held`].
+        key: gate.held(),
 
         data_dir,
         checkouts: Arc::new(tokio::sync::Mutex::new(())),
@@ -924,7 +974,7 @@ pub fn router_keyed(pool: SqlitePool, key: key::WorkbenchKey) -> Router {
         nowhere(),
         sessions::Sessions::none(),
         Gh::on_path(),
-        tailnet(),
+        tailnet().keyed(key.clone()),
         key::Gate::keyed(key),
     )
 }
@@ -1190,7 +1240,7 @@ pub async fn run_on_keyed(
         // install told to listen somewhere else is one whose serve has to point
         // somewhere else too — see [`remote`]. With whatever this process was
         // started with a way to escalate through, where it was started with one.
-        tailnet_over(config.listen.port(), escalation),
+        tailnet_over(config.listen.port(), escalation, key.clone()),
         // And the key this Data Directory holds, which is what the workbench
         // and the viewer's own namespace are behind.
         key,

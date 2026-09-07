@@ -53,6 +53,13 @@
 //! Both arms end in the same place. A dialog somebody dismissed is not a
 //! failure to report as one — the serve is off, which is the truth of the
 //! machine, and the line stands on the pane for whoever would rather type it.
+//!
+//! **And the one thing here that is not read off Tailscale at all**: the login
+//! link. A served address is where a phone would reach the workbench and the
+//! Workbench Key is what it would be let in by, so the two of them together are
+//! the link the pane draws as a QR code — composed here because this is the one
+//! place that has both. It hangs off a served address and nothing else: a
+//! machine on a tailnet serving nothing has no address, and so no link.
 
 use std::collections::HashMap;
 use std::process::Output;
@@ -61,6 +68,8 @@ use std::sync::Arc;
 use serde::Deserialize;
 use tokio::process::Command;
 use verkstead_render::{RemoteView, ServePress, ServeView};
+
+use crate::key::WorkbenchKey;
 
 /// The tailscale on this machine, and the port a serve has to be pointing at
 /// for it to be this workbench's.
@@ -91,6 +100,20 @@ pub struct Tailscale {
     /// from a unit file has nobody at the machine to put a dialog in front of,
     /// so what a refused press leaves it with is the line and the next press.
     escalation: Option<Arc<dyn Elevate>>,
+
+    /// And the Workbench Key, which is what turns a served address into a login
+    /// link: the address with `?key=…` on it is the whole of how a phone is let
+    /// in, and the pane draws it as a QR code — see [`crate::key`].
+    ///
+    /// Held rather than read at the moment it is wanted, because the handle is
+    /// what re-issuing goes through: this is a clone of the one the gate stands
+    /// on, so a link built here after a **Reset key** carries the new secret
+    /// without anything having been told about it.
+    ///
+    /// `None` is a router that was not stood up to be reached from a phone. It
+    /// reads the machine exactly as the served one does and hands back no link,
+    /// there being no key to make one out of.
+    key: Option<WorkbenchKey>,
 }
 
 /// A way for this process to run one command with a privilege it has not got.
@@ -174,6 +197,20 @@ impl Tailscale {
             port,
             user: this_user(),
             escalation: None,
+            key: None,
+        }
+    }
+
+    /// The same again, holding the Workbench Key this server is gated on, so
+    /// that a served address reads with the login link that opens it.
+    ///
+    /// A clone of the gate's own handle rather than a second key — see
+    /// [`WorkbenchKey`] — which is what makes a link read after a **Reset key**
+    /// the new one.
+    pub fn keyed(self, key: WorkbenchKey) -> Tailscale {
+        Tailscale {
+            key: Some(key),
+            ..self
         }
     }
 
@@ -269,10 +306,27 @@ impl Tailscale {
             None => RemoteView::Unreadable {
                 trouble: "`tailscale status --json` named no node for this machine".to_owned(),
             },
-            Some(node) => RemoteView::Up {
-                node,
-                serve: self.serving().await,
-            },
+            Some(node) => {
+                let serve = self.serving().await;
+
+                RemoteView::Up {
+                    link: self.link_to(&serve),
+                    node,
+                    serve,
+                }
+            }
+        }
+    }
+
+    /// The login link for whatever `serve` says the workbench answers on.
+    ///
+    /// Nothing where there is nothing to point it at, which is every serve but
+    /// one: an address is what a link is made of, and the loopback the server
+    /// is also reachable on is no use to the phone this link is for.
+    fn link_to(&self, serve: &ServeView) -> Option<String> {
+        match serve {
+            ServeView::On { address } => self.key.as_ref().map(|key| key.link(address)),
+            _ => None,
         }
     }
 

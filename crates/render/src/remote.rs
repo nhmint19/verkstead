@@ -30,6 +30,13 @@
 //! switch. It runs `tailscale serve` and answers with the machine read again,
 //! so the position it settles at is a reading like every other field on this
 //! page. Its own third answer is the operator grant — see [`ServePress`].
+//!
+//! **The login link rides along with the address**, because it is the address
+//! with the Workbench Key on it and the key is the one thing the browser has
+//! not got: the cookie carrying it is `HttpOnly`, so a page cannot build the
+//! link it is about to draw as a QR code. Re-issuing the key answers with the
+//! whole reading again — see [`RemoteView::Up`] — so that the QR and the link
+//! beside it redraw on the new one rather than being asked for a second time.
 
 use serde::{Deserialize, Serialize};
 
@@ -69,6 +76,21 @@ pub enum RemoteView {
 
         /// And whether anything on that name is proxied to the workbench.
         serve: ServeView,
+
+        /// The login link a phone is let in by: the served address with the
+        /// Workbench Key on it, which is what the pane draws as a QR code and
+        /// offers to copy.
+        ///
+        /// Composed here rather than in the browser because the key is the one
+        /// thing the browser is not given — it is carried in a cookie no script
+        /// reads — and it is a field of the reading rather than of
+        /// [`ServeView::On`] because the serve is what `tailscale` said and this
+        /// is what Verkstead makes of it.
+        ///
+        /// `None` where there is nothing to build one on: a machine on the
+        /// tailnet serving nothing has no address a link could point at, and
+        /// nor has one whose serve could not be read.
+        link: Option<String>,
     },
 }
 

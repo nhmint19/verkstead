@@ -36,6 +36,7 @@ use verkstead_schema::{
     Answer, Liveness, Question, QuestionOption, QuestionSet, RepoDiff, Response, SetCreated,
     Subquestion,
 };
+use verkstead_server::key::WorkbenchKey;
 use verkstead_server::remote::Tailscale;
 use verkstead_server::{
     Gh, open_database, router, router_asking_github, router_reading_tailscale, store,
@@ -3199,7 +3200,11 @@ async fn tailscale_app(script: &str) -> (tempfile::TempDir, Router) {
     }
     // Stated, because the operator grant names it: a fixture whose command
     // said whoever ran `cargo test` would be a fixture of this machine.
-    .as_user("ada".to_owned());
+    .as_user("ada".to_owned())
+    // And the Workbench Key stated for the same reason: the login link the pane
+    // draws as a QR code is the served address with this on the end of it, and
+    // thirty-two random bytes would be a fixture nobody could pin.
+    .keyed(WorkbenchKey::stated(dir.path(), "a-stated-workbench-key").unwrap());
 
     (dir, router_reading_tailscale(pool, tailscale))
 }

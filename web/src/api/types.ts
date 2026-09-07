@@ -2390,7 +2390,23 @@ node: string,
 /**
  * And whether anything on that name is proxied to the workbench.
  */
-serve: ServeView, };
+serve: ServeView, 
+/**
+ * The login link a phone is let in by: the served address with the
+ * Workbench Key on it, which is what the pane draws as a QR code and
+ * offers to copy.
+ *
+ * Composed here rather than in the browser because the key is the one
+ * thing the browser is not given — it is carried in a cookie no script
+ * reads — and it is a field of the reading rather than of
+ * [`ServeView::On`] because the serve is what `tailscale` said and this
+ * is what Verkstead makes of it.
+ *
+ * `None` where there is nothing to build one on: a machine on the
+ * tailnet serving nothing has no address a link could point at, and
+ * nor has one whose serve could not be read.
+ */
+link: string | null, };
 
 /**
  * Which registered Repo a drafting Conversation is to be moved onto.
