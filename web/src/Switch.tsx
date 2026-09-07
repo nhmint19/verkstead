@@ -8,6 +8,12 @@
 //! It says on or off and nothing else. Anything a switch cannot say — that this
 //! browser has no push to offer, that a tap failed — is said in words beside it
 //! by whoever is showing it, because only they know what to say.
+//!
+//! **And it says where things stand rather than where somebody pressed.** A tap
+//! is a request; what moves the switch is `on` changing, which is the caller's
+//! answer arriving. So the box goes straight back after every tap and is moved
+//! only from above — a flip still in flight, or one that came back refused,
+//! leaves it showing the truth instead of the wish.
 
 import type { JSX } from "solid-js";
 
@@ -48,7 +54,19 @@ export function Switch(props: {
         // The box the browser has just ticked, rather than the opposite of what
         // the caller held: a disabled flip never gets here, and reading the
         // element is the account that cannot disagree with what the human sees.
-        onChange={(ev) => props.flip(ev.currentTarget.checked)}
+        //
+        // And then put straight back where `on` says it stands, because the
+        // browser moving it is not the same thing as it having moved. What ticks
+        // a box the human clicked is the caller's answer arriving and `on`
+        // changing with it — so a flip that is refused, or one still in flight,
+        // leaves a switch showing where things actually are rather than where
+        // somebody asked for them to be.
+        onChange={(ev) => {
+          const asked = ev.currentTarget.checked;
+          ev.currentTarget.checked = props.on;
+
+          props.flip(asked);
+        }}
       />
     </label>
   );

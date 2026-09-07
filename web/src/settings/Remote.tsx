@@ -22,13 +22,29 @@
 //! answer this build could not read is none of the three: Tailscale is whatever
 //! the host has, so a shape nobody here has seen says so rather than being read
 //! as the nearest state with room for it.
+//!
+//! **And one thing to press**, which is the serve itself. The switch's position
+//! is the reading rather than anything this page remembers, so a serve somebody
+//! set up in a terminal reads as on and the switch turns *that* off; a press
+//! answers with the machine read again, and the switch settles wherever the
+//! machine actually ended up. It is drawn only where the serve state was
+//! readable, because a switch over *cannot tell* would be offering to turn on
+//! something that may already be on.
+//!
+//! **The operator grant is a sentence, not a button.** Tailscale refuses a
+//! serve from a process that is neither root nor the tailnet's operator, and the
+//! server has no privilege to raise. So a refused press draws the line that
+//! lifts it — for this machine's own user, as it is to be typed — and the next
+//! press is the re-try.
 
-import { Match, Switch as Choose, type JSX } from "solid-js";
+import { useMutation, useQueryClient } from "@tanstack/solid-query";
+import { Match, Show, Switch as Choose, type JSX } from "solid-js";
 
 import { CardButton } from "../CardButton";
 import { PaneSticky } from "../Panes";
-import { loadRemote } from "../api/client";
-import type { RemoteView, ServeView } from "../api/types";
+import { Switch } from "../Switch";
+import { loadRemote, pressServe } from "../api/client";
+import type { RemoteView, ServePress, ServeView } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
@@ -53,6 +69,13 @@ const up = (told: RemoteView) => (told.tailscale === "Up" ? told : null);
 const serving = (serve: ServeView) => (serve.serve === "On" ? serve : null);
 const unread = (serve: ServeView) =>
   serve.serve === "Unreadable" ? serve : null;
+
+/// And what a press came back with, where it was one of the two answers that is
+/// not the machine read again. `undefined` before anything has been pressed.
+const ungranted = (pressed: ServePress | undefined) =>
+  pressed?.press === "Ungranted" ? pressed : null;
+const troubled = (pressed: ServePress | undefined) =>
+  pressed?.press === "Trouble" ? pressed : null;
 
 /// What this machine's Tailscale is doing, read for the two panes that draw it.
 ///
@@ -156,7 +179,28 @@ export function RemotePane(props: {
   /// The way back to the settings, which is the pane this one was entered from.
   back: () => void;
 }): JSX.Element {
+  const queries = useQueryClient();
   const remote = useRemote();
+
+  /// The serve switch, pressed.
+  ///
+  /// What a press that went through answers with is the machine read again, so
+  /// it is written straight over the read the pane is drawn from: a second
+  /// request would learn nothing the first one did not already say, and could
+  /// only disagree with what is on screen while it was in flight.
+  ///
+  /// The other two answers are left in `press.data` and drawn from there. They
+  /// are not errors — a refusal for want of the operator grant is a sentence
+  /// with a command in it — so nothing here throws, and the next press replaces
+  /// whichever of them is showing.
+  const press = useMutation(() => ({
+    mutationFn: (on: boolean) => pressServe({ on }),
+    onSuccess: (pressed: ServePress) => {
+      if (pressed.press === "Done") {
+        queries.setQueryData(["remote"], pressed.reading);
+      }
+    },
+  }));
 
   return (
     <>
@@ -233,12 +277,43 @@ export function RemotePane(props: {
 
                 <Match when={up(told())} keyed>
                   {(here) => (
-                    <dl class={styles.readings}>
-                      <dt>This machine on the tailnet</dt>
-                      <dd class={styles.address}>{here.node}</dd>
+                    <>
+                      {/* Only where the serve state was readable. A switch over
+                          an answer this build could not read would be offering
+                          to turn on something that may already be on. */}
+                      <Show when={!unread(here.serve)}>
+                        <Switch
+                          label="Serve the workbench to the tailnet"
+                          on={Boolean(serving(here.serve))}
+                          disabled={press.isPending}
+                          flip={(on) => press.mutate(on)}
+                        />
 
-                      {served(here.serve)}
-                    </dl>
+                        <Note>
+                          Tailscale puts this machine's tailnet name in front of
+                          the workbench over HTTPS, which is what a phone on the
+                          tailnet opens. Where it stands is read off the machine,
+                          so a serve set up in a terminal reads as on here and
+                          this turns that one off.
+                        </Note>
+                      </Show>
+
+                      {refused(press.data)}
+
+                      <Show when={press.isError}>
+                        <ErrorLine class={styles.failure}>
+                          The serve could not be changed:{" "}
+                          {press.error?.message}
+                        </ErrorLine>
+                      </Show>
+
+                      <dl class={styles.readings}>
+                        <dt>This machine on the tailnet</dt>
+                        <dd class={styles.address}>{here.node}</dd>
+
+                        {served(here.serve)}
+                      </dl>
+                    </>
                   )}
                 </Match>
               </Choose>
@@ -279,6 +354,44 @@ function served(serve: ServeView): JSX.Element {
               What is served here could not be read.
               <span class={styles.trouble}>{strange.trouble}</span>
             </dd>
+          </>
+        )}
+      </Match>
+    </Choose>
+  );
+}
+
+/// What a press said, where what it said was not the machine read again.
+///
+/// Two answers and neither of them an error the page can retry for the human.
+/// The operator grant is a line to run in a terminal, and the next press is the
+/// re-try — so it is drawn as the command it is, with what Tailscale said under
+/// it. Anything else is the machine's own words and nothing to add to them.
+///
+/// Nothing at all before the first press, and nothing after one that went
+/// through: the reading it answered with is already on the page.
+function refused(pressed: ServePress | undefined): JSX.Element {
+  return (
+    <Choose>
+      <Match when={ungranted(pressed)} keyed>
+        {(denied) => (
+          <>
+            <Note>
+              Tailscale will not set up a serve for the user this server runs
+              as. Run this on the machine, then press the switch again:
+            </Note>
+            <p class={styles.command}>{denied.grant}</p>
+            <p class={styles.trouble}>{denied.trouble}</p>
+          </>
+        )}
+      </Match>
+      <Match when={troubled(pressed)} keyed>
+        {(bad) => (
+          <>
+            <Note>
+              The serve could not be changed. This is what Tailscale said:
+            </Note>
+            <p class={styles.trouble}>{bad.trouble}</p>
           </>
         )}
       </Match>

@@ -26,11 +26,11 @@ use crate::{
     NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice, ProfileChosen,
     ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
     Registered, Registration, RemoteView, RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved,
-    RepoSwitched, RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, SetReading,
-    SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedConversation,
-    ShowingArchived, Shown, Started, SteerOpened, SteerSubmission, Submitted, Subscribed,
-    Subscription, TerminalOpened, TerminalsView, TranscriptView, Unsubscribe, UpdateNotice,
-    Watching,
+    RepoSwitched, RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit,
+    ServePress, SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
+    SharePublished, SharedConversation, ShowingArchived, Shown, Started, SteerOpened,
+    SteerSubmission, Submitted, Subscribed, Subscription, TerminalOpened, TerminalsView,
+    TranscriptView, Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -290,6 +290,13 @@ fn the_viewers_types_are_written_from_these() {
     // serve state it carries writes the state a phone is reached through with
     // it.
     RemoteView::export_all(&config).unwrap();
+
+    // And the one thing on that section that is pressed rather than read: the
+    // serve switch. What a press takes in, and the three answers it comes back
+    // with — the machine read again, the operator grant it wants first, or what
+    // went wrong in the machine's own words.
+    ServeEdit::export_all(&config).unwrap();
+    ServePress::export_all(&config).unwrap();
 
     // How every one of them refuses. The same shape the agents' half refuses in,
     // so the viewer has one thing to read whichever half answered.

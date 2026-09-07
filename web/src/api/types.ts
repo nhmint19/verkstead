@@ -2739,6 +2739,44 @@ why: string, };
 export type Screen = { repaint: string, columns: number, rows: number, };
 
 /**
+ * Where the serve switch is being put.
+ *
+ * A press rather than a setting: nothing of it is saved, and what the switch
+ * reads as afterwards is the machine read again — see [`ServePress::Done`].
+ */
+export type ServeEdit = { 
+/**
+ * Whether the workbench is to be served to the tailnet.
+ */
+on: boolean, };
+
+/**
+ * And what came of the press.
+ *
+ * Three answers, because the middle one is the whole of why this is not simply
+ * a command that worked or did not. `tailscale serve` is refused outright for a
+ * process that is neither root nor the tailnet's **operator**, and the only
+ * thing that lifts it is a line somebody runs in a terminal. So a refusal
+ * carries that line rather than an apology, and the next press runs the same
+ * command again — which is all a re-try is once the grant has been made.
+ *
+ * Nothing here escalates anything. The server has no privilege to raise and no
+ * business asking for one; what the desktop app does with the same line is its
+ * own, and still the human's press.
+ */
+export type ServePress = { "press": "Done", reading: RemoteView, } | { "press": "Ungranted", 
+/**
+ * The line that grants it, for this machine's own user —
+ * `sudo tailscale set --operator=ada`. Copied into a terminal, run,
+ * and then the switch pressed again.
+ */
+grant: string, 
+/**
+ * And what `tailscale` said when it refused, in its own words.
+ */
+trouble: string, } | { "press": "Trouble", trouble: string, };
+
+/**
  * Whether `tailscale serve` is putting this machine's tailnet name in front of
  * the port the workbench is served on.
  *

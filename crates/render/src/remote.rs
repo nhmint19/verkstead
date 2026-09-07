@@ -25,6 +25,11 @@
 //! `trouble` is what the machine said, verbatim wherever there were words to
 //! take — the line `tailscale` printed on standard error is the one that names
 //! the systemd unit to start, and no sentence written here would be as useful.
+//!
+//! **And the one thing here that is pressed rather than read**: the serve
+//! switch. It runs `tailscale serve` and answers with the machine read again,
+//! so the position it settles at is a reading like every other field on this
+//! page. Its own third answer is the operator grant — see [`ServePress`].
 
 use serde::{Deserialize, Serialize};
 
@@ -86,4 +91,55 @@ pub enum ServeView {
     /// And a serve configuration that could not be read, which is not the same
     /// as one that is empty.
     Unreadable { trouble: String },
+}
+
+/// Where the serve switch is being put.
+///
+/// A press rather than a setting: nothing of it is saved, and what the switch
+/// reads as afterwards is the machine read again — see [`ServePress::Done`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ServeEdit {
+    /// Whether the workbench is to be served to the tailnet.
+    pub on: bool,
+}
+
+/// And what came of the press.
+///
+/// Three answers, because the middle one is the whole of why this is not simply
+/// a command that worked or did not. `tailscale serve` is refused outright for a
+/// process that is neither root nor the tailnet's **operator**, and the only
+/// thing that lifts it is a line somebody runs in a terminal. So a refusal
+/// carries that line rather than an apology, and the next press runs the same
+/// command again — which is all a re-try is once the grant has been made.
+///
+/// Nothing here escalates anything. The server has no privilege to raise and no
+/// business asking for one; what the desktop app does with the same line is its
+/// own, and still the human's press.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "press")]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum ServePress {
+    /// It went through, and this is what the machine reads as now.
+    ///
+    /// The reading travels back with it because the switch's position is read
+    /// rather than remembered: a press that answered only *yes* would leave the
+    /// page holding an opinion of its own about a machine somebody else may have
+    /// changed in the meantime.
+    Done { reading: RemoteView },
+
+    /// Tailscale would not take it from this user, for want of the operator
+    /// grant.
+    Ungranted {
+        /// The line that grants it, for this machine's own user —
+        /// `sudo tailscale set --operator=ada`. Copied into a terminal, run,
+        /// and then the switch pressed again.
+        grant: String,
+
+        /// And what `tailscale` said when it refused, in its own words.
+        trouble: String,
+    },
+
+    /// And every other way running it can fail.
+    Trouble { trouble: String },
 }

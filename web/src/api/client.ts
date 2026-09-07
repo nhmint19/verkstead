@@ -55,6 +55,8 @@ import type {
   RoleChoice,
   RoadmapPane,
   Screen,
+  ServeEdit,
+  ServePress,
   SetReading,
   SettingsEdit,
   SettingsSaved,
@@ -942,6 +944,18 @@ export function chooseReviewPairing(
 /// each of them is a different thing to say to the human.
 export function loadRemote(): Promise<RemoteView> {
   return get<RemoteView>("/api/ui/remote");
+}
+
+/// Put this machine's tailnet name in front of the workbench, or take it off
+/// again.
+///
+/// What comes back is the machine read again, so the switch settles where the
+/// machine is rather than where the press meant to put it — with two answers
+/// that are not a reading: the operator grant Tailscale wants before it will
+/// take a serve from this user, and whatever else went wrong, in the machine's
+/// own words.
+export function pressServe(edit: ServeEdit): Promise<ServePress> {
+  return post<ServePress>("/api/ui/remote/serve", edit);
 }
 
 /// Whether a newer Verkstead has been released than the one serving this page.

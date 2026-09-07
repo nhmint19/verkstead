@@ -17,26 +17,36 @@
 //! drawn from is the shape the endpoint really answers with — see
 //! `crates/server/tests/remote.rs`, whose subject those shapes are.
 
-import { render, screen, waitFor } from "@solidjs/testing-library";
+import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import type { JSX } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { RemoteView } from "../src/api/types";
+import type { RemoteView, ServePress } from "../src/api/types";
 import { RemoteCard, RemotePane } from "../src/settings/Remote";
 import absent from "./fixtures/remote-absent.json" with { type: "json" };
 import down from "./fixtures/remote-down.json" with { type: "json" };
 import off from "./fixtures/remote-off.json" with { type: "json" };
+import unreadableServe from "./fixtures/remote-serve-unreadable.json" with { type: "json" };
 import serving from "./fixtures/remote-serving.json" with { type: "json" };
+import done from "./fixtures/serve-done.json" with { type: "json" };
+import ungranted from "./fixtures/serve-ungranted.json" with { type: "json" };
 import { json, whenever, serving as stubbing } from "./serving";
 
-/// The four machines: no Tailscale at all, one whose daemon is not answering,
-/// one that is up and serving the workbench, and one that is up and serving
-/// nothing.
+/// The five machines: no Tailscale at all, one whose daemon is not answering,
+/// one that is up and serving the workbench, one that is up and serving
+/// nothing, and one that is up and whose serve state could not be read.
 const ABSENT = absent as RemoteView;
 const DOWN = down as RemoteView;
 const SERVING = serving as RemoteView;
 const OFF = off as RemoteView;
+const UNREADABLE_SERVE = unreadableServe as RemoteView;
+
+/// And the two answers a press comes back with that are not the machine read
+/// again — the operator grant, and the reading a press that went through
+/// carries.
+const DONE = done as ServePress;
+const UNGRANTED = ungranted as ServePress;
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -171,5 +181,151 @@ describe("the pane", () => {
     );
 
     expect(screen.queryByText(/^https:\/\//)).toBeNull();
+  });
+});
+
+describe("the serve switch", () => {
+  /// A server answering the read and the presses both.
+  ///
+  /// The read is held for its path, because the pane makes it whenever it likes
+  /// and a test about a press should not have to say when. The presses go in the
+  /// order given, which is what a re-try is made of: a refusal, and then the same
+  /// press again once the grant has been run.
+  function theMachinePressed(told: RemoteView, ...answers: Array<ServePress>) {
+    return stubbing(
+      whenever("/api/ui/remote", json(told)),
+      ...answers.map((answer) => json(answer)),
+    );
+  }
+
+  function theSwitch(): HTMLInputElement {
+    return screen.getByRole("switch") as HTMLInputElement;
+  }
+
+  /// What the page put on the wire for the press it made.
+  function pressed(fetching: ReturnType<typeof stubbing>): unknown {
+    const put = fetching.mock.calls.find(
+      ([path, init]) =>
+        String(path) === "/api/ui/remote/serve" && init?.method === "POST",
+    );
+
+    expect(put, "expected the page to have pressed").toBeTruthy();
+    return JSON.parse(String(put![1]?.body));
+  }
+
+  /// The position is the reading rather than anything the page remembers, which
+  /// is what makes a serve set up in a terminal one this switch turns off.
+  it("stands where the machine reads, not where it was last pressed", async () => {
+    mountPane(SERVING);
+
+    await waitFor(() => expect(theSwitch().checked).toBe(true));
+  });
+
+  it("stands off on a machine serving nothing", async () => {
+    mountPane(OFF);
+
+    await waitFor(() => expect(theSwitch().checked).toBe(false));
+  });
+
+  /// And a serve state this build could not read gets no switch at all: *cannot
+  /// tell* under a control offering to turn *off* on would be the one sentence
+  /// this section must never say.
+  it("is not drawn where the serve state could not be read", async () => {
+    mountPane(UNREADABLE_SERVE);
+
+    await waitFor(() =>
+      expect(screen.getAllByText(/could not be read/).length).toBeGreaterThan(0),
+    );
+
+    expect(screen.queryByRole("switch")).toBeNull();
+  });
+
+  /// A press says which way it is going, and the address it comes back with is
+  /// what the pane then reads — the answer *is* the read, so nothing asks
+  /// again.
+  it("presses the serve on and reads the address off the answer", async () => {
+    const fetching = theMachinePressed(OFF, DONE);
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    await waitFor(() => expect(theSwitch().checked).toBe(false));
+    fireEvent.click(theSwitch());
+
+    await waitFor(() =>
+      expect(
+        screen.getAllByText("https://workbench.tailnet-name.ts.net"),
+      ).toHaveLength(2),
+    );
+
+    expect(pressed(fetching)).toEqual({ on: true });
+    expect(theSwitch().checked).toBe(true);
+  });
+
+  /// And off the other way, which is the same press with the other value.
+  it("presses the serve off", async () => {
+    const fetching = theMachinePressed(SERVING, {
+      press: "Done",
+      reading: OFF,
+    });
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    await waitFor(() => expect(theSwitch().checked).toBe(true));
+    fireEvent.click(theSwitch());
+
+    await waitFor(() =>
+      expect(screen.getByText("Not served to the tailnet.")).toBeTruthy(),
+    );
+
+    expect(pressed(fetching)).toEqual({ on: false });
+    expect(theSwitch().checked).toBe(false);
+  });
+
+  /// A serve Tailscale would not take draws the line that makes it take one —
+  /// exactly as it is to be typed, because a word of it reworded is a command
+  /// that does not work.
+  it("draws the operator grant when a serve is refused", async () => {
+    theMachinePressed(OFF, UNGRANTED);
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    await waitFor(() => expect(theSwitch().checked).toBe(false));
+    fireEvent.click(theSwitch());
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("sudo tailscale set --operator=ada"),
+      ).toBeTruthy(),
+    );
+
+    // With what Tailscale said under it, because the grant is this build's
+    // reading of a refusal and the refusal is the machine's own.
+    expect(screen.getByText("Access denied: serve config denied")).toBeTruthy();
+
+    // And nothing moved: the switch is still where the machine reads.
+    expect(theSwitch().checked).toBe(false);
+  });
+
+  /// The press after the grant has been run is the same press again, and it
+  /// serves — which is the whole of what a re-try is here.
+  it("serves on the press after the grant", async () => {
+    theMachinePressed(OFF, UNGRANTED, DONE);
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    await waitFor(() => expect(theSwitch().checked).toBe(false));
+    fireEvent.click(theSwitch());
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("sudo tailscale set --operator=ada"),
+      ).toBeTruthy(),
+    );
+
+    fireEvent.click(theSwitch());
+
+    await waitFor(() => expect(theSwitch().checked).toBe(true));
+
+    // And the grant goes with the refusal it belonged to: there is nothing left
+    // for anybody to run.
+    expect(
+      screen.queryByText("sudo tailscale set --operator=ada"),
+    ).toBeNull();
   });
 });

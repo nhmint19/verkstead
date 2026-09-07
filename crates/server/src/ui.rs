@@ -38,10 +38,11 @@ use verkstead_render::{
     IgnoreRule, IgnoredCommentsEdit, Lifecycle, Locked, Merging, MissedOut, NewAdoption,
     NewCompanion, NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
     Registration, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice,
-    RuleField, RuleRefused, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
-    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowingArchived, Standing,
-    SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TerminalOpened,
-    TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    RuleField, RuleRefused, ServeEdit, ServePress, SetReading, SetView, SettingsEdit,
+    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation,
+    ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription,
+    TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice,
+    Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -392,6 +393,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // a read that answered off the settings files would be a page saying
         // what somebody once typed rather than what the machine is doing now.
         .route("/api/ui/remote", get(remote))
+        // And the one thing on that section that is pressed: `tailscale serve`,
+        // put on and taken off. A route of its own rather than a body on the
+        // read, because it is the one half of the section that changes the
+        // machine — and what it answers with is that read, made again.
+        .route("/api/ui/remote/serve", post(press_serve))
 }
 
 /// `GET /api/ui/sets/{id}` — one Set, rendered, with where it stands.
@@ -4178,6 +4184,25 @@ async fn remote(State(state): State<AppState>) -> HttpResponse {
     let view: RemoteView = state.remote.reading().await;
 
     Json(view).into_response()
+}
+
+/// `POST /api/ui/remote/serve` — put this machine's tailnet name in front of the
+/// workbench, or take it off again.
+///
+/// What comes back is the machine read again, so the switch settles where the
+/// machine actually is rather than where the press meant to put it: a serve that
+/// did not take reads as off, which is the truth and the only thing worth
+/// drawing.
+///
+/// Never a refusal either, for the reason the read above is never one. Tailscale
+/// denies a serve from a process that is neither root nor the tailnet's
+/// operator, and that is not a failure to report but a sentence to put in front
+/// of the human — the line that grants it, for this machine's own user, with the
+/// next press as the re-try. See [`crate::remote`].
+async fn press_serve(State(state): State<AppState>, Json(edit): Json<ServeEdit>) -> HttpResponse {
+    let pressed: ServePress = state.remote.press(edit.on).await;
+
+    Json(pressed).into_response()
 }
 
 /// `GET /api/ui/update` — whether a newer Verkstead has been released than

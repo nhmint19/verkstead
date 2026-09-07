@@ -91,6 +91,46 @@
   margin-bottom: 0;
 }
 
+/* The serve switch and what stands under it. The switch is `Switch.module.css`'s
+   own; this is only the room around it, so the readings below do not sit on top
+   of the sentence that explains it. */
+.remote label + p {
+  margin-top: 0.5rem;
+}
+
+.remote .readings {
+  margin-top: 1.25rem;
+}
+
+/* The line that makes this machine's user Tailscale's operator, drawn as what it
+   is: something to select and paste into a terminal, character for character.
+
+   The accent down its edge rather than the stopped red the trouble beside it
+   carries, because they say different things. The trouble is what went wrong;
+   this is the thing to do about it, and the one line on this pane that ends with
+   the switch working. */
+.command {
+  display: block;
+  margin: 0.5rem 0 0;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--edge);
+  border-inline-start: 3px solid var(--accent);
+  border-radius: 0.6rem;
+  background: var(--code-wash);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+/* And a press the browser could not even put on the wire, which is neither of
+   the two answers above: nothing of the machine's to quote. */
+.failure {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
 @media (hover: hover) {
   .pointer:hover {
     color: var(--accent-deep);

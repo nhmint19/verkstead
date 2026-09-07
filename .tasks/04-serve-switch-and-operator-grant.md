@@ -28,12 +28,12 @@ as it is for the sandbox.
 
 ## Acceptance criteria
 
-- [ ] The switch on makes the address readable on the pane, and off takes it
+- [x] The switch on makes the address readable on the pane, and off takes it
       away; the position is read back from the serve state rather than held.
-- [ ] A serve refused for want of the operator grant reads back the exact
+- [x] A serve refused for want of the operator grant reads back the exact
       command for this machine's user, and a press after the grant re-tries and
       serves.
-- [ ] `services.tailscale.enable` on a Verkstead host sets the operator to the
+- [x] `services.tailscale.enable` on a Verkstead host sets the operator to the
       unit's user, and `tailscale` is on the unit's PATH.
-- [ ] The VM test shows the unit reaching the Tailscale daemon through its own
+- [x] The VM test shows the unit reaching the Tailscale daemon through its own
       hardening.

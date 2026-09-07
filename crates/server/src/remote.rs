@@ -4,17 +4,17 @@
 //! The Workbench Key is what makes this a section of the settings rather than a
 //! recipe in the adoption docs (ADR-0015): a phone cannot reach the workbench
 //! until it holds the key, and `tailscale serve --bg 8422` was a command
-//! somebody ran by hand. What this module answers is the reading half of that
-//! section — whether there is a Tailscale here at all, whether it is up, what
-//! this node is called, and whether the tailnet name is already in front of the
-//! port the workbench is served on.
+//! somebody ran by hand. What this module answers is that section — whether
+//! there is a Tailscale here at all, whether it is up, what this node is
+//! called, whether the tailnet name is already in front of the port the
+//! workbench is served on, and the one press that puts it there.
 //!
-//! **Two commands, and nothing else.** `tailscale status --json` says whether
+//! **Three commands, and nothing else.** `tailscale status --json` says whether
 //! the daemon is answering and what this node is called; `tailscale serve
-//! status --json` says what is proxied where. There is no Tailscale library
-//! here and no socket opened by hand: the binary on the machine is the one
-//! thing that is certain to speak this machine's Tailscale, whatever version it
-//! happens to be.
+//! status --json` says what is proxied where; and `tailscale serve` is the
+//! switch. There is no Tailscale library here and no socket opened by hand: the
+//! binary on the machine is the one thing that is certain to speak this
+//! machine's Tailscale, whatever version it happens to be.
 //!
 //! **Which is exactly why the reading is defensive.** Tailscale is whatever the
 //! host has — nothing in this repository pins it, and the NixOS module only
@@ -32,13 +32,22 @@
 //! serve at all: a machine already serving something else on its tailnet name
 //! would otherwise read as a workbench reachable at an address that answers
 //! with somebody else's page.
+//!
+//! **The press is refused before it is run.** `tailscale serve` from a process
+//! that is neither root nor the tailnet's operator is denied by the daemon, and
+//! there is nothing the server can do about that: it runs unprivileged, and a
+//! daemon that could make itself the operator would be a daemon that could do
+//! anything. So a denied press hands back the line that grants it —
+//! `sudo tailscale set --operator=<user>`, for this machine's own user — and
+//! the next press is the re-try. The desktop app runs the same line through the
+//! platform's graphical sudo; the daemon on its own only shows it.
 
 use std::collections::HashMap;
 use std::process::Output;
 
 use serde::Deserialize;
 use tokio::process::Command;
-use verkstead_render::{RemoteView, ServeView};
+use verkstead_render::{RemoteView, ServePress, ServeView};
 
 /// The tailscale on this machine, and the port a serve has to be pointing at
 /// for it to be this workbench's.
@@ -56,6 +65,11 @@ pub struct Tailscale {
     /// rather than a constant: an install told to listen somewhere else is one
     /// whose serve has to point somewhere else too.
     port: u16,
+
+    /// Who this process is, for the one sentence that has to name them: the
+    /// operator grant. Read once, at startup, because it is what the machine's
+    /// own user is called and nothing about a request changes it.
+    user: String,
 }
 
 /// What `tailscale status --json` says when the machine is on a tailnet. Every
@@ -76,7 +90,21 @@ impl Tailscale {
 
     /// The same, with something else where `tailscale` goes.
     pub fn running(program: Vec<String>, port: u16) -> Tailscale {
-        Tailscale { program, port }
+        Tailscale {
+            program,
+            port,
+            user: this_user(),
+        }
+    }
+
+    /// The same again, with the machine's own user stated rather than read off
+    /// the environment.
+    ///
+    /// For the suites, which have the operator grant to check: the command it
+    /// hands back names a user, and a test whose expected line came out of
+    /// whoever happens to be running `cargo test` would be a test of nothing.
+    pub fn as_user(self, user: String) -> Tailscale {
+        Tailscale { user, ..self }
     }
 
     /// What this machine's Tailscale is doing, read now.
@@ -152,6 +180,56 @@ impl Tailscale {
                 node,
                 serve: self.serving().await,
             },
+        }
+    }
+
+    /// Put the serve where the switch was pressed to, and read the machine
+    /// again.
+    ///
+    /// One command each way — `tailscale serve --bg <port>` on, and
+    /// `tailscale serve --https=443 off` off — and then the reading, because
+    /// the switch's position comes off the machine rather than off what this
+    /// press meant to do. A serve that would not go on comes back as a switch
+    /// still off, which is the truth about the machine and the only thing worth
+    /// drawing.
+    ///
+    /// The one answer that is not the reading is the operator grant: Tailscale
+    /// refuses a serve from a process that is neither root nor the tailnet's
+    /// operator, and nothing this server can do lifts that. So the refusal
+    /// carries the line that does — for this machine's own user — and the next
+    /// press is the re-try.
+    pub(crate) async fn press(&self, on: bool) -> ServePress {
+        let port = self.port.to_string();
+        let off = format!("--https={HTTPS}");
+
+        let arguments: Vec<&str> = match on {
+            true => vec!["serve", "--bg", &port],
+            false => vec!["serve", &off, "off"],
+        };
+
+        let told = match self.run(&arguments).await {
+            Ok(told) => told,
+            Err(trouble) => {
+                return ServePress::Trouble {
+                    trouble: trouble.to_string(),
+                };
+            }
+        };
+
+        if !told.status.success() {
+            let trouble = complaint(&told);
+
+            return match ungranted(&trouble) {
+                true => ServePress::Ungranted {
+                    grant: grant(&self.user),
+                    trouble,
+                },
+                false => ServePress::Trouble { trouble },
+            };
+        }
+
+        ServePress::Done {
+            reading: self.reading().await,
         }
     }
 
@@ -302,6 +380,56 @@ fn complaint(told: &Output) -> String {
         .unwrap_or_else(|| format!("tailscale exited with {}", told.status))
 }
 
+/// Whether what `tailscale` printed is it refusing to take the change from this
+/// user, rather than failing to make it.
+///
+/// Read off the words, because there is nothing else to read it off: the
+/// refusal is the daemon's, it comes back through the CLI as an exit status and
+/// a line, and asking who the operator is would mean a command Tailscale
+/// documents as unstable. So this matches on what the refusal is called —
+/// *access denied*, *permission denied*, or the word *operator* itself, whoever
+/// happened to put it there.
+///
+/// Wrong either way costs the same small thing and nothing more. A refusal not
+/// recognised is shown as what the machine said, which is what the human needed
+/// anyway; something else mistaken for one is that line with a grant offered
+/// under it, and running the grant is harmless on a machine that did not need
+/// it.
+fn ungranted(trouble: &str) -> bool {
+    let said = trouble.to_lowercase();
+
+    ["access denied", "permission denied", "operator"]
+        .iter()
+        .any(|refusal| said.contains(refusal))
+}
+
+/// The line that makes this machine's user Tailscale's operator, which is what
+/// lets a serve be set up by anything but root.
+///
+/// Handed over rather than run. Nothing here escalates: the server has no
+/// privilege to raise, and a daemon that quietly acquired one would be a worse
+/// thing than a switch that has to be pressed twice.
+fn grant(user: &str) -> String {
+    format!("sudo tailscale set --operator={user}")
+}
+
+/// What this machine's own user is called, for the grant above to name.
+///
+/// The environment rather than the passwd database: systemd sets `USER` for
+/// every service it starts, a shell sets it for everything run from one, and
+/// reading a user out of libc would be a dependency and a platform's worth of
+/// conditional compilation for one string.
+///
+/// Where neither is set there is still a command to hand over — one that works
+/// out the name in the shell it is pasted into, which is the same line with the
+/// same effect and one more thing for the human to trust.
+fn this_user() -> String {
+    ["USER", "LOGNAME"]
+        .iter()
+        .filter_map(|named| std::env::var(named).ok())
+        .find(|user| !user.is_empty())
+        .unwrap_or_else(|| "$(id -un)".to_owned())
+}
 /// The half of `tailscale status --json` this reads.
 ///
 /// Every field optional, because every one of them is another project's to
@@ -429,5 +557,32 @@ mod tests {
             complaint(&told),
             "failed to connect to local tailscaled; it doesn't appear to be running"
         );
+    }
+
+    /// A refusal is told apart from a failure, because only one of them has a
+    /// command under it: the grant is what makes the switch work on the next
+    /// press, and offering it under a daemon that is simply not running would
+    /// be sending somebody to a terminal for nothing.
+    #[test]
+    fn a_refused_serve_is_told_apart_from_a_failed_one() {
+        assert!(ungranted("Access denied: serve config denied"));
+        assert!(ungranted(
+            "access denied: must be operator or root to modify serve config"
+        ));
+        assert!(ungranted("error setting serve config: permission denied"));
+
+        assert!(!ungranted(
+            "failed to connect to local tailscaled; it doesn't appear to be running"
+        ));
+        assert!(!ungranted(
+            "HTTPS must be enabled in the admin console to use serve"
+        ));
+    }
+
+    /// And the grant names the machine's own user, because that is the whole of
+    /// what makes it a line somebody can paste.
+    #[test]
+    fn the_grant_names_this_machines_user() {
+        assert_eq!(grant("ada"), "sudo tailscale set --operator=ada");
     }
 }

@@ -264,6 +264,22 @@ testers.runNixOSTest {
         "f ${account}/.claude.json 0644 verkstead verkstead - {}"
       ];
 
+      # Tailscale, because the Remote access section is the one part of the
+      # workbench whose whole subject is another daemon on the same machine —
+      # and reaching it means reaching a unix socket under `/run` from inside
+      # the unit's own hardening, which nothing in-process can show. The crate
+      # tests put a shell script where `tailscale` goes precisely so they need
+      # no daemon; this is the other half, and the only place a relaxation the
+      # unit turns out to need would be caught.
+      #
+      # Userspace networking so that nothing here wants a TUN device: what is
+      # being asked is whether the service can talk to `tailscaled`, and a
+      # tailnet this VM has no route to join would be asking something else.
+      # Unauthenticated, therefore — the daemon comes up, answers, and reports a
+      # machine that is not logged in, which is a state the pane already draws.
+      services.tailscale.enable = true;
+      services.tailscale.interfaceName = "userspace-networking";
+
       # The CLI finds its own git through the package's wrapper; this one is here
       # so the test can build the repository the CLI then reads.
       #
@@ -534,6 +550,40 @@ testers.runNixOSTest {
         machine.wait_for_open_port(8422)
         machine.succeed("curl -sf http://127.0.0.1:8422/api/v1/health")
 
+    with subtest("the workbench is behind the key, and the startup line hands it over"):
+        # Everything of the human's is gated — the viewer's own namespace and the
+        # pages it is served from alike — because a session's network is this
+        # machine's own and nothing about the socket tells a browser apart from
+        # an agent (ADR-0015). What the gate is made of is the crate tests'
+        # subject; what needs a VM is that a packaged install comes up behind it
+        # with nobody having configured anything, and that there is a way in
+        # without a secret being handed over out of band.
+        #
+        # The health endpoint above is deliberately not one of them: it is open,
+        # and it is what said the service was up before anybody had a key.
+        assert status_code("http://127.0.0.1:8422/") == "401"
+        assert status_code("http://127.0.0.1:8422/api/ui/repos") == "401"
+
+        # And the way in is the line the daemon printed as it came up. A machine
+        # started from a unit file has no tray to press **Open** in, so the
+        # journal is where the login link is — the address with the key on it,
+        # which is the whole of what lets a device in.
+        printed = machine.succeed("journalctl -u verkstead.service --no-pager -o cat")
+        found = re.search(r"\?key=([A-Za-z0-9_-]+)", printed)
+        assert found, f"the startup line carries no login link:\n{printed}"
+
+        # Kept where every `curl` below picks it up, which is what makes the rest
+        # of this file the browser that followed that link rather than a stranger
+        # on the loopback. A `.curlrc` is where a curl keeps a cookie, and the
+        # test driver's own shell exports `HOME=/root`.
+        cookie = f'cookie = "workbench_key={found.group(1)}"\n'
+        machine.succeed(f"printf %s {shlex.quote(cookie)} > /root/.curlrc")
+
+        # Which is the whole of being logged in: the same two requests, from the
+        # same machine, now answered.
+        assert status_code("http://127.0.0.1:8422/") == "200"
+        assert status_code("http://127.0.0.1:8422/api/ui/repos") == "200"
+
     with subtest("the database is in the data directory, owned by the service"):
         # The server opens the database before it binds, so the open port above
         # already says the file exists; what is asserted here is where it is and
@@ -618,6 +668,90 @@ testers.runNixOSTest {
             f" http://127.0.0.1:8422{path}"
         ).strip()
 
+
+    with subtest("the unit reaches the Tailscale daemon through its own hardening"):
+        # The one part of the workbench whose subject is another daemon on the
+        # same machine — and the only place the unit's hardening can be seen
+        # meeting it. The crate tests put a shell script where `tailscale` goes
+        # so that they need no daemon at all; what needs a VM is whether the
+        # service, under `ProtectSystem`, `PrivateUsers`, an empty capability
+        # bounding set and the seccomp filter, can open `tailscaled`'s socket
+        # under `/run` and be answered.
+        #
+        # This VM's daemon is unauthenticated and on userspace networking, so
+        # what it answers is a machine that has joined no tailnet. That is
+        # exactly the reading worth having: `Down` carrying the daemon's own
+        # `BackendState` can only have been written after the socket was opened,
+        # the JSON parsed and a field read out of it. A unit that could not
+        # reach through would read `Down` too — with a line naming the socket
+        # instead, which is what this tells apart.
+        machine.wait_for_unit("tailscaled.service")
+        machine.wait_until_succeeds("test -S /run/tailscale/tailscaled.sock")
+        machine.wait_until_succeeds(
+            "curl -sf http://127.0.0.1:8422/api/ui/remote"
+            " | grep -q 'the Tailscale daemon reports'"
+        )
+
+        reading = json.loads(
+            machine.succeed("curl -sf http://127.0.0.1:8422/api/ui/remote")
+        )
+        assert reading["tailscale"] == "Down", (
+            f"an unauthenticated daemon reads as not up: {reading}"
+        )
+        assert "the Tailscale daemon reports" in reading["trouble"], (
+            "the reading has to be the daemon's own answer rather than a socket "
+            f"the unit could not reach: {reading['trouble']!r}"
+        )
+
+        # Which is also what says `tailscale` is on the unit's `PATH` at all:
+        # `path` is what that `PATH` *is* rather than something added to it, so
+        # a service with no `tailscale` on it would read every machine as one
+        # with nothing installed — `Absent`, and a link to the installer.
+        #
+        # And the press runs, which is the other half of the same reach: whether
+        # a logged-out daemon takes a serve is its own business, but running
+        # `tailscale serve` at all has to be something this unit can do.
+        pressed = json.loads(post("/api/ui/remote/serve", {"on": True}))
+        assert pressed["press"] in ("Done", "Ungranted", "Trouble"), (
+            f"the press answered nothing this build knows: {pressed}"
+        )
+        assert "No such file or directory" not in pressed.get("trouble", ""), (
+            f"the unit could not run tailscale at all: {pressed}"
+        )
+
+    with subtest("the module makes the service user Tailscale's operator"):
+        # `tailscale serve` is refused for a process that is neither root nor
+        # the tailnet's operator, and the daemon's answer to that is to show
+        # `sudo tailscale set --operator=verkstead` and re-try on the next
+        # press. A host declaring both services has nobody to show it to, so
+        # the module sets it and the switch simply works.
+        #
+        # What `extraSetFlags` becomes is a `tailscaled-set` oneshot, and the
+        # flags are in the script it runs rather than in the unit that runs it —
+        # so the unit is read for what it runs and the grant is read out of
+        # that.
+        unit = machine.succeed("systemctl cat tailscaled-set.service")
+        found = re.search(r"^ExecStart=(\S+)", unit, re.M)
+        assert found, f"tailscaled-set runs nothing:\n{unit}"
+
+        grant = machine.succeed(f"cat {found.group(1)}")
+        assert "--operator=verkstead" in grant, (
+            f"the service user is not Tailscale's operator:\n{grant}"
+        )
+
+        # And it was made rather than merely declared: the oneshot ran and the
+        # daemon took it. Which is what makes the press above the operator's own
+        # — nothing on this machine has an operator grant left to ask for, so a
+        # press refused for want of one would say the grant did not land.
+        result = machine.succeed(
+            "systemctl show -p Result --value tailscaled-set.service"
+        ).strip()
+        assert result == "success", f"the grant did not take: {result}"
+
+        assert pressed["press"] != "Ungranted", (
+            "the service user is Tailscale's operator on this machine, so a "
+            f"serve refused for want of that grant means it did not land: {pressed}"
+        )
 
     with subtest("a repo under a directory the unit binds registers"):
         # Both bound paths, because they are exposed to the unit two different

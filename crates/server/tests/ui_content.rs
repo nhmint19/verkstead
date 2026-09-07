@@ -3078,6 +3078,45 @@ async fn the_viewers_own_tests_are_fed_from_here() {
 
     let (_dir, off) = tailscale_app(NOT_SERVING).await;
     write("remote-off.json", &get(&off, "/api/ui/remote").await);
+
+    // And one whose serve state could not be read at all, which is the machine
+    // the switch is not drawn over: *cannot tell* under a control offering to
+    // turn *off* on would be the one sentence this section must never say.
+    let (_dir, strange) = tailscale_app(UNREADABLE_SERVE).await;
+    write(
+        "remote-serve-unreadable.json",
+        &get(&strange, "/api/ui/remote").await,
+    );
+
+    // And what a press of the serve switch comes back with. Two of them,
+    // because the pane draws two different things: the machine read again,
+    // which is where the switch settles, and the operator grant, which is a
+    // line for somebody to run in a terminal before pressing again.
+    //
+    // The serving machine above takes the press without complaint — its script
+    // answers every `serve` alike — so what it writes is the whole of a press
+    // that worked, reading and all.
+    let (_dir, took) = tailscale_app(SERVING).await;
+    write(
+        "serve-done.json",
+        &post(
+            &took,
+            "/api/ui/remote/serve",
+            &serde_json::json!({ "on": true }),
+        )
+        .await,
+    );
+
+    let (_dir, denied) = tailscale_app(REFUSES_SERVE).await;
+    write(
+        "serve-ungranted.json",
+        &post(
+            &denied,
+            "/api/ui/remote/serve",
+            &serde_json::json!({ "on": true }),
+        )
+        .await,
+    );
 }
 
 /// A machine on a tailnet with the workbench served on its tailnet name.
@@ -3110,6 +3149,25 @@ exit 1
 #[cfg(unix)]
 const NO_TAILSCALE: &str = "";
 
+/// And a machine whose Tailscale will not take a serve from the user this
+/// server is running as, which is the operator grant not yet made.
+#[cfg(unix)]
+const REFUSES_SERVE: &str = r#"
+echo "Access denied: serve config denied" >&2
+exit 1
+"#;
+
+/// And a machine that is up whose serve configuration answered in a shape this
+/// build does not know — which is *cannot tell*, and the one state the switch is
+/// not drawn over.
+#[cfg(unix)]
+const UNREADABLE_SERVE: &str = r#"
+case "$1" in
+  status) printf '%s' '{"BackendState":"Running","Self":{"DNSName":"workbench.tailnet-name.ts.net."}}' ;;
+  serve) printf '%s' '{"Sites":{"workbench.tailnet-name.ts.net:443":{}}}' ;;
+esac
+"#;
+
 /// The port the fixtures' workbench is served on, which is the one the serve
 /// above proxies to.
 #[cfg(unix)]
@@ -3138,7 +3196,10 @@ async fn tailscale_app(script: &str) -> (tempfile::TempDir, Router) {
             ],
             WORKBENCH,
         ),
-    };
+    }
+    // Stated, because the operator grant names it: a fixture whose command
+    // said whoever ran `cargo test` would be a fixture of this machine.
+    .as_user("ada".to_owned());
 
     (dir, router_reading_tailscale(pool, tailscale))
 }

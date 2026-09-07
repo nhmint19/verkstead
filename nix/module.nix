@@ -50,8 +50,13 @@ in
 
         The server binds the loopback interface and speaks plain HTTP.
         Reaching the web UI from a phone means HTTPS, which is
-        `tailscale serve --bg 8422`'s job in front of it and stays host-level
-        configuration rather than anything this module arranges.
+        `tailscale serve --bg 8422`'s job in front of it — and that is the
+        **Remote access** section of the workbench settings rather than a
+        command anybody runs here, on a host where
+        {option}`services.tailscale.enable` is on. This module puts `tailscale`
+        on the service's own `PATH` and makes the service user Tailscale's
+        operator, which is the whole of what that section needs to work; joining
+        the tailnet in the first place stays the host's own business.
       '';
     };
 
@@ -260,6 +265,23 @@ in
     # this one, so the two halves of an ask are always the same build.
     environment.systemPackages = [ cfg.package ];
 
+    # The operator grant, made by the host rather than asked for on the page.
+    #
+    # `tailscale serve` is refused for a process that is neither root nor the
+    # tailnet's operator, and Verkstead runs as neither: the daemon's answer to
+    # that is to show `sudo tailscale set --operator=verkstead` and re-try on
+    # the next press. On a host that is already declaring both services there
+    # is nobody left to show it to — the two facts are in the same file — so it
+    # is set here and the switch simply works.
+    #
+    # `services.tailscale.extraSetFlags` is what runs it: nixpkgs turns a
+    # non-empty list into a `tailscaled-set` oneshot that runs `tailscale set`
+    # after the daemon. Merged rather than assigned, so a host with flags of its
+    # own keeps them.
+    services.tailscale.extraSetFlags = lib.mkIf config.services.tailscale.enable [
+      "--operator=verkstead"
+    ];
+
     users.users.verkstead = {
       isSystemUser = true;
       group = "verkstead";
@@ -296,11 +318,24 @@ in
       # sandbox read-only. Without it the cache is still a cache — the crate
       # downloads are shared — so the server says so in the log and carries on,
       # but on a module install it never has to.
+      #
+      # And `tailscale`, which is the whole of what the **Remote access**
+      # section runs: `tailscale status --json` to read this machine, and
+      # `tailscale serve` to put its tailnet name in front of the workbench.
+      # `path` is what the unit's `PATH` *is* rather than something added to it,
+      # so a section that has no `tailscale` to run reads every machine as one
+      # with none installed — which would be a lie on a host that is on a
+      # tailnet.
+      #
+      # Only where the host has Tailscale on, and the host's own package rather
+      # than `pkgs.tailscale`: a machine that has not turned it on has none, and
+      # a section saying so with a link to the installer is exactly right there.
       path = [
         pkgs.bubblewrap
         pkgs.gh
         pkgs.sccache
-      ];
+      ]
+      ++ lib.optional config.services.tailscale.enable config.services.tailscale.package;
 
       serviceConfig = {
         # The flags rather than the environment variables behind them: what the

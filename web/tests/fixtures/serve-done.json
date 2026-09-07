@@ -1,0 +1,11 @@
+{
+  "press": "Done",
+  "reading": {
+    "node": "workbench.tailnet-name.ts.net",
+    "serve": {
+      "address": "https://workbench.tailnet-name.ts.net",
+      "serve": "On"
+    },
+    "tailscale": "Up"
+  }
+}
