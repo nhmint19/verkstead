@@ -663,16 +663,38 @@ fn grant(user: &str) -> String {
 /// reading a user out of libc would be a dependency and a platform's worth of
 /// conditional compilation for one string.
 ///
-/// Where neither is set there is still a command to hand over — one that works
-/// out the name in the shell it is pasted into, which is the same line with the
-/// same effect and one more thing for the human to trust.
+/// **All three names, because the platforms disagree about it.** `USER` and
+/// `LOGNAME` are the Unix ones and Windows sets neither: what it sets is
+/// `USERNAME`, so a list of the first two would have fallen through to the
+/// line below on every Windows machine there is.
 fn this_user() -> String {
-    ["USER", "LOGNAME"]
-        .iter()
-        .filter_map(|named| std::env::var(named).ok())
-        .find(|user| !user.is_empty())
-        .unwrap_or_else(|| "$(id -un)".to_owned())
+    named_by(|named| std::env::var(named).ok())
 }
+
+/// The same, out of whatever `lookup` says this machine's environment holds.
+///
+/// Apart from the read so that the list can be asked about directly: what has
+/// to be right here is which names a platform sets, and a test that had to set
+/// an environment variable to ask would be a test racing every other thread in
+/// the process.
+fn named_by(lookup: impl Fn(&str) -> Option<String>) -> String {
+    ["USER", "LOGNAME", "USERNAME"]
+        .iter()
+        .filter_map(|named| lookup(named))
+        .find(|user| !user.is_empty())
+        .unwrap_or_else(|| SHELL_WORKS_IT_OUT.to_owned())
+}
+
+/// And what is left where no platform's name is set: a command that works the
+/// name out in the shell it is pasted into.
+///
+/// Which is the whole of what it is good for. It is a shell expression rather
+/// than a user, so it is only ever right in [`grant`], where what is handed over
+/// is a line for somebody to paste. [`Tailscale::operator`] runs the same grant
+/// as a program with its arguments, and a shell expression there would be
+/// Tailscale asked to make a user of that name the operator — which is why every
+/// platform's own name is read above rather than only one platform's.
+const SHELL_WORKS_IT_OUT: &str = "$(id -un)";
 /// The half of `tailscale status --json` this reads.
 ///
 /// Every field optional, because every one of them is another project's to
@@ -827,5 +849,34 @@ mod tests {
     #[test]
     fn the_grant_names_this_machines_user() {
         assert_eq!(grant("ada"), "sudo tailscale set --operator=ada");
+    }
+
+    /// And it names whoever this machine calls its user, whichever of the three
+    /// names this platform sets. Windows sets none of the Unix two.
+    ///
+    /// Which matters twice over, because the same string goes two ways: into
+    /// the line the pane shows, and into the command the desktop app runs
+    /// behind the platform's own password dialog — see [`Tailscale::operator`].
+    /// A machine that fell through to the line below would be a UAC prompt
+    /// answered so that Tailscale could be asked to make a user called
+    /// `$(id -un)` the operator.
+    #[test]
+    fn every_platform_names_its_own_user() {
+        for named in ["USER", "LOGNAME", "USERNAME"] {
+            assert_eq!(
+                named_by(|asked| (asked == named).then(|| "ada".to_owned())),
+                "ada",
+                "a machine setting only {named}",
+            );
+        }
+    }
+
+    /// And an environment naming nobody at all still has a line to hand over:
+    /// one the shell it is pasted into works the name out in, which is the only
+    /// place a shell expression is any use.
+    #[test]
+    fn an_environment_naming_nobody_leaves_the_shell_to_work_it_out() {
+        assert_eq!(named_by(|_| None), "$(id -un)");
+        assert_eq!(named_by(|_| Some(String::new())), "$(id -un)");
     }
 }
