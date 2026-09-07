@@ -136,9 +136,31 @@ on macOS, `%APPDATA%\Verkstead` on Windows. One directory either way, holding
 the database, the Worktrees, the Skills, the handoff directories and both
 settings files.
 
-The server binds loopback and speaks plain HTTP. Answering from a phone needs
-HTTPS, which is `tailscale serve --bg 8422` in front of it — and push
-notifications need that HTTPS to work at all.
+**The first visit is out of the journal.** Every page of the workbench answers
+401 without the **Workbench Key** — the one secret Verkstead makes in its Data
+Directory at the first start, which is what keeps a session out of the workbench
+it is being watched through — and a host with no tray icon has one place to be
+handed the link: the line the server logs as it comes up.
+
+```console
+$ journalctl -u verkstead | grep 'verkstead is listening'
+  INFO verkstead_server: verkstead is listening listen=127.0.0.1:8422 workbench=http://127.0.0.1:8422/?key=… data_dir=/var/lib/verkstead …
+```
+
+`workbench=` is the address with the key on the end of it. Open it once and the
+browser holds a cookie from then on; the same line is there after a restart, so
+a device that forgot the cookie is let back in by reading it again.
+
+The server binds loopback and speaks plain HTTP, and answering from a phone
+needs HTTPS — which push notifications need to work at all. That is the
+**Remote access** section of the workbench settings rather than anything to run
+here: it reads what this machine's Tailscale is doing, a switch puts the tailnet
+name in front of the port, and the login link is drawn there as a QR code to
+point a phone's camera at. What this module does for it is the two things a host
+has to do — `tailscale` goes on the unit's own `PATH`, and the service user is
+made the tailnet's operator, so nobody is shown a `sudo` line for a grant the
+build already made. Joining the tailnet stays the host's own business:
+`services.tailscale.enable`, and a `tailscale up` in a terminal.
 
 ### The desktop app, on a Linux machine
 
@@ -153,6 +175,25 @@ server's logging goes to when there is no terminal to print it in, **Launch on
 Startup** is a checkbox over the desktop's own startup registration, and
 **Exit** stops the server. `--no-open` starts it without the browser, and
 `--data-dir` moves the Data Directory off `~/.local/share/verkstead`.
+
+**The browser it opens is logged in.** Every page of the workbench answers 401
+without the **Workbench Key**, the secret Verkstead keeps in its Data Directory
+where no session can reach it — so what the app opens is the login link, the
+address with the key on the end of it. **Open** composes it afresh at every
+press, which is what to reach for when a browser has forgotten the cookie:
+there is no link to keep anywhere, and nothing to type. Started with
+`--no-open`, the same link is on the startup line in **View Logs**.
+
+**Answering from your phone is the workbench's own settings**, under **Remote
+access**: it reads what this machine's Tailscale is doing, a switch puts the
+tailnet name in front of the port — HTTPS, which push notifications need to work
+at all — and the login link is drawn there as a QR code to point a camera at.
+Nothing here installs Tailscale: the pane points at where to get one where the
+machine has none, and joining a tailnet is a `tailscale up` in a terminal. What
+the app adds over the daemon is the password dialog — Tailscale refuses to be
+served by a process that is neither root nor the tailnet's operator, and an app
+has somebody at the machine to ask, so that press goes through `pkexec` rather
+than handing back a `sudo` line to type.
 
 **What is inside is the whole `verkstead`**, and the icon is one verb of it:
 the entry point in the file runs `verkstead desktop`, because a desktop
@@ -248,6 +289,18 @@ arguments at all.
 macOS keeps a **Login Items** list of its own beside that plist, in a database
 the file is not in, and the checkbox cannot see it: switching Verkstead off
 there leaves the box ticked and the plist where it was.
+
+**The browser it opens is logged in**, as it is on Linux: what the app opens is
+the login link rather than the bare address, and **Open** composes it afresh at
+every press, which is what a browser that has forgotten the cookie wants.
+Started with `--no-open`, the same link is on the startup line in **View Logs**.
+
+**Answering from your phone is the settings page's Remote access section**, as
+it is on Linux, and Tailscale itself is the Mac's own. What differs is the
+password dialog behind the serve switch: serving to a tailnet is refused for a
+process that is neither root nor the tailnet's operator, and here the press is
+put to you through `osascript`'s *with administrator privileges* — the Mac's own
+authentication prompt.
 
 **Sessions run on a Mac**, and what one may reach is the same description as on
 Linux rendered over Apple's sandbox instead of bubblewrap: the Conversation's
@@ -362,6 +415,18 @@ server. **Windows hides an icon it has not seen before**, in the flyout the `^`
 on the taskbar opens — dragging it out of there onto the taskbar is what pins
 it, and until you do, the app is running with its icon one click further away
 than this describes.
+
+**The browser it opens is logged in**, as on the other two: what the app opens
+is the login link rather than the bare address, and **Open** composes it afresh
+at every press, which is what a browser that has forgotten the cookie wants.
+Started from a terminal with `--no-open`, the same link is on the startup line
+printed there and in **View Logs**.
+
+**Answering from your phone is the settings page's Remote access section**, as
+it is on the other two, and Tailscale itself is the machine's own. What differs
+is the elevation prompt behind the serve switch: serving to a tailnet is refused
+for a process that is not the tailnet's operator, and here the press comes up as
+a **User Account Control** dialog.
 
 **The shortcut opens the shim rather than the binary**, and that is what keeps
 a console window off the screen: `verkstead.exe` is an ordinary console program

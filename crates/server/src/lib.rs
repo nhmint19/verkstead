@@ -354,7 +354,7 @@ pub(crate) struct AppState {
 
 /// The port Verkstead is served on when nobody has said otherwise, and so the
 /// port `tailscale serve` is put in front of — see the Remote access pane in
-/// [`remote`], and the `tailscale serve --bg 8422` in the adoption docs.
+/// [`remote`], which is what the adoption docs point at for it.
 ///
 /// Written once and read twice: it is the `--listen` default below, and what a
 /// router stood up without a listening socket reads a serve against.

@@ -321,6 +321,81 @@ with the browser left alone, because a login is not a moment to be handed a
 browser window.
 _Avoid_: autostart setting, startup preference, run at login option
 
+**Workbench Key**:
+The one long-lived secret that says a request is the human's browser rather
+than something a session started. A session's network is the host's own, so the
+loopback address an agent asks on is the address the workbench answers on and
+the socket cannot tell the two apart; what can is a secret kept in the **Data
+Directory**, which is not bound into a Sandbox. `workbench.key` beside the
+settings files rather than inside one — a file of its own, at mode `0600`, made
+at the first start and read back at every one after it — because clearing the
+GitHub token writes `secrets.yaml` empty and would take a key kept there with
+it.
+**What it gates is every page of the workbench and the viewer's own `/api/ui/`
+namespace**: without a cookie carrying the current key, a 401. **The link is
+the address with `?key=…` on it**, and opening one is the whole of logging in:
+the server sets the cookie and redirects to the same path without the
+parameter, so the secret is out of the URL bar, the history entry and any
+referrer before the page is drawn. A wrong key is worth exactly what none is.
+**What stays open is what is nobody's work to read**: `/api/v1/health`, the
+Conversation-scoped session API a session is already scoped to, and the service
+worker, web manifest and icons a phone installs the viewer from — a manifest is
+fetched without credentials and a service worker behind a gate is a push
+notification that never arrives, and there is nothing about anybody's work in
+an icon. The **Share Viewer** needs no exemption, being a file at GitHub that
+reads nothing of this server.
+**Where it is handed out is the install's own first-visit path**: the daemon's
+startup line carries `workbench=`, and on the desktop app the browser opened at
+startup and the tray's **Open** both go to the link, built afresh at each press
+so a browser that forgot the cookie is let in again.
+**Reset key**, under the QR code on **Remote Access**, re-issues it: everything
+holding the old one meets a 401 on its next request, and the browser that
+pressed stays in — a reset made from the phone is a reset made from the only
+device that could reach the server at all. One secret with a press behind it,
+rather than a key per device or a key that expires.
+_Avoid_: password, login, token, API key, session
+
+**Remote Access**:
+The settings section that puts this workbench in front of a phone: what this
+machine's Tailscale is doing, the switch that puts the tailnet name in front of
+the port Verkstead is listening on, and the **Workbench Key** handed over as
+something a camera can read. A card and a pane like every other section, and
+the answer to what used to be a `tailscale serve --bg 8422` somebody ran in a
+terminal.
+**Everything on it is read off the machine rather than configured**: two
+commands at the moment the pane opens, so a tailnet joined in a terminal and a
+serve set up by hand read here exactly as ones set up from this page would, and
+nothing of this section is in either settings file. Four answers, because each
+wants something different done about it — no `tailscale` at all is an install
+and the pane points at one; a binary with no daemon answering is a `tailscale
+up`, said in the words the command printed; up is the node's name and whether
+the workbench is served; and a shape this build cannot read says so rather than
+being read as the nearest state with room for it, because *cannot tell* under a
+switch offering to turn *off* on is the one thing this section must never say.
+**The serve switch is that reading rather than a wish**: a press answers with
+the machine read again, and the switch settles wherever the machine ended up.
+**The operator grant is its third answer.** Tailscale refuses a serve from a
+process that is neither root nor the tailnet's operator and the server has no
+privilege to raise, so a refused press hands back `sudo tailscale set
+--operator=<user>` for this machine's own user and the next press is the
+re-try. The desktop app has somebody at the machine to ask and a daemon has
+not, so where the app started the server that press goes through the platform's
+own password dialog first; the NixOS module makes the grant itself, so nobody
+on a host is shown a command they are also the one to run.
+**And the address by itself lets nobody in**, which is why the pane draws the
+login link rather than the address: a QR code, drawn in the browser from an
+encoder the viewer ships because a workbench standing behind a secret has no
+business handing it to a third party to render, with the link to copy beside it
+and **Reset key** under them.
+**The banner is how somebody finds it**: one line above the Timeline while the
+first grilling is writing its first Question Set — the first moment there is
+nothing to do at the desk — pointing here and dismissed with *Got it*. The
+dismissal is the server's, read back on every load, because a banner drawn at a
+desk and pointing at a phone would otherwise meet the human again on the very
+device it sent them to.
+_Avoid_: remote settings, tailnet settings, VPN, tunnel, exposing the workbench
+(it is served to a tailnet, never to the internet)
+
 **Companion Repo**:
 Another registered Repo a Conversation is given to work alongside its own,
 **read-only** or **read-write**, checked out beside the Conversation's own

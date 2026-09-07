@@ -25,4 +25,4 @@ Roadmap stage: [02: The workbench key, and Remote access](docs/roadmaps/onboardi
 - [x] 05: The desktop's graphical sudo — [details](05-desktop-graphical-sudo.md)
 - [x] 06: The QR, the copyable link, and Reset key — [details](06-qr-link-and-reset-key.md)
 - [x] 07: The banner — [details](07-grilling-banner.md)
-- [ ] 08: Docs and vocabulary — [details](08-docs-and-vocabulary.md)
+- [x] 08: Docs and vocabulary — [details](08-docs-and-vocabulary.md)

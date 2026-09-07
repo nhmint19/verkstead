@@ -21,10 +21,10 @@ is for and when the module sets it.
 
 ## Acceptance criteria
 
-- [ ] CONTEXT.md carries **Workbench Key** and **Remote Access**, written as the
+- [x] CONTEXT.md carries **Workbench Key** and **Remote Access**, written as the
       terms around them are.
-- [ ] `adoption.md` says how the link is found on each install it describes.
-- [ ] The `tailscale serve` recipes in `adoption.md` and `development.md` point
+- [x] `adoption.md` says how the link is found on each install it describes.
+- [x] The `tailscale serve` recipes in `adoption.md` and `development.md` point
       at the pane instead of being run by hand.
-- [ ] Nothing in the documentation still tells somebody to run a command the
+- [x] Nothing in the documentation still tells somebody to run a command the
       pane now runs for them.
