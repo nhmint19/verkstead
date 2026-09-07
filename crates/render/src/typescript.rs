@@ -23,14 +23,14 @@ use crate::{
     CompanionModeChosen, CompanionRemoved, ConflictResolutionEdit, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
     ConversationUnarchived, ConversationView, DirectoryListing, GrillingStarted, Locked,
-    NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice, ProfileChosen,
-    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
-    Registered, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView,
-    RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen,
-    ServeEdit, ServePress, SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
-    SharePublished, SharedConversation, ShowingArchived, Shown, Started, SteerOpened,
-    SteerSubmission, Submitted, Subscribed, Subscription, TerminalOpened, TerminalsView,
-    TranscriptView, Unsubscribe, UpdateNotice, Watching,
+    NewAdoption, NewCompanion, NewConversation, NewOrder, OnboardingView, ProfileChoice,
+    ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
+    PushKey, Registered, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
+    RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed, RoadmapPane,
+    RoleChoice, Screen, ServeEdit, ServePress, SetReading, SettingsEdit, SettingsSaved,
+    SettingsView, ShareCommented, SharePublished, SharedConversation, ShowingArchived, Shown,
+    Started, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TerminalOpened,
+    TerminalsView, TranscriptView, Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -302,6 +302,11 @@ fn the_viewers_types_are_written_from_these() {
     // went wrong in the machine's own words.
     ServeEdit::export_all(&config).unwrap();
     ServePress::export_all(&config).unwrap();
+
+    // And whether a fresh Verkstead can do anything yet: the mode the wizard
+    // runs in, the machine it is standing on, and what is missing from it. It
+    // writes the rows and the three steps' met-ness with it.
+    OnboardingView::export_all(&config).unwrap();
 
     // How every one of them refuses. The same shape the agents' half refuses in,
     // so the viewer has one thing to read whichever half answered.

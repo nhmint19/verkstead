@@ -22,6 +22,7 @@
 mod answering;
 mod browsing;
 mod conversations;
+mod onboarding;
 mod profiles;
 mod push;
 mod remote;
@@ -57,6 +58,9 @@ pub use conversations::{
     pull_request_reached, question_set_event, resolve_conflicts_event, roadmap_pane, stage_list,
     stage_list_event, stage_list_reached, steer_event, task_list, task_list_event,
     task_list_reached, unreadable_set_event,
+};
+pub use onboarding::{
+    Dependency, DependencyState, DependencyView, Distro, OnboardingView, Platform, StepsView,
 };
 pub use profiles::{
     AgentType, Broken, PairingView, PickedView, ProfileAccount, ProfileChoice, ProfileChosen,

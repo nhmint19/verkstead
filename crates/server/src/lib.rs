@@ -86,6 +86,14 @@ mod merges;
 mod nudge;
 /// Telling a session idling on a stored ask that its Answers are there to fetch.
 mod nudging;
+/// Whether this Verkstead can do anything yet: the objective a fresh one is
+/// short of, and the mode it enters at startup where it is.
+///
+/// Public for the reason the sandbox is — what says a machine is ready is the
+/// product's own answer rather than an endpoint's, and what proves each arm of
+/// it is a server stood up over a stated machine, which is a test standing
+/// where a start does.
+pub mod onboarding;
 /// Every Sandbox Configuration bind as the settings page reads them: which of
 /// the two places said each one, and whether the server can see it.
 mod paths;
@@ -309,6 +317,15 @@ pub(crate) struct AppState {
     /// once. `None` is a router with no gate over it, where there is no key to
     /// re-issue and nothing a re-issue would mean.
     key: Option<key::WorkbenchKey>,
+
+    /// Whether this Verkstead can do anything yet, and the machine that is
+    /// probed to say so — see [`onboarding`].
+    ///
+    /// A handle rather than a reading, like the two above it, and with one
+    /// thing in it that is neither: the mode, which is settled once at startup
+    /// and held for the length of the run. Everything else it answers is
+    /// probed at the moment the wizard asks.
+    onboarding: onboarding::Onboarding,
 
     /// The two files the human tells Verkstead their credentials and their
     /// identity in. A handle rather than what is in them: the files are read at
@@ -557,6 +574,7 @@ pub fn router(pool: SqlitePool) -> Router {
         Gh::on_path(),
         tailnet(),
         key::Gate::open(),
+        onboarding::Machine::here(),
     )
 }
 
@@ -575,6 +593,7 @@ pub fn router_keeping(pool: SqlitePool, data_dir: PathBuf) -> Router {
         Gh::on_path(),
         tailnet(),
         key::Gate::open(),
+        onboarding::Machine::here(),
     )
 }
 
@@ -600,6 +619,7 @@ pub fn router_installed(
         gh,
         tailnet(),
         key::Gate::open(),
+        onboarding::Machine::here(),
     )
 }
 
@@ -630,6 +650,7 @@ pub fn router_running_sessions(
         gh,
         tailnet(),
         key::Gate::open(),
+        onboarding::Machine::here(),
     )
 }
 
@@ -650,6 +671,7 @@ pub fn router_asking_github(pool: SqlitePool, data_dir: PathBuf, gh: Gh) -> Rout
         gh,
         tailnet(),
         key::Gate::open(),
+        onboarding::Machine::here(),
     )
 }
 
@@ -658,6 +680,37 @@ pub fn router_asking_github(pool: SqlitePool, data_dir: PathBuf, gh: Gh) -> Rout
 /// what an installation said.
 fn nothing_bound() -> sandbox::SandboxConfig {
     sandbox::SandboxConfig::default()
+}
+
+/// A router whose onboarding probes `machine` rather than the one the tests are
+/// running on, keeping its settings files in `data_dir`.
+///
+/// The seam the onboarding suite is stood up over, and a parameter for the
+/// reason [`router_reading_tailscale`]'s Tailscale is one: what the wizard
+/// answers is a fact about the machine underneath it, and a wizard that has to
+/// say something about three platforms, eight distributions and a `bwrap` that
+/// will not run cannot be asked about any of them on the one machine the suite
+/// happens to be on. See [`onboarding::Machine::stated`].
+///
+/// The Data Directory because two of the three steps are read from there: the
+/// git author is in `config.yaml`, and the Profiles are in the database beside
+/// it.
+pub fn router_onboarding(
+    pool: SqlitePool,
+    data_dir: PathBuf,
+    machine: onboarding::Machine,
+) -> Router {
+    routed(
+        pool,
+        updates::Updates::nothing_learned(),
+        nothing_bound(),
+        data_dir,
+        sessions::Sessions::none(),
+        Gh::on_path(),
+        tailnet(),
+        key::Gate::open(),
+        machine,
+    )
 }
 
 /// A router reading this machine's Tailscale through `remote`, over a database
@@ -678,6 +731,7 @@ pub fn router_reading_tailscale(pool: SqlitePool, remote: remote::Tailscale) -> 
         Gh::on_path(),
         remote,
         key::Gate::open(),
+        onboarding::Machine::here(),
     )
 }
 
@@ -705,6 +759,7 @@ pub fn router_reading_tailscale_keyed(
         Gh::on_path(),
         remote,
         key::Gate::keyed(key),
+        onboarding::Machine::here(),
     )
 }
 
@@ -770,10 +825,11 @@ pub fn router_checking_updates(pool: SqlitePool, releases: Option<&str>) -> Rout
         Gh::on_path(),
         tailnet(),
         key::Gate::open(),
+        onboarding::Machine::here(),
     )
 }
 
-/// Eight, because the state a router holds is what a router is built out of:
+/// Nine, because the state a router holds is what a router is built out of:
 /// each of these is one thing the served router was given and every other one
 /// stands in for. A struct of them would be this list with a name on it.
 #[allow(clippy::too_many_arguments)]
@@ -786,6 +842,7 @@ fn routed(
     github: Gh,
     remote: remote::Tailscale,
     gate: key::Gate,
+    machine: onboarding::Machine,
 ) -> Router {
     let state = AppState {
         pool,
@@ -818,6 +875,10 @@ fn routed(
         // re-issues it goes through the very handle every request is checked
         // against — see [`key::Gate::held`].
         key: gate.held(),
+
+        // And the machine the onboarding probes are made against, held with the
+        // verdict they settle at startup — see [`onboarding`].
+        onboarding: onboarding::Onboarding::probing(machine),
 
         data_dir,
         checkouts: Arc::new(tokio::sync::Mutex::new(())),
@@ -874,6 +935,12 @@ fn routed(
     // because a nudge sent from one and silently not from the other is a session
     // waiting for a line nobody is going to type.
     nudging::listening(&state);
+
+    // And the verdict about the machine itself, which is the one sweep here
+    // that decides something rather than tidying something: whether this
+    // Verkstead has what it takes to run a session at all, reached once, now,
+    // and held for the length of the run — see [`onboarding::at_startup`].
+    onboarding::at_startup(&state);
 
     Router::new()
         // The one route that is nobody's Conversation: whether the server is up
@@ -951,6 +1018,7 @@ pub fn router_with_ui(
         gh,
         remote,
         gate.clone(),
+        onboarding::Machine::here(),
     )
     .fallback_service(guarded_viewer::<viewer::Built>(&gate))
 }
@@ -976,6 +1044,7 @@ pub fn router_keyed(pool: SqlitePool, key: key::WorkbenchKey) -> Router {
         Gh::on_path(),
         tailnet().keyed(key.clone()),
         key::Gate::keyed(key),
+        onboarding::Machine::here(),
     )
 }
 

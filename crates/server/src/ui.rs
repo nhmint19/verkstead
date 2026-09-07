@@ -387,6 +387,14 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // asking.
         .route("/api/ui/directories", get(directories))
         .route("/api/ui/update", get(update))
+        // And whether this Verkstead can do anything yet, which is the same
+        // kind of read one step further out: what the machine has on it, and
+        // what Verkstead has been told, judged against the objective a session
+        // needs. Not folded into the settings above for the reason the read
+        // below is not — the verdict is a different question from what is
+        // configured, and a wizard drawn off the settings page's payload would
+        // be a wizard saying what somebody typed rather than what is there.
+        .route("/api/ui/onboarding", get(onboarding))
         // And whether a phone can reach this workbench: what the machine's own
         // Tailscale is doing, read at the moment the pane is opened. Not under
         // the settings above, and deliberately: nothing here is configured, and
@@ -4179,6 +4187,28 @@ async fn directories(Query(browsing): Query<Browsing>) -> HttpResponse {
         Err(error) => {
             tracing::error!(error = ?error, "listing a directory failed");
             unavailable("the directory could not be listed")
+        }
+    }
+}
+
+/// `GET /api/ui/onboarding` — whether this Verkstead can do anything yet: the
+/// mode, the machine it is standing on, and what is missing from it.
+///
+/// **Probed on every read**, like the reading below it and for the same reason:
+/// what it answers changes whenever somebody installs something in a terminal,
+/// and a cached one would be a wizard that had to be reloaded to notice. The
+/// probes are a `PATH` walk and one trivial `bwrap`, and the page asks only
+/// while a step is unmet — so nothing here runs while nobody is looking.
+///
+/// **Except the mode**, which is the verdict this server reached at startup and
+/// is not a reading at all. See [`crate::onboarding`], where the whole of that
+/// difference is written down.
+async fn onboarding(State(state): State<AppState>) -> HttpResponse {
+    match state.onboarding.read(&state.pool, &state.settings).await {
+        Ok(reading) => Json(reading).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "reading the onboarding objective failed");
+            unavailable("what this machine is missing could not be read")
         }
     }
 }

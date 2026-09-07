@@ -1571,6 +1571,37 @@ shared: ShareView | null,
 attachments: Array<AttachmentView>, };
 
 /**
+ * What a row is about.
+ *
+ * Flat rather than a harness variant carrying an [`crate::AgentType`]: the
+ * step draws seven rows with an instruction apiece, and which of them are
+ * harnesses is a fact about the objective rather than about the drawing.
+ */
+export type Dependency = "Sandbox" | "Git" | "Claude" | "Codex" | "Grok" | "OpenCode" | "Gh";
+
+/**
+ * And whether the machine has it.
+ *
+ * Flat on the wire — `{"state": "Absent", "trouble": "…"}` — so the viewer
+ * narrows on a field rather than unwrapping a variant name.
+ */
+export type DependencyState = { "state": "Present" } | { "state": "Absent", 
+/**
+ * What the machine said about it, where anything was said at all: the
+ * standard error of a `bwrap` that is installed and would not run,
+ * which is where an unprivileged user namespace that is switched off
+ * says so in its own words. Nothing where the answer was simply that
+ * no such program is on the sandbox's `PATH`.
+ */
+trouble: string | null, } | { "state": "NotApplicable" };
+
+/**
+ * One row of the dependencies step: a thing a session needs, and whether this
+ * machine has it.
+ */
+export type DependencyView = { dependency: Dependency, state: DependencyState, };
+
+/**
  * The Diff as the browser receives it: the HTML the server rendered, and the
  * path of each file in it, in Diff order — `paths[0]` is what `#diff-1` shows.
  *
@@ -1631,6 +1662,16 @@ export type DirectoryListing = { "Listed": {
  * holding them.
  */
 path: string | null, entries: Array<DirectoryEntry>, } } | "NotAbsolute" | "Missing" | "NotADirectory" | { "Unreadable": { why: string, } };
+
+/**
+ * And which of the wizard's eight tabs this machine is.
+ *
+ * The five Linux distributions whose commands are written down, everything
+ * else that is a Linux, and the two platforms whose answer is the platform's
+ * own. Read off `/etc/os-release` — `ID` first and then `ID_LIKE`, so that a
+ * derivative gets its parent's commands rather than the generic list.
+ */
+export type Distro = "MacOs" | "Windows" | "NixOs" | "Ubuntu" | "Fedora" | "Debian" | "Arch" | "OtherLinux";
 
 /**
  * What one entry is, which decides what the field drawing it does with the row.
@@ -1866,6 +1907,33 @@ html: string, };
 export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "profiles" };
 
 /**
+ * Whether a fresh Verkstead can do anything yet, and what it would take.
+ */
+export type OnboardingView = { 
+/**
+ * Whether onboarding mode is on: the verdict of the objective, reached
+ * once at startup and standing until the wizard finishes.
+ */
+mode: boolean, 
+/**
+ * Whose rules this machine plays by, which is what the sandbox row and the
+ * wording around it are about.
+ */
+platform: Platform, 
+/**
+ * And which install commands it takes, which is the tab that opens.
+ */
+distro: Distro, 
+/**
+ * Every row of the dependencies step, in the order it is drawn.
+ */
+dependencies: Array<DependencyView>, 
+/**
+ * And whether each of the three steps stands met, at this moment.
+ */
+steps: StepsView, };
+
+/**
  * One Option as the page draws it: the number a Response answers by, its text
  * already rendered, and whether the agent recommended it.
  *
@@ -1978,6 +2046,16 @@ export type PickedView = "Nothing" | "Skipped" | { "Under": PairingView };
  * the pinned block in `crates/server/src/ui.rs`.
  */
 export type PinnedEvent = { "AgentOutput": AgentOutputEvent } | { "TaskList": TaskListEvent } | { "StageList": StageListEvent } | { "PullRequest": PullRequestEvent };
+
+/**
+ * The three platforms, as the viewer receives one.
+ *
+ * Its own type beside [`Distro`], which carries the same fact for two of its
+ * eight values: the distro is which set of commands to draw, and this is which
+ * machine they are for — a sandbox row that ticks, one that is run, and one
+ * that is nothing to install.
+ */
+export type Platform = "Linux" | "MacOs" | "Windows";
 
 /**
  * The account a Profile names, in the shape the agent type running it keeps
@@ -3585,6 +3663,25 @@ upgraded: Array<CompanionUpgrade>, };
  * wrapping up and no following up of work nobody can see.
  */
 export type SteerTarget = "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Done";
+
+/**
+ * Whether each of the wizard's three steps stands met, read at the moment the
+ * endpoint is asked.
+ */
+export type StepsView = { 
+/**
+ * A sandbox, `git`, and at least one of the four harnesses.
+ */
+dependencies: boolean, 
+/**
+ * At least one Agent Profile, however it was made.
+ */
+accounts: boolean, 
+/**
+ * And a git author: both halves of one, because that is what git asks for.
+ * The GitHub token is not in this — see ADR-0016.
+ */
+git: boolean, };
 
 /**
  * What became of the human's Response.

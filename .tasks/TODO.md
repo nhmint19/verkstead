@@ -19,7 +19,7 @@ Roadmap stage: [03: The onboarding wizard](docs/roadmaps/onboarding/03-onboardin
 
 ## Tasks
 
-- [ ] 01: The verdict and the endpoint — [details](01-verdict-and-endpoint.md)
+- [x] 01: The verdict and the endpoint — [details](01-verdict-and-endpoint.md)
 - [ ] 02: The page and the gate — [details](02-page-and-gate.md)
 - [ ] 03: The unnamed Profile — [details](03-unnamed-profile.md)
 - [ ] 04: The dependencies step — [details](04-dependencies-step.md)

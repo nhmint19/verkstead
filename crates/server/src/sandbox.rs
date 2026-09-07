@@ -692,12 +692,69 @@ pub(crate) fn taken_back(data_dir: &Path, conversation: i64) {
 /// One list or the other and never both: a NixOS box has nothing under
 /// `/opt/homebrew` and a Mac has nothing under `/run/current-system/sw` unless
 /// somebody put it there.
-fn machine_path(platform: Platform) -> OsString {
+///
+/// Reachable from outside this module because it is what *present* means: the
+/// onboarding probes ask whether a session would find a program, and a session
+/// finds one on this list — see [`crate::onboarding`], which walks it with
+/// [`on_the_path`]. Verkstead's own directory is left off, that being the one
+/// entry holding nothing a human installs.
+pub(crate) fn machine_path(platform: Platform) -> OsString {
     match platform {
         Platform::Linux => OsString::from(LINUX_PATH),
         Platform::MacOs => OsString::from(APPLE_PATH),
         Platform::Windows => servers_path(),
     }
+}
+
+/// Where `program` is on `path`, read the way `platform` reads a name, or
+/// `None` where that platform would find it nowhere.
+///
+/// **What a name means is the platform's**, which is the whole of why this
+/// takes one. A bare `git` is a file on the two Unixes and is nothing at all on
+/// Windows, where what is installed is `git.exe` and what says so is `PATHEXT`
+/// — so a walk of `PATH` alone would find a program on no Windows machine that
+/// has one. That resolving is the open rendering's, which is where the rules
+/// are written down: see [`open::found`].
+///
+/// **The `PATH` is a value rather than a read**, and that is what makes this
+/// one function with two callers rather than two functions. The build cache
+/// asks about the *server's* own environment, because what it is looking for is
+/// a file to bind into a sandbox; the onboarding probes ask about
+/// [`machine_path`], because what they are looking for is what a session would
+/// find. One question — *is this program there, by this platform's rules* — and
+/// the caller says which `PATH` it is being asked of.
+///
+/// Blocks: it is a handful of `stat` calls.
+pub(crate) fn on_the_path(
+    platform: Platform,
+    program: &str,
+    path: Option<&OsStr>,
+    pathext: Option<&OsStr>,
+) -> Option<PathBuf> {
+    match platform {
+        Platform::Windows => open::found(OsStr::new(program), path, pathext),
+        Platform::Linux | Platform::MacOs => apart(path?)
+            .map(|dir| Path::new(dir).join(program))
+            .find(|candidate| candidate.is_file()),
+    }
+}
+
+/// The directories a Unix `PATH` names, in the order they were written, with
+/// the empty ones left out — an empty entry means the working directory, which
+/// is not somewhere to go looking for a program.
+///
+/// Split by hand rather than by [`std::env::split_paths`], which splits on the
+/// separator of whatever platform the *server* was compiled for: this is a Unix
+/// value wherever it is being read, and the Windows job asking this arm what it
+/// resolves is asking about one written with colons. The same reading
+/// [`open::apart`] is of the same value on the other platform, and put back
+/// together the same way — an `OsStr`'s encoding is self-synchronising, so a
+/// split on an ASCII byte lands on a boundary.
+fn apart(path: &OsStr) -> impl Iterator<Item = &OsStr> {
+    path.as_encoded_bytes()
+        .split(|byte| *byte == b':')
+        .filter(|piece| !piece.is_empty())
+        .map(|piece| unsafe { OsStr::from_encoded_bytes_unchecked(piece) })
 }
 
 /// And what it is on Windows, which is not a list here at all: the `PATH` the
@@ -725,8 +782,15 @@ fn servers_path() -> OsString {
 
 /// What that is on Linux: the system profile, then the Nix default profile,
 /// then the paths a non-NixOS `/usr` would put things in.
-const LINUX_PATH: &str =
-    "/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/usr/bin:/bin";
+///
+/// `/usr/local/bin` among them because that is where the Debian family's
+/// `npm install -g` lands a binary, and an agent installed from npm is one of
+/// the shapes ADR-0016 says a machine may have its harness in: a session that
+/// could not find one there would be a session refused for a program the human
+/// had installed. Ahead of `/usr/bin`, which is the ordering every Unix reads a
+/// local install by and the one [`APPLE_PATH`] already has.
+const LINUX_PATH: &str = "/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:\
+                          /usr/local/bin:/usr/bin:/bin";
 
 /// And on a Mac, which has none of NixOS in it until somebody installs one.
 ///

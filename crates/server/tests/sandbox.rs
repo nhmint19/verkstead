@@ -2057,6 +2057,32 @@ async fn the_verkstead_a_session_asks_with_is_the_one_serving_it() {
     );
 }
 
+/// And `/usr/local/bin` is on it, which is where the Debian family's `npm
+/// install -g` lands a binary.
+///
+/// Asked of a shell inside rather than of the constant it was built from, like
+/// everything else here: what settles whether a session would find an agent
+/// installed from npm is a session reading the `PATH` it was really handed.
+/// That is what the onboarding probes resolve on too — a row that ticked
+/// against a list a session did not have would be a row promising a session
+/// that could not start. See `verkstead_server::onboarding`.
+#[tokio::test]
+async fn a_session_looks_for_a_program_where_an_npm_install_puts_one() {
+    let fixture = grilling().await;
+    let sandbox = fixture.sandbox(vec![]);
+
+    let reported = probe(&sandbox, r#"say path "$PATH""#);
+
+    assert!(
+        reported["path"]
+            .split(':')
+            .any(|entry| entry == "/usr/local/bin"),
+        "a session's PATH is {:?}, and an agent installed from npm on this \
+         family of distributions is nowhere on it",
+        reported["path"],
+    );
+}
+
 /// And where that image was packed with the libraries it runs over, a session
 /// still finds one `verkstead` and nothing beside it: the launcher that points
 /// the loader at them and execs the image behind it.

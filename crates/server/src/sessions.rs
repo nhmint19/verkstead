@@ -505,7 +505,7 @@ impl Agents {
 /// reason this is a mapping rather than a name written into the line. The type
 /// comes off the Pairing's Profile, so nothing has to be plumbed through to say
 /// which agent is being launched.
-fn binary(agent_type: store::AgentType) -> &'static str {
+pub(crate) fn binary(agent_type: store::AgentType) -> &'static str {
     match agent_type {
         store::AgentType::Claude => "claude",
         store::AgentType::Codex => "codex",
