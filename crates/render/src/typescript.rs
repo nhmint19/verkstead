@@ -22,15 +22,14 @@ use crate::{
     CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionModeChoice,
     CompanionModeChosen, CompanionRemoved, ConflictResolutionEdit, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
-    ConversationUnarchived, ConversationView, DirectoryListing, GrillingStarted, Locked,
-    NewAdoption, NewCompanion, NewConversation, NewOrder, OnboardingView, PrefillView,
+    ConversationUnarchived, ConversationView, Created, Creation, DirectoryListing, GrillingStarted,
+    Locked, NewAdoption, NewCompanion, NewConversation, NewOrder, OnboardingView, PrefillView,
     ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved,
     PullRequestDetails, PushKey, Registered, Registration, RemoteBanner, RemoteView, RepoChoice,
     RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed,
     RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress, SetReading, SettingsEdit,
-    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedConversation,
-    ShowArchived, ShowingArchived, Shown, Started, SteerOpened, SteerSubmission, Submitted,
-    Subscribed,
+    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedConversation, ShowArchived,
+    ShowingArchived, Shown, Started, SteerOpened, SteerSubmission, Submitted, Subscribed,
     Subscription, TerminalOpened, TerminalsView, TranscriptView, Unsubscribe, UpdateNotice,
     Watching,
 };
@@ -66,6 +65,11 @@ fn the_viewers_types_are_written_from_these() {
     Registration::export_all(&config).unwrap();
     Registered::export_all(&config).unwrap();
     RepoRemoved::export_all(&config).unwrap();
+
+    // And making one, which is the other way a Repo arrives: a parent and a name
+    // in, and the whole opened Repo or the reason there is none back.
+    Creation::export_all(&config).unwrap();
+    Created::export_all(&config).unwrap();
 
     // And the one thing there is to say to a registered Repo: how it resolves a
     // conflict, which is an override of the global setting or nothing at all.

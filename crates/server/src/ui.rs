@@ -34,16 +34,15 @@ use verkstead_render::{
     CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode, CompanionModeChoice,
     CompanionModeChosen, CompanionRemoved, CompanionView, CompileCaching, ConflictResolutionEdit,
     ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
-    ConversationStopped, ConversationUnarchived, ConversationView, Cursor, GrillingStarted,
-    IgnoreRule, IgnoredCommentsEdit, Lifecycle, Locked, Merging, MissedOut, NewAdoption,
-    NewCompanion, NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
-    Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed,
-    RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress, SetReading, SetView, SettingsEdit,
-    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation,
-    ShowArchived, ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed,
-    Subscription,
-    TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice,
-    Verified,
+    ConversationStopped, ConversationUnarchived, ConversationView, Creation, Cursor,
+    GrillingStarted, IgnoreRule, IgnoredCommentsEdit, Lifecycle, Locked, Merging, MissedOut,
+    NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry,
+    PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved,
+    Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress, SetReading, SetView,
+    SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit,
+    SharedConversation, ShowArchived, ShowingArchived, Standing, SteerOpened, SteerSubmission,
+    Submitted, Subscribed, Subscription, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved,
+    UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -62,6 +61,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route("/api/ui/sets/{id}/response", post(submit_response))
         .route("/api/ui/sets/{id}/lock", post(lock_set))
         .route("/api/ui/repos", get(repos).post(register_repo))
+        // And making one, which is the other way a Repo arrives. Its own path
+        // beside the registration rather than a shape the one above also takes:
+        // what it is given is a parent and a name rather than a path, and what
+        // it can answer is a different set of sentences.
+        .route("/api/ui/repos/new", post(create_repo))
         // What one Repo's branches are, which is what a drafting Conversation
         // picks the one it comes off out of. Under the Repo rather than under
         // the Conversation: the branches are the repository's, and two
@@ -777,6 +781,42 @@ async fn register_repo(
         Err(error) => {
             tracing::error!(error = ?error, "registering a Repo failed");
             unavailable("the Repo could not be registered")
+        }
+    }
+}
+
+/// `POST /api/ui/repos/new` — make a repository, and take it on.
+///
+/// The other way a Repo arrives, and the one that ends in the same registration:
+/// a directory under the parent, `git init` onto `main`, a `README.md` committed
+/// as the configured author, and the Repo the pane is drawn from back. See
+/// [`crate::repos::create`].
+///
+/// Every refusal is a named outcome in the body rather than a status, the way
+/// the registration's are and for the same reason: each is a different sentence
+/// to put in front of the human, and none of them is something to retry.
+///
+/// The author is read at the moment of the call rather than held from startup,
+/// the way a publish reads it: somebody filling the settings in and coming
+/// straight back has an author.
+async fn create_repo(
+    State(state): State<AppState>,
+    Json(creation): Json<Creation>,
+) -> HttpResponse {
+    let author = state.settings.config();
+
+    match crate::repos::create(
+        &state.pool,
+        author.git_author(),
+        &creation.parent,
+        &creation.name,
+    )
+    .await
+    {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "making a Repo failed");
+            unavailable("the Repo could not be made")
         }
     }
 }

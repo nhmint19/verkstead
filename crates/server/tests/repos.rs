@@ -2,6 +2,11 @@
 //! is refused before it can, what one of them says when it is opened, and what
 //! taking one off the registry does to the list it was on.
 //!
+//! And making one, which is the other way a Repo arrives: a directory, a
+//! repository on `main` with a first commit by the configured author, and the
+//! same registration at the end of it — with five refusals of its own, every one
+//! of them leaving nothing on the registry.
+//!
 //! Every refusal here is asked of the *server*, through the endpoint, rather
 //! than of the checks underneath it: a browser that skipped the form, or a
 //! `curl` that never saw one, meets the same answers.
@@ -24,7 +29,7 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
-use verkstead_render::{ConflictResolution, Registered, RepoEntry, RepoRemoved, RepoView};
+use verkstead_render::{ConflictResolution, Created, Registered, RepoEntry, RepoRemoved, RepoView};
 use verkstead_server::{open_database, router_keeping, store};
 
 /// A router, plus the Data Directory holding its database alive.
@@ -699,4 +704,280 @@ async fn registering_a_removed_repo_again_brings_it_back() {
     let back = listed(&app).await;
     assert_eq!(back.len(), 1);
     assert_eq!(back[0].id, id, "the same Repo, under the id it always had");
+}
+
+/// Ask for a repository to be made, and read back what the server made of it.
+async fn create(app: &Router, parent: &Path, name: &str) -> Created {
+    post(
+        app,
+        "/api/ui/repos/new",
+        &serde_json::json!({ "parent": parent, "name": name }),
+    )
+    .await
+}
+
+/// The same, for a parent that is not one the filesystem can hand back — a path
+/// typed into the form.
+async fn create_under(app: &Router, parent: &str, name: &str) -> Created {
+    post(
+        app,
+        "/api/ui/repos/new",
+        &serde_json::json!({ "parent": parent, "name": name }),
+    )
+    .await
+}
+
+/// The Repo a create that landed hands back — and the assertion that it landed,
+/// which is the same thing: the one outcome carrying a Repo is the one that
+/// left a repository on the disk.
+#[track_caller]
+fn made(outcome: Created) -> RepoView {
+    match outcome {
+        Created::Made(repo) => repo,
+        refused => panic!("the create was refused: {refused:?}"),
+    }
+}
+
+/// What git says about `dir`, for the readings a test makes of a repository the
+/// server built.
+fn git_says(dir: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .expect("git should be on the PATH for these tests");
+
+    assert!(
+        output.status.success(),
+        "git {args:?} failed in {}",
+        dir.display()
+    );
+
+    String::from_utf8(output.stdout).unwrap().trim().to_owned()
+}
+
+/// A workbench that has been told who to commit as, which a create needs and a
+/// registration never does.
+///
+/// Written into the Data Directory the router was stood up over: the settings
+/// files are read at the moment they are wanted, so an author saved after the
+/// server came up is the author the next create uses.
+async fn workbench_authored() -> (tempfile::TempDir, Router) {
+    let (dir, app) = workbench().await;
+
+    author(&dir, "Ada Lovelace", "ada@example.com");
+
+    (dir, app)
+}
+
+/// Say who Verkstead commits as, in the file the settings page writes.
+fn author(dir: &tempfile::TempDir, name: &str, email: &str) {
+    std::fs::write(
+        dir.path().join("config.yaml"),
+        format!("git_author:\n  name: \"{name}\"\n  email: \"{email}\"\n"),
+    )
+    .unwrap();
+}
+
+/// A created repository is one a Conversation can be started on the moment it
+/// comes back: `main` is there, it holds a commit, and the commit is by the
+/// human the settings page was told about.
+#[tokio::test]
+async fn a_created_repository_holds_a_first_commit_by_the_configured_author() {
+    let root = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench_authored().await;
+
+    let repo = made(create(&app, root.path(), "verkstead").await);
+
+    let path = root.path().join("verkstead");
+    assert_eq!(repo.name, "verkstead", "named for the directory it is");
+    assert_eq!(repo.path, path.canonicalize().unwrap().to_str().unwrap());
+    assert_eq!(repo.default_branch, "main");
+    assert_eq!(repo.branches, vec!["main".to_owned()]);
+
+    // One commit, on `main`, holding the README a fresh repository conventionally
+    // holds — which is what a Conversation takes its base from.
+    assert_eq!(git_says(&path, &["rev-list", "--count", "HEAD"]), "1");
+    assert_eq!(
+        git_says(&path, &["symbolic-ref", "--short", "HEAD"]),
+        "main"
+    );
+    assert_eq!(
+        git_says(&path, &["show", "--name-only", "--format=", "HEAD"]),
+        "README.md"
+    );
+    assert_eq!(
+        std::fs::read_to_string(path.join("README.md")).unwrap(),
+        "# verkstead\n"
+    );
+
+    // By the configured author rather than by whatever this machine's git would
+    // have signed it — and said on the command line, so the new repository's own
+    // config is left holding nothing about who anybody is.
+    assert_eq!(
+        git_says(&path, &["log", "-1", "--format=%an <%ae>"]),
+        "Ada Lovelace <ada@example.com>"
+    );
+    assert!(
+        git_says(&path, &["config", "--local", "--list"])
+            .lines()
+            .all(|line| !line.starts_with("user.")),
+        "the identity is said to the commit rather than written into the repository",
+    );
+
+    // And it is registered, under the directory's own name, like any other Repo.
+    let repos = listed(&app).await;
+    assert_eq!(repos.len(), 1);
+    assert_eq!(repos[0].id, repo.id);
+    assert_eq!(repos[0].name, "verkstead");
+    assert_eq!(repos[0].path, repo.path);
+}
+
+/// A parent with nothing at it, and one that is not a path the server can mean:
+/// one sentence, because either way there is no directory for the new one to go
+/// in.
+#[tokio::test]
+async fn a_parent_that_is_not_there_is_refused() {
+    let root = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench_authored().await;
+
+    let nowhere = root.path().join("never-made");
+    assert_eq!(
+        create(&app, &nowhere, "verkstead").await,
+        Created::ParentMissing
+    );
+    assert_eq!(
+        create_under(&app, "src", "verkstead").await,
+        Created::ParentMissing
+    );
+
+    // A file is not a parent either.
+    let file = root.path().join("notes.md");
+    std::fs::write(&file, "nothing to see").unwrap();
+    assert_eq!(
+        create(&app, &file, "verkstead").await,
+        Created::ParentMissing
+    );
+
+    assert!(listed(&app).await.is_empty(), "nothing was registered");
+}
+
+/// A directory of that name in that parent is somebody's, so the create says so
+/// and touches neither it nor the registry.
+#[tokio::test]
+async fn a_directory_that_is_there_already_is_left_alone() {
+    let root = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench_authored().await;
+
+    let taken = root.path().join("verkstead");
+    std::fs::create_dir(&taken).unwrap();
+    std::fs::write(taken.join("notes.md"), "somebody's").unwrap();
+
+    assert_eq!(
+        create(&app, root.path(), "verkstead").await,
+        Created::AlreadyThere
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(taken.join("notes.md")).unwrap(),
+        "somebody's",
+        "what was there is what is there",
+    );
+    assert!(!taken.join(".git").exists(), "nothing was made in it");
+    assert!(listed(&app).await.is_empty());
+
+    // A file of that name is the same answer: something is there.
+    std::fs::write(root.path().join("notes"), "somebody's").unwrap();
+    assert_eq!(
+        create(&app, root.path(), "notes").await,
+        Created::AlreadyThere
+    );
+}
+
+/// A name is a name rather than a path: nothing that would climb out of the
+/// parent or land somewhere else makes a directory.
+#[tokio::test]
+async fn a_name_that_is_not_a_name_is_refused() {
+    let root = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench_authored().await;
+
+    for name in ["", "   ", ".", "..", "src/verkstead", "../verkstead"] {
+        assert_eq!(
+            create(&app, root.path(), name).await,
+            Created::BadName,
+            "for {name:?}",
+        );
+    }
+
+    assert!(listed(&app).await.is_empty(), "nothing was registered");
+    assert_eq!(
+        std::fs::read_dir(root.path()).unwrap().count(),
+        0,
+        "and nothing was made",
+    );
+}
+
+/// A repository whose first commit is by nobody is that repository's history, so
+/// a Verkstead nobody has told who they are refuses rather than signing it
+/// itself.
+#[tokio::test]
+async fn nothing_is_made_without_an_author() {
+    let root = tempfile::tempdir().unwrap();
+    let (dir, app) = workbench().await;
+
+    assert_eq!(
+        create(&app, root.path(), "verkstead").await,
+        Created::NoAuthor
+    );
+    assert!(
+        !root.path().join("verkstead").exists(),
+        "refused before anything was made",
+    );
+    assert!(listed(&app).await.is_empty());
+
+    // Half an author is no author: git wants both, and the answer is about the
+    // settings page rather than about git.
+    std::fs::write(dir.path().join("config.yaml"), "git_author:\n  name: Ada\n").unwrap();
+    assert_eq!(
+        create(&app, root.path(), "verkstead").await,
+        Created::NoAuthor
+    );
+
+    // And with both, the same call goes through — which is what says the two
+    // refusals above were about the author and nothing else.
+    author(&dir, "Ada Lovelace", "ada@example.com");
+    made(create(&app, root.path(), "verkstead").await);
+}
+
+/// A git that will not do its half is named in git's own words, and what it got
+/// half way through is taken back: nothing on the registry, and no directory
+/// standing where the human asked for a repository.
+///
+/// The failure is a configured author git will not take — it strips the
+/// disallowed characters and finds nothing left — which is a create that gets as
+/// far as the directory and the `git init` and stops at the commit.
+#[tokio::test]
+async fn a_git_that_will_not_commit_leaves_nothing_behind() {
+    let root = tempfile::tempdir().unwrap();
+    let (dir, app) = workbench().await;
+
+    author(&dir, "<", ">");
+
+    let refused = create(&app, root.path(), "verkstead").await;
+
+    let Created::Refused(why) = refused else {
+        panic!("the create was not refused: {refused:?}");
+    };
+    assert!(
+        why.contains("disallowed characters"),
+        "git's own words rather than Verkstead's: {why}",
+    );
+
+    assert!(listed(&app).await.is_empty(), "nothing was registered");
+    assert!(
+        !root.path().join("verkstead").exists(),
+        "the half-made directory was taken back",
+    );
 }

@@ -7,10 +7,9 @@ use sqlx::SqlitePool;
 use verkstead_store::{
     Account, Archiving, Closing, Edited, Event, Grilling, Lifecycle, Picked, ProfileFacts,
     RowState, Switched, Unarchiving, add_companion, adopting, any_archived, archive_conversation,
-    archived,
-    close_conversation, conversation_branch, conversations, create_profile, follow_branch,
-    load_conversation, open_database, register_repo, reinvent_branch, rename_branch, save_brief,
-    set_base_commit, set_grilling_pairing, set_state, settle_naming, show_archived,
+    archived, close_conversation, conversation_branch, conversations, create_profile,
+    follow_branch, load_conversation, open_database, register_repo, reinvent_branch, rename_branch,
+    save_brief, set_base_commit, set_grilling_pairing, set_state, settle_naming, show_archived,
     showing_archived, start_adoption, start_building, start_conversation, start_grilling,
     start_unnamed_conversation, switch_repo, timeline, unarchive_conversation,
 };

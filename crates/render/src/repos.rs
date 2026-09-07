@@ -1,11 +1,16 @@
-//! Registering a Repo, the list of the ones that are, one of them opened, and
-//! taking one away again: what the viewer sends and what it is handed back.
+//! Registering a Repo, making one, the list of the ones that are, one of them
+//! opened, and taking one away again: what the viewer sends and what it is
+//! handed back.
 //!
 //! Every way registering can be refused is a named outcome rather than a status
 //! code, as answering and locking are — because each of them is a different
 //! sentence to put in front of the human, and none of them is something to
 //! retry. A directory that is not a repository is something to go and put right,
 //! not an error.
+//!
+//! Making one is refused the same way and for the same reason, with one more
+//! of its own behind it: a create that got half way is a directory on somebody's
+//! disk rather than a form to fill in again.
 
 use serde::{Deserialize, Serialize};
 
@@ -168,6 +173,77 @@ pub struct RepoView {
     /// would be a choice nobody made. What that global is, is on the settings
     /// themselves — see [`crate::SettingsView::conflict_resolution`].
     pub conflict_resolution: Option<ConflictResolution>,
+}
+
+/// A repository the human is asking Verkstead to *make*, said as where it is to
+/// go and what it is to be called.
+///
+/// Two fields rather than the one path a [`Registration`] carries, because the
+/// two halves are answered differently: the parent is browsed for, and the name
+/// is typed. Joining them in the browser would be the one place a path is built
+/// out of a separator the server never agreed to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct Creation {
+    /// The directory the new repository goes in. Absolute, and somewhere the
+    /// server can write.
+    pub parent: String,
+
+    /// And what to call it, which is the directory's name and so the Repo's:
+    /// what a Repo is called is read off the directory rather than claimed, and
+    /// a create is the one moment the human chooses the directory.
+    pub name: String,
+}
+
+/// What became of a create.
+///
+/// Every refusal is a named outcome for the reason [`Registered`]'s are, and one
+/// more of its own: a create that got half way is a directory on somebody's
+/// disk, so what comes back has to be a sentence about their machine rather
+/// than a status code.
+///
+/// A refusal registers nothing. [`Created::Made`] is the only outcome that
+/// leaves a Repo, and it carries the whole opened Repo rather than the row: the
+/// modal that asked for it is about to put a draft on it, and a page that had to
+/// go and read the Repo it just made would be asking for something the server
+/// was already holding.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Created {
+    /// Made: the directory is there, `main` holds one commit by the configured
+    /// author, and the Repo is on the registry.
+    Made(RepoView),
+
+    /// Nothing is at the parent, or what was typed was not an absolute path —
+    /// which is the same sentence, there being no directory either way for the
+    /// new one to go in.
+    ParentMissing,
+
+    /// Something of that name is in that parent already. A create never writes
+    /// into a directory that is there: what is in it is somebody's, and a
+    /// repository made around it would be a repository nobody asked for.
+    ///
+    /// One that is already a repository is **Open repo**'s to register rather
+    /// than this one's to make.
+    AlreadyThere,
+
+    /// The name is not one a directory can have — blank, or a path rather than a
+    /// name.
+    BadName,
+
+    /// Nobody is configured to commit as. The first commit is this repository's
+    /// own history from here on, so it is refused rather than made by a
+    /// stand-in — see the settings page's **Git author**.
+    NoAuthor,
+
+    /// Anything else, in git's own words where git is what failed: the directory
+    /// could not be made, or `git` would not do one of the four things a fresh
+    /// repository is made of.
+    ///
+    /// Nothing is on the registry either way, and a directory this got half way
+    /// through making is taken back: a create that did not happen leaves nothing
+    /// behind that looks as though it did.
+    Refused(String),
 }
 
 /// How one Repo is to resolve a conflict from now on, which is the one thing

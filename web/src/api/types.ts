@@ -1602,6 +1602,44 @@ shared: ShareView | null,
 attachments: Array<AttachmentView>, };
 
 /**
+ * What became of a create.
+ *
+ * Every refusal is a named outcome for the reason [`Registered`]'s are, and one
+ * more of its own: a create that got half way is a directory on somebody's
+ * disk, so what comes back has to be a sentence about their machine rather
+ * than a status code.
+ *
+ * A refusal registers nothing. [`Created::Made`] is the only outcome that
+ * leaves a Repo, and it carries the whole opened Repo rather than the row: the
+ * modal that asked for it is about to put a draft on it, and a page that had to
+ * go and read the Repo it just made would be asking for something the server
+ * was already holding.
+ */
+export type Created = { "Made": RepoView } | "ParentMissing" | "AlreadyThere" | "BadName" | "NoAuthor" | { "Refused": string };
+
+/**
+ * A repository the human is asking Verkstead to *make*, said as where it is to
+ * go and what it is to be called.
+ *
+ * Two fields rather than the one path a [`Registration`] carries, because the
+ * two halves are answered differently: the parent is browsed for, and the name
+ * is typed. Joining them in the browser would be the one place a path is built
+ * out of a separator the server never agreed to.
+ */
+export type Creation = { 
+/**
+ * The directory the new repository goes in. Absolute, and somewhere the
+ * server can write.
+ */
+parent: string, 
+/**
+ * And what to call it, which is the directory's name and so the Repo's:
+ * what a Repo is called is read off the directory rather than claimed, and
+ * a create is the one moment the human chooses the directory.
+ */
+name: string, };
+
+/**
  * What a row is about.
  *
  * Flat rather than a harness variant carrying an [`crate::AgentType`]: the
