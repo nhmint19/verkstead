@@ -400,6 +400,48 @@ device it sent them to.
 _Avoid_: remote settings, tailnet settings, VPN, tunnel, exposing the workbench
 (it is served to a tailnet, never to the internet)
 
+**Onboarding Mode**:
+The state a Verkstead that cannot do anything yet is in, and while it is on the
+wizard at `/setup` is the only page there is: every other URL redirects there.
+What it is about is the **objective** — a sandbox, `git` and at least one of the
+four harnesses present; at least one **Agent Profile**; a git author. Present
+means a session would find it, so every probe resolves on the `PATH` inside the
+**Sandbox** rather than the server's own: a harness on the server's `PATH` and
+nowhere a session looks is a row that ticks and a session that cannot start. The
+GitHub token is not part of it — GitHub may not be in use at all, where git is
+not optional and its author is what git asks for.
+
+**The verdict is reached once, at startup**, and the mode stays on until the
+wizard's last Continue takes it off. There is no skip and no re-entry: nothing
+inside a run puts it back on, so deleting the last Profile mid-run is the
+settings page's own empty state to say rather than a first-run page thrown over
+work somebody has, and finishing the wizard is the one thing that ends it. What
+the wizard *shows* is a different thing from the verdict and is probed at every
+read — a `PATH` walked, one trivial `bwrap` run, the server's home looked in —
+so an install that lands in another window ticks its row within ten seconds
+without anybody touching the page, and a workbench nobody has open asks the
+machine nothing at all.
+
+**Three steps, in the order a machine is set up in**, and the order is not the
+human's to pick: an account is an account under a harness, and the harness has
+to be installed before there is one to log into; there is nothing to commit as
+until there is something to commit. The first names every dependency with this
+distro's own install command and where the binary has to land; the second offers
+the agent accounts already in the server's home as Profiles and holds its
+Continue until there is one, because a step that walked past a Profile would
+clear the mode onto the empty state a skip was rejected for; the third asks for
+the git author over fields prefilled with whatever the machine could say for
+itself, each labelled with where it was found. Which step is open is a fact
+about the browser in front of you and is kept on the device, never on the wire.
+The last Continue clears the mode and lands on the compose page.
+
+**Not the compose page's setup card**, which is a draft's own row of pickers —
+the Repo, the branch and base, the companions, the three Pairings — and was here
+first. That one settles a piece of work and is answered again for every one;
+this settles the machine, once, before there is any work to settle.
+_Avoid_: first-run wizard as the name of the state (the mode is the state, the
+wizard is the page), setup mode, install wizard, onboarding flow, skip
+
 **Companion Repo**:
 Another registered Repo a Conversation is given to work alongside its own,
 **read-only** or **read-write**, checked out beside the Conversation's own
@@ -970,24 +1012,45 @@ _Avoid_: quiet (one backend's answer, not the question), silent, asleep, stalled
 (that is a Conversation nothing is driving)
 
 **Agent Profile**:
-A named coding-agent account Verkstead can run a session under: an agent type,
-the account itself, and the models that account can run. **The account's shape
-is its type's**, rather than one shape every Profile is assumed to have — Claude
-Code's is the directory and config file pair bind-mounted at `~/.claude` /
-`~/.claude.json` inside the sandbox, and every backend after it keeps its whole
-account under one relocatable home — Codex's at `~/.codex`, Grok Build's at
-`~/.grok`, and OpenCode's at neither, opencode keeping no dot-directory of its
-own: its home is the directory its XDG config and data directories sit inside,
-and both are bound at those defaults in a HOME that is fresh enough for them to
-resolve there. Whichever it is, mounting it is what keeps accounts separate. A
-type is offered to the human only once it can launch the real thing: one that
-cannot would be a lie in a picker, so the form offers Claude, Codex, Grok Build
-and OpenCode, and a Profile of a type whose stage has not landed is one saved
-over the API until it does. Picking a type on the form asks for that type's own
-account paths. The models are a list and the list is the Profile's own, because
-different Profiles reach different accounts and each can launch different
-things; none of them is a default, so which one a session runs is always picked
-— as a Pairing, alongside the Profile itself.
+A coding-agent account Verkstead can run a session under: an agent type, the
+account itself, the models that account can run, and a name where there is
+anything for one to tell apart. **The account's shape is its type's**, rather
+than one shape every Profile is assumed to have — Claude Code's is the directory
+and config file pair bind-mounted at `~/.claude` / `~/.claude.json` inside the
+sandbox, and every backend after it keeps its whole account under one
+relocatable home — Codex's at `~/.codex`, Grok Build's at `~/.grok`, and
+OpenCode's at neither, opencode keeping no dot-directory of its own: its home is
+the directory its XDG config and data directories sit inside, and both are bound
+at those defaults in a HOME that is fresh enough for them to resolve there.
+Whichever it is, mounting it is what keeps accounts separate. A type is offered
+to the human only once it can launch the real thing: one that cannot would be a
+lie in a picker, so the form offers Claude, Codex, Grok Build and OpenCode, and
+a Profile of a type whose stage has not landed is one saved over the API until
+it does. Picking a type on the form asks for that type's own account paths. The
+models are a list and the list is the Profile's own, because different Profiles
+reach different accounts and each can launch different things; none of them is a
+default, so which one a session runs is always picked — as a Pairing, alongside
+the Profile itself.
+**A Profile need not be named.** The harness's mark and the model already say
+the whole of what most accounts are — the one Claude Code login on this machine,
+running Fable 5 — and a box that had to be filled in before a save would be a
+word invented to get past it. So the name is optional, and what a name is *for*
+is telling two accounts of one harness apart: **at most one unnamed Profile per
+harness**, and **no two named alike**. Both are rules the store holds rather
+than looks taken in front of a write, and which of the two refused a save is
+read off what was being saved — a Profile with a name can only have hit the
+second, and one without a name only the first.
+**An unnamed one reads as nothing wherever the harness and the model say
+enough**, which is most of the places a Profile is read: the pairing rows of a
+harness with one account, the second line of the Agent run card, the Brief's
+three pairing facts. Where a name has to be shown it reads **Default** — the
+settings card, which is a list of Profiles by name, and a picker holding two
+accounts of one harness, where the name is the difference between the rows. It
+is a word for a blank rather than a Profile anything falls back to: there is no
+default Profile, exactly as there is no default model. And a session run under
+one writes no name into its record, so a finished run draws as the harness and
+the model alone — which is how a record from before Verkstead wrote the name
+down already drew.
 **Removing one is always allowed**, and it is a delete rather than an
 unregistering: a Profile is a way in to an account, so one the human is finished
 with is one Verkstead should stop holding. Every Conversation that had chosen it
@@ -998,7 +1061,8 @@ account it launched under; the next session that Conversation would start finds
 no account and starts nothing, and a **Steer** is how the human picks another and
 carries on. What has already run goes on saying so, a session's record holding
 the Profile's name rather than a pointer to its row.
-_Avoid_: account, identity, persona, agent config
+_Avoid_: account, identity, persona, agent config, default profile (**Default**
+is what an unnamed one is *called*, not one anything falls back to)
 
 **Pairing**:
 An Agent Profile and one of the models it lists, chosen together, and what a

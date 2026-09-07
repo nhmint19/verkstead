@@ -557,18 +557,35 @@ directory — is [development.md](development.md#quickstart).
 
 ## A day's work
 
-**Once per machine:** register the Repos you work in, and save at least one
-**Agent Profile** — a claude home and config pair, and the models that account
-can run. A Conversation fixes a **Grilling Pairing**, an **Implementation
-Pairing** and a **Review Pairing** before it starts — a Profile and one of its
-models, picked together as one row. The same Profile may fill all three, and
-separate ones are how the parts bill to separate accounts. The review one runs
-the wrap-up's review and nothing else, reviewing being a fresh set of eyes on
-what was built — and its picker offers **No review** beside the accounts, for
-work you would rather have wrapped up without one. The grilling picker offers
-**No grilling** the same way, for work whose Brief is already the whole plan.
-All of them are settled while the Conversation is drafting, and the work
-starting is what fixes them.
+**Once per machine: the first start asks.** A Verkstead that cannot do anything
+yet is in **Onboarding Mode**, and opens on the wizard at `/setup` rather than
+on the workbench. It walks three steps. **What a session needs** names every
+dependency it could not find — a sandbox, `git`, one of the four coding agents,
+and `gh` as an optional row — with this distro's own install command and where
+the binary has to land, and it re-probes while you are away, so an
+`apt install bubblewrap` finishing in another window ticks the row within ten
+seconds. **Agent Profiles** offers the agent accounts already logged in under
+the server's home; each one you leave ticked is saved as a Profile with no name
+and every model this build knows for that agent — and there is a form under them
+for an account elsewhere. **Who the work is committed as** asks for the git
+author, prefilled from `git config --global`, with the GitHub token optional and
+prefilled from `GH_TOKEN`, `GITHUB_TOKEN` or the host `gh`'s own login, each
+field labelled with where its value came from. The last Continue takes the mode
+off and lands you on the compose page. There is no skip and no going back
+through it: the verdict is reached once, at startup, so a machine that already
+has all three opens the workbench and never sees the wizard. What it does not do
+is register the Repos you work in — that stays yours, on the settings page.
+
+A Conversation fixes a **Grilling Pairing**, an **Implementation Pairing** and a
+**Review Pairing** before it starts — a Profile and one of its models, picked
+together as one row. The same Profile may fill all three, and separate ones are
+how the parts bill to separate accounts. The review one runs the wrap-up's
+review and nothing else, reviewing being a fresh set of eyes on what was built —
+and its picker offers **No review** beside the accounts, for work you would
+rather have wrapped up without one. The grilling picker offers **No grilling**
+the same way, for work whose Brief is already the whole plan. All of them are
+settled while the Conversation is drafting, and the work starting is what fixes
+them.
 
 **Then, per piece of work:**
 

@@ -31,8 +31,9 @@ state/log dir.
   **View Logs** opens it with the platform opener. The plain CLI keeps logging
   to stdout.
 - The flag is `--no-open`; the app id everywhere is `net.tobico.Verkstead`.
-- First-run is the browser's job: the settings page already edits Watched
-  Paths, so the tray adds no configuration UI.
+- First-run is the browser's job, so the tray adds no configuration UI: what a
+  fresh machine needs is asked for in the viewer, by the onboarding wizard of
+  [stage 03 of the onboarding roadmap](../onboarding/03-onboarding-wizard.md).
 
 ## Proposed tasks (provisional)
 
