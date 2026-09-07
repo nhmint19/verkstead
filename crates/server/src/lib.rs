@@ -71,6 +71,14 @@ mod grillings;
 /// session runs on — every sandbox binds one — so standing a router up that runs
 /// sessions means saying where they live.
 pub mod handoffs;
+/// The Workbench Key: the secret the human's browser holds and a session cannot
+/// read, and the gate that answers 401 to everything which has not shown it.
+///
+/// Public for the reason [`sandbox`] is — what stands between a session and the
+/// workbench is the product's boundary rather than an implementation detail of
+/// an endpoint, and standing the served router up means saying which key it is
+/// keyed with.
+pub mod key;
 mod limits;
 /// Watching a pull request go on merging after the work on it is Done — see
 /// [`checks`] for the watcher that covers a wrap-up, which this takes over from.
@@ -478,6 +486,7 @@ pub fn router(pool: SqlitePool) -> Router {
         nowhere(),
         sessions::Sessions::none(),
         Gh::on_path(),
+        key::Gate::open(),
     )
 }
 
@@ -494,6 +503,7 @@ pub fn router_keeping(pool: SqlitePool, data_dir: PathBuf) -> Router {
         data_dir,
         sessions::Sessions::none(),
         Gh::on_path(),
+        key::Gate::open(),
     )
 }
 
@@ -517,6 +527,7 @@ pub fn router_installed(
         data_dir,
         sessions::Sessions::none(),
         gh,
+        key::Gate::open(),
     )
 }
 
@@ -545,6 +556,7 @@ pub fn router_running_sessions(
         data_dir,
         sessions::Sessions::under(agents),
         gh,
+        key::Gate::open(),
     )
 }
 
@@ -563,6 +575,7 @@ pub fn router_asking_github(pool: SqlitePool, data_dir: PathBuf, gh: Gh) -> Rout
         data_dir,
         sessions::Sessions::none(),
         gh,
+        key::Gate::open(),
     )
 }
 
@@ -598,6 +611,7 @@ pub fn router_checking_updates(pool: SqlitePool, releases: Option<&str>) -> Rout
         nowhere(),
         sessions::Sessions::none(),
         Gh::on_path(),
+        key::Gate::open(),
     )
 }
 
@@ -608,6 +622,7 @@ fn routed(
     data_dir: PathBuf,
     sessions: sessions::Sessions,
     github: Gh,
+    gate: key::Gate,
 ) -> Router {
     let state = AppState {
         pool,
@@ -705,7 +720,14 @@ fn routed(
         // a submit or a locking from the browser has to reach an agent
         // waiting on the endpoint above, and both halves have to agree about
         // which Sets a wait is being held on.
-        .merge(ui::routes())
+        //
+        // And it is behind the gate, where the two routes above are not: this
+        // namespace is the human's browser asking about everybody's work, and a
+        // session reaching the loopback must not be able to ask any of it. The
+        // first of the gate's two attachments — the other is over the fallback
+        // that answers every page of the workbench, which is put on in
+        // [`router_with_ui`]. See [`key`].
+        .merge(gate.guarding(ui::routes()))
         .with_state(state)
 }
 
@@ -723,16 +745,23 @@ async fn health() -> &'static str {
 /// This is also the only router that checks for updates, because it is the only
 /// one with a viewer to draw the Notice in — see [`router_checking_updates`] for
 /// what `releases` is.
+///
+/// And the only one that is keyed, because it is the only one anybody is served
+/// by: `key` is the Workbench Key this Data Directory holds, and the gate over
+/// the viewer's namespace and over the fallback is what a session reaching the
+/// loopback finds instead of the workbench — see [`key`].
 pub fn router_with_ui(
     pool: SqlitePool,
     releases: Option<&str>,
     data_dir: PathBuf,
     agents: Agents,
     gh: Gh,
+    key: key::WorkbenchKey,
 ) -> Router {
     // Off the agents, for the reason [`router_running_sessions`] takes it off
     // them: one configured set, said once.
     let binds = agents.binds().clone();
+    let gate = key::Gate::keyed(key);
 
     routed(
         pool,
@@ -741,14 +770,53 @@ pub fn router_with_ui(
         data_dir,
         sessions::Sessions::under(agents),
         gh,
+        gate.clone(),
     )
-    .fallback(viewer::serve::<viewer::Built>)
+    .fallback_service(guarded_viewer::<viewer::Built>(&gate))
 }
 
 /// The same, over a site named by the caller, which is how the tests ask what the
 /// server does with one without waiting on `pnpm build` to produce it.
 pub fn router_with_viewer<V: Embed + 'static>(pool: SqlitePool) -> Router {
     router(pool).fallback(viewer::serve::<V>)
+}
+
+/// [`router`], keyed: what the suite that asks about the gate itself stands up.
+///
+/// A constructor of its own rather than a flag on the others, because the others
+/// are what several hundred requests across the suites are built on and every
+/// one of them assumes an answer rather than a 401 — see [`key::Gate`].
+pub fn router_keyed(pool: SqlitePool, key: key::WorkbenchKey) -> Router {
+    routed(
+        pool,
+        updates::Updates::nothing_learned(),
+        nothing_bound(),
+        nowhere(),
+        sessions::Sessions::none(),
+        Gh::on_path(),
+        key::Gate::keyed(key),
+    )
+}
+
+/// And the same with a site behind it, which is what the workbench's own pages
+/// are asked for through: the gate's second attachment is over the fallback, so
+/// a suite asking whether a page is gated needs a router that has one.
+pub fn router_keyed_with_viewer<V: Embed + 'static>(
+    pool: SqlitePool,
+    key: key::WorkbenchKey,
+) -> Router {
+    let gate = key::Gate::keyed(key.clone());
+
+    router_keyed(pool, key).fallback_service(guarded_viewer::<V>(&gate))
+}
+
+/// The viewer's fallback with the gate over it.
+///
+/// A router of its own rather than a layer on the outer one: the two routes the
+/// gate is not over — the health check and a session's own Conversation-scoped
+/// API — are on the outer router, and a layer there would cover them too.
+fn guarded_viewer<V: Embed + 'static>(gate: &key::Gate) -> Router {
+    gate.guarding(Router::new().fallback(viewer::serve::<V>))
 }
 
 /// Take the address, open the database, and serve until the process is stopped.
@@ -869,6 +937,16 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
     // through the settings page applies without a restart — see [`settings`].
     let settings = settings::Settings::in_data_dir(&data_dir);
 
+    // And the Workbench Key, in a file of its own in the same directory: made
+    // here where the first start finds nothing, and read back on every start
+    // after it, so a phone that was let in once stays let in. Refused where it
+    // cannot be written, the way the binds and the Data Directory are: a server
+    // with no key is one whose workbench nothing could open, and a machine that
+    // cannot write a file into its own Data Directory is a misconfiguration to
+    // report now — see [`key`].
+    let key = key::WorkbenchKey::issued(&data_dir)
+        .with_context(|| format!("keeping the workbench key in {}", data_dir.display()))?;
+
     let pool = open_database(&database(&data_dir)).await?;
 
     listener
@@ -947,6 +1025,9 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
         // token — the same one the sessions get, so one token is the whole
         // of Verkstead's GitHub auth.
         Gh::on_path().authenticated_by(settings),
+        // And the key this Data Directory holds, which is what the workbench
+        // and the viewer's own namespace are behind.
+        key,
     );
 
     // Two listeners over one router here, so that everything a request can ask

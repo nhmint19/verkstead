@@ -7,7 +7,7 @@ mod support;
 
 use std::io::Write;
 use std::net::TcpListener;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
@@ -53,6 +53,17 @@ fn free_port() -> u16 {
 struct Serve {
     child: Option<Child>,
     url: String,
+
+    /// Where it was told to keep what it makes, read off the flags it was
+    /// started with.
+    ///
+    /// The viewer's own namespace and every page of the workbench answer 401 to
+    /// a request that has not shown the Workbench Key (ADR-0015), and the key is
+    /// a file in there: a test standing where the browser stands holds it the
+    /// same way the browser does. `None` for a start that named no directory on
+    /// the command line, which is the test about the environment and asks the
+    /// viewer nothing.
+    data_dir: Option<PathBuf>,
 }
 
 impl Serve {
@@ -88,9 +99,27 @@ impl Serve {
         let serving = Serve {
             child: Some(child),
             url: format!("http://127.0.0.1:{port}"),
+            data_dir: data_dir_in(args),
         };
         serving.await_health();
         serving
+    }
+
+    /// The cookie a browser holds, which is the Workbench Key the server wrote
+    /// into its Data Directory as it came up.
+    ///
+    /// Read back through the server's own reader rather than off a filename this
+    /// suite would have to know: what a second start over the same Data
+    /// Directory reads is what the running one is keyed with.
+    fn cookie(&self) -> String {
+        let data_dir = self
+            .data_dir
+            .as_deref()
+            .expect("a test asking for the workbench names a Data Directory");
+
+        verkstead_server::key::WorkbenchKey::issued(data_dir)
+            .expect("the server writes its key as it starts")
+            .cookie()
     }
 
     /// The plain form: the flags every test but the environment one uses.
@@ -154,10 +183,12 @@ impl Serve {
             .unwrap_or_else(|| panic!("the Conversation should have started: {started}"))
     }
 
-    /// Tell the viewer's namespace something, in the JSON a browser would send.
+    /// Tell the viewer's namespace something, in the JSON a browser would send —
+    /// holding the key, which is the whole of what makes it the browser.
     fn through_the_viewer(&self, path: &str, body: &serde_json::Value) -> serde_json::Value {
         let mut reply = ureq::post(format!("{}{path}", self.url))
             .header("Content-Type", "application/json")
+            .header("Cookie", self.cookie())
             .send(body.to_string())
             .unwrap_or_else(|error| panic!("POST {path}: {error}"));
 
@@ -168,6 +199,7 @@ impl Serve {
 
     fn read(&self, path: &str) -> String {
         ureq::get(format!("{}{path}", self.url))
+            .header("Cookie", self.cookie())
             .call()
             .unwrap_or_else(|error| panic!("GET {path}: {error}"))
             .body_mut()
@@ -275,6 +307,20 @@ fn refused_to_start(args: &[&str]) -> String {
     );
 
     String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+/// The Data Directory out of the flags a server was started with, which is where
+/// the Workbench Key it made is — see [`Serve::cookie`].
+///
+/// Read off the arguments rather than threaded through [`Serve::start`]: every
+/// test that asks the workbench for anything already says where its own
+/// directory is, and a second parameter saying it again would be two places to
+/// keep in step.
+fn data_dir_in(args: &[&str]) -> Option<PathBuf> {
+    args.iter()
+        .position(|arg| *arg == "--data-dir")
+        .and_then(|at| args.get(at + 1))
+        .map(PathBuf::from)
 }
 
 /// A standalone install: no unit, no flags, nothing configured anywhere. It
@@ -421,13 +467,20 @@ fn the_served_api_round_trips_an_ask() {
 /// not claimed is the app's, so `/` is answered by the viewer rather than 404ed
 /// by the router. In a checkout that has never run `pnpm build` there is nothing
 /// to hand over, and saying so is still the viewer answering.
+///
+/// Holding the key, because the workbench's own pages are behind it: what is
+/// being asked here is which half of the server answers `/`, and a 401 would be
+/// the gate answering instead of either.
 #[test]
 fn the_viewer_is_served_beside_the_api() {
     let tmp = tempfile::tempdir().unwrap();
     let port = free_port();
     let mut serving = Serve::with_flags(tmp.path(), port, tmp.path());
 
-    match ureq::get(format!("{}/", serving.url)).call() {
+    match ureq::get(format!("{}/", serving.url))
+        .header("Cookie", serving.cookie())
+        .call()
+    {
         Ok(mut document) => {
             let body = document.body_mut().read_to_string().unwrap();
             assert!(

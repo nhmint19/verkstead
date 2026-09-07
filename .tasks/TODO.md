@@ -18,7 +18,7 @@ Roadmap stage: [02: The workbench key, and Remote access](docs/roadmaps/onboardi
 
 ## Tasks
 
-- [ ] 01: The key and the gate — [details](01-key-and-gate.md)
+- [x] 01: The key and the gate — [details](01-key-and-gate.md)
 - [ ] 02: Handing the link out — [details](02-handing-the-link-out.md)
 - [ ] 03: Remote access — the pane that reads — [details](03-remote-access-pane.md)
 - [ ] 04: The serve switch and the operator grant — [details](04-serve-switch-and-operator-grant.md)

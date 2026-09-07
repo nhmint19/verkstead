@@ -158,6 +158,16 @@ impl Opener {
 struct App {
     child: Option<Child>,
     url: String,
+
+    /// Where the app was told to keep what it makes, read off the flags it was
+    /// started with.
+    ///
+    /// The viewer's own namespace answers 401 to anything that has not shown the
+    /// Workbench Key (ADR-0015), and the key is a file in there: a test driving
+    /// `/api/ui/` is standing where the browser stands, so it holds the key the
+    /// same way. `None` for a start that named no directory, which is a test
+    /// about something else entirely.
+    data_dir: Option<PathBuf>,
 }
 
 impl App {
@@ -191,9 +201,27 @@ impl App {
         let app = App {
             child: Some(child),
             url: format!("http://127.0.0.1:{port}"),
+            data_dir: data_dir_in(args),
         };
         app.await_health();
         app
+    }
+
+    /// The cookie a browser holds, which is the Workbench Key the app wrote into
+    /// its Data Directory as it came up.
+    ///
+    /// Read back through the server's own reader rather than off a filename this
+    /// suite would have to know: what a second start of the same Data Directory
+    /// reads is what the running one is keyed with.
+    fn cookie(&self) -> String {
+        let data_dir = self
+            .data_dir
+            .as_deref()
+            .expect("a test asking the viewer's namespace names a Data Directory");
+
+        verkstead_server::key::WorkbenchKey::issued(data_dir)
+            .expect("the app writes its key as it starts")
+            .cookie()
     }
 
     fn await_health(&self) {
@@ -235,10 +263,12 @@ impl App {
             .unwrap_or_else(|| panic!("the Conversation should have started: {started}"))
     }
 
-    /// Tell the viewer's namespace something, in the JSON a browser would send.
+    /// Tell the viewer's namespace something, in the JSON a browser would send —
+    /// holding the key, which is the whole of what makes it the browser.
     fn through_the_viewer(&self, path: &str, body: &serde_json::Value) -> serde_json::Value {
         let mut reply = ureq::post(format!("{}{path}", self.url))
             .header("Content-Type", "application/json")
+            .header("Cookie", self.cookie())
             .send(body.to_string())
             .unwrap_or_else(|error| panic!("POST {path}: {error}"));
 
@@ -249,6 +279,7 @@ impl App {
 
     fn read(&self, path: &str) -> String {
         ureq::get(format!("{}{path}", self.url))
+            .header("Cookie", self.cookie())
             .call()
             .unwrap_or_else(|error| panic!("GET {path}: {error}"))
             .body_mut()
@@ -398,6 +429,19 @@ fn flags(port: u16, data_dir: &Path) -> [String; 4] {
         "--data-dir".into(),
         data_dir.to_str().unwrap().into(),
     ]
+}
+
+/// And the Data Directory back out of them, which is where the Workbench Key
+/// the app made is — see [`App::cookie`].
+///
+/// Read off the arguments rather than threaded through [`App::start`]: every
+/// test already says where its own directory is, and a second parameter saying
+/// it again would be two places to keep in step.
+fn data_dir_in(args: &[&str]) -> Option<PathBuf> {
+    args.iter()
+        .position(|arg| *arg == "--data-dir")
+        .and_then(|at| args.get(at + 1))
+        .map(PathBuf::from)
 }
 
 /// And the same with a Sandbox Configuration bind of the test's own, for the

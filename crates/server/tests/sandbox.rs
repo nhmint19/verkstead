@@ -32,6 +32,7 @@ use std::process::{Command, Stdio};
 use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
+use verkstead_server::key::WorkbenchKey;
 use verkstead_server::platform::Platform;
 use verkstead_server::sandbox::{
     Bind, Closing, Executable, Homes, Reachable, Sandbox, SandboxConfig, under_dev_shell,
@@ -2357,6 +2358,86 @@ YAML
             .expect("the Set the session just sent reads back")
             .title,
         "What a delivery that has failed forty times becomes"
+    );
+
+    serving.abort();
+}
+
+/// And the half of the same loopback a session may *not* reach: the workbench's
+/// own namespace, which answers 401 to everything that has not shown the
+/// Workbench Key (ADR-0015).
+///
+/// A session's network is the host's own — see
+/// [`the_network_is_the_hosts_own`] — so the address the agent contract is
+/// served on is the address the workbench is served on, and nothing about the
+/// socket tells the two apart. What does is a secret in the Data Directory,
+/// which is not among the things a sandbox binds.
+///
+/// Asked from inside rather than read off the flags, like every other claim in
+/// this file: what settles whether a session can register a Repo through the
+/// viewer's API is a session trying to, and the status it reads back.
+#[tokio::test]
+async fn a_session_is_refused_the_workbenchs_own_namespace() {
+    let fixture = grilling().await;
+
+    // In the Data Directory, where a real server keeps it.
+    let key = WorkbenchKey::issued(fixture.state.path()).unwrap();
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listening = listener.local_addr().unwrap();
+
+    let serving = tokio::spawn({
+        let pool = fixture.pool.clone();
+        let key = key.clone();
+        async move {
+            let _ = axum::serve(listener, verkstead_server::router_keyed(pool, key)).await;
+        }
+    });
+
+    let sandbox = fixture.sandbox_reaching(listening, &BuildCache::none(), vec![]);
+    let key_file = key.path().to_owned();
+
+    let reported = tokio::task::spawn_blocking(move || {
+        probe(
+            &sandbox,
+            &format!(
+                r#"
+                status() {{
+                    {curl} --silent --output /dev/null --write-out '%{{http_code}}' "$2" \
+                        > /tmp/status 2>/dev/null
+                    say "$1" "$(cat /tmp/status)"
+                }}
+
+                status workbench "http://{listening}/api/ui/repos"
+                status page "http://{listening}/conversations"
+                status health "http://{listening}/api/v1/health"
+
+                file {key_file} key-file
+                "#,
+                curl = quoted(&on_the_host("curl")),
+                key_file = quoted(&key_file),
+            ),
+        )
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(
+        reported["workbench"], "401",
+        "a session shares the loopback, so what keeps it out of the viewer's \
+         namespace is the key rather than the network"
+    );
+    assert_eq!(
+        reported["page"], "401",
+        "and out of the workbench's own pages, which carry the same"
+    );
+    assert_eq!(
+        reported["health"], "200",
+        "whether the server is up is not a question about anybody's work"
+    );
+    assert_eq!(
+        reported["key-file"], "absent",
+        "the key is in the Data Directory, which no sandbox mounts"
     );
 
     serving.abort();

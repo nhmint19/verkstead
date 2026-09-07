@@ -253,10 +253,12 @@ fn yaml<T: Serialize>(value: &T) -> std::io::Result<String> {
 ///
 /// **Reachable from the rest of the crate**, because the settings files are not
 /// the only thing under the Data Directory a half of would be worse than
-/// nothing. The record a Conversation's AppContainer is swept by is the other:
-/// it is read by a server that did not write it, and one that will not parse is
-/// a boundary nothing will ever take off the human's own directories — see
-/// [`crate::sandbox::granting::remembering`].
+/// nothing. The record a Conversation's AppContainer is swept by is one: it is
+/// read by a server that did not write it, and one that will not parse is a
+/// boundary nothing will ever take off the human's own directories — see
+/// [`crate::sandbox::granting::remembering`]. The Workbench Key is the other,
+/// and wants exactly what a secrets file wants: a credential in a file of its
+/// own in the same directory, at the same mode — see [`crate::key`].
 pub(crate) fn write_atomically(path: &Path, text: &str, mode: u32) -> std::io::Result<()> {
     let name = path
         .file_name()
