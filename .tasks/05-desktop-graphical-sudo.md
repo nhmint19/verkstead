@@ -23,10 +23,10 @@ for somebody who would rather type it.
 
 ## Acceptance criteria
 
-- [ ] Pressing the switch without the grant, in the desktop app, raises the
+- [x] Pressing the switch without the grant, in the desktop app, raises the
       platform's own password dialog.
-- [ ] Cancelling it leaves the switch off with the command still shown; granting
+- [x] Cancelling it leaves the switch off with the command still shown; granting
       it re-tries and serves.
-- [ ] A server the desktop app did not start escalates nothing and shows the
+- [x] A server the desktop app did not start escalates nothing and shows the
       command, exactly as it did before this task.
-- [ ] Each platform's arm is tested on the command it would run.
+- [x] Each platform's arm is tested on the command it would run.

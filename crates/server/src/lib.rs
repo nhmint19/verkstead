@@ -682,6 +682,22 @@ fn tailnet() -> remote::Tailscale {
     remote::Tailscale::on_path(WORKBENCH_PORT)
 }
 
+/// The served router's own: the host's `tailscale` in front of the port this
+/// server bound, taking the operator grant through `escalation` where whatever
+/// started the process handed one over.
+///
+/// One place rather than two, because the two arms are one behaviour: what the
+/// pane does about a refused serve is show the line, and an app that can ask for
+/// the grant asks for it first — see [`remote::Elevate`].
+fn tailnet_over(port: u16, escalation: Option<Arc<dyn remote::Elevate>>) -> remote::Tailscale {
+    let tailscale = remote::Tailscale::on_path(port);
+
+    match escalation {
+        Some(escalation) => tailscale.escalating(escalation),
+        None => tailscale,
+    }
+}
+
 /// The data directory of a router that has no use for one.
 ///
 /// The empty path, which nothing is created in — and nothing tries: a router
@@ -969,20 +985,31 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
     // [`run_on_keyed`] for the caller that arrives having already made this call.
     let key = config.workbench_key()?;
 
-    run_on_keyed(listener, config, key).await
+    // And nothing to escalate with: a server started this way was started from a
+    // shell or a unit file, where there is nobody at the machine to put a
+    // password dialog in front of — see [`remote::Elevate`].
+    run_on_keyed(listener, config, key, None).await
 }
 
-/// The same again, with the Workbench Key already in hand.
+/// The same again, with the Workbench Key already in hand — and with whatever
+/// way of escalating the caller has.
 ///
 /// Which is the desktop app's way in. The browser it opens is opened on the
 /// login link, so it has to hold the key before there is a server to ask one of
 /// — and what it hands over here is therefore the key the workbench is gated on,
 /// by being the same handle rather than by being read a second time. See
 /// `verkstead_desktop::Desktop::run`.
+///
+/// `escalation` is the other thing only that caller has: the operator grant the
+/// Remote access pane asks for is a command run with a privilege this process
+/// has not got, and the desktop app can ask the platform for one where a daemon
+/// cannot. `None` is every other way in, and is what the pane behaved as before
+/// there was an app to hand one over — see [`remote::Elevate`].
 pub async fn run_on_keyed(
     listener: std::net::TcpListener,
     config: Config,
     key: key::WorkbenchKey,
+    escalation: Option<Arc<dyn remote::Elevate>>,
 ) -> Result<()> {
     // Resolved at startup: a bind that names nothing, and a HOME the unit never
     // said, are misconfigurations to report now rather than sessions that fail
@@ -1161,8 +1188,9 @@ pub async fn run_on_keyed(
         // And whatever `tailscale` it has, asked about the port this server just
         // bound: a serve is this workbench's when it proxies there, and an
         // install told to listen somewhere else is one whose serve has to point
-        // somewhere else too — see [`remote`].
-        remote::Tailscale::on_path(config.listen.port()),
+        // somewhere else too — see [`remote`]. With whatever this process was
+        // started with a way to escalate through, where it was started with one.
+        tailnet_over(config.listen.port(), escalation),
         // And the key this Data Directory holds, which is what the workbench
         // and the viewer's own namespace are behind.
         key,

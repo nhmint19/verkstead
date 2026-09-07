@@ -13,12 +13,22 @@
 //! The press needs a fifth, and a different kind of one: a machine that answers
 //! differently after it has been pressed. That one keeps its serve in a file and
 //! reads it back out — see [`switchable`] — because what makes the switch worth
-//! pressing is precisely that the read afterwards says something else.
+//! pressing is precisely that the read afterwards says something else. It keeps
+//! the operator grant in a second file, so a `tailscale set --operator=…` run
+//! against it is a refusal lifted rather than a command that goes nowhere.
+//!
+//! Which is what the escalation is tested through. A press refused for want of
+//! that grant is answered two ways — the line shown, or the line taken through
+//! the platform's own password dialog — and which of them is a fact about what
+//! started the server. So the dialog is a handle here too, the way `tailscale`
+//! is: see [`Dialog`], which is one somebody answers and one somebody dismisses.
 //!
 //! Unix only, for that reason and no other: the cases are shapes of stdout
 //! rather than anything about a platform, and a Windows run would be a second
 //! machine reading the same JSON.
 #![cfg(unix)]
+
+use std::sync::{Arc, Mutex};
 
 use axum::Router;
 use axum::body::Body;
@@ -26,7 +36,7 @@ use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 use verkstead_render::{RemoteView, ServePress};
-use verkstead_server::remote::Tailscale;
+use verkstead_server::remote::{Elevate, Raised, Tailscale};
 use verkstead_server::{open_database, router_reading_tailscale};
 
 /// The port the workbench is served on in this suite, and so the port a serve
@@ -242,6 +252,10 @@ case "$1" in
         fi ;;
       --https=443) rm -f "{state}/serving" ;;
     esac ;;
+  set)
+    case "$2" in
+      --operator=*) : > "{state}/operator" ;;
+    esac ;;
 esac
 "#
     )
@@ -253,9 +267,44 @@ esac
 const WHO: &str = "ada";
 
 /// A server whose `tailscale` is the switchable machine above, with the state
-/// directory that machine keeps its serve in.
+/// directory that machine keeps its serve in — and with no way to ask for the
+/// operator grant, which is the daemon and every server but the desktop app's.
 async fn app_pressing() -> (tempfile::TempDir, Router) {
+    app_pressing_through(None).await
+}
+
+/// And the same with `escalation` where the desktop app's password dialog goes.
+async fn app_pressing_through(escalation: Option<Arc<dyn Elevate>>) -> (tempfile::TempDir, Router) {
     let dir = tempfile::tempdir().unwrap();
+    let script = switchable(dir.path());
+
+    app_asking(dir, script, escalation).await
+}
+
+/// A machine that takes the operator grant and refuses the serve anyway.
+///
+/// Which is not a contradiction: the grant is one command and the serve is
+/// another, and Tailscale has more than one reason to refuse the second. What it
+/// is here for is the press that has already asked — the dialog was answered,
+/// and there is still nothing to do but show the line.
+const STUBBORN: &str = r#"
+case "$1" in
+  status) printf '%s' '{"BackendState":"Running","Self":{"DNSName":"workbench.tailnet-name.ts.net."}}' ;;
+  serve)
+    case "$2" in
+      status) printf '%s' 'null' ;;
+      *) echo "Access denied: serve config denied" >&2; exit 1 ;;
+    esac ;;
+esac
+"#;
+
+/// A server whose `tailscale` is `script`, running as [`WHO`] and asking for the
+/// operator grant through `escalation` where it was handed one.
+async fn app_asking(
+    dir: tempfile::TempDir,
+    script: String,
+    escalation: Option<Arc<dyn Elevate>>,
+) -> (tempfile::TempDir, Router) {
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
@@ -264,7 +313,7 @@ async fn app_pressing() -> (tempfile::TempDir, Router) {
         vec![
             "/bin/sh".to_owned(),
             "-c".to_owned(),
-            switchable(dir.path()),
+            script,
             // `sh -c` gives `$0` the script's own name, so what Verkstead passes
             // lands in `$1` onwards.
             "tailscale".to_owned(),
@@ -273,7 +322,82 @@ async fn app_pressing() -> (tempfile::TempDir, Router) {
     )
     .as_user(WHO.to_owned());
 
+    let tailscale = match escalation {
+        Some(escalation) => tailscale.escalating(escalation),
+        None => tailscale,
+    };
+
     (dir, router_reading_tailscale(pool, tailscale))
+}
+
+/// The platform's own password dialog, as a suite has one: what it was asked to
+/// run, and whether anybody answered it.
+///
+/// The real one is `pkexec`, `osascript` or a UAC prompt, and which of those is
+/// the desktop crate's business — see `verkstead_desktop::elevate`. What this
+/// side of the seam has to get right is the two answers: one that runs the
+/// command, which is somebody typing their password, and one that runs nothing,
+/// which is somebody pressing Cancel.
+#[derive(Debug)]
+struct Dialog {
+    /// Whether it is answered.
+    answered: bool,
+
+    /// And what crossed the seam, kept for the tests to read: what goes through
+    /// is a command to run rather than the line the pane shows, and the `sudo`
+    /// on the front of that line is exactly what must not be here.
+    asked: Mutex<Vec<Vec<String>>>,
+}
+
+impl Dialog {
+    /// One somebody types their password into.
+    fn answered() -> Arc<Dialog> {
+        Arc::new(Dialog {
+            answered: true,
+            asked: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// And one somebody dismisses.
+    fn dismissed() -> Arc<Dialog> {
+        Arc::new(Dialog {
+            answered: false,
+            asked: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// What it has been asked to raise, in the order it was asked.
+    fn asked(&self) -> Vec<Vec<String>> {
+        self.asked.lock().unwrap().clone()
+    }
+}
+
+impl Elevate for Dialog {
+    fn raise(&self, command: &[String]) -> Raised {
+        self.asked.lock().unwrap().push(command.to_vec());
+
+        if !self.answered {
+            return Raised::Refused {
+                why: "User canceled.".to_owned(),
+            };
+        }
+
+        // Answered, so the command runs — with the privilege it wanted, which
+        // this machine's `tailscale` stands in for by taking the grant from
+        // whoever asks.
+        let (program, arguments) = command.split_first().unwrap();
+        let told = std::process::Command::new(program)
+            .args(arguments)
+            .output()
+            .unwrap();
+
+        match told.status.success() {
+            true => Raised::Done,
+            false => Raised::Refused {
+                why: String::from_utf8_lossy(&told.stderr).into_owned(),
+            },
+        }
+    }
 }
 
 /// Press the switch, and read what came of it.
@@ -432,4 +556,100 @@ async fn a_press_with_no_tailscale_is_trouble_rather_than_a_grant() {
         press(&app, true).await,
         ServePress::Trouble { .. }
     ));
+}
+
+/// The desktop app's arm: a press refused for want of the operator grant raises
+/// the platform's own asking, and the press that follows the grant serves.
+///
+/// One press from the human, therefore, where the daemon's arm takes two and a
+/// terminal in between.
+#[tokio::test]
+async fn a_dialog_somebody_answered_takes_the_grant_and_serves() {
+    let dialog = Dialog::answered();
+    let (_dir, app) = app_pressing_through(Some(dialog.clone())).await;
+
+    assert_eq!(
+        press(&app, true).await,
+        ServePress::Done {
+            reading: RemoteView::Up {
+                node: "workbench.tailnet-name.ts.net".to_owned(),
+                serve: verkstead_render::ServeView::On {
+                    address: "https://workbench.tailnet-name.ts.net".to_owned(),
+                },
+            },
+        }
+    );
+
+    // And what was raised is the grant as a command — the line the pane shows,
+    // without the `sudo`: what raises the privilege is the dialog rather than a
+    // word in front of the command.
+    let asked = dialog.asked();
+
+    assert_eq!(asked.len(), 1, "the dialog is raised once: {asked:?}");
+    assert_eq!(
+        asked[0][asked[0].len() - 2..],
+        ["set".to_owned(), format!("--operator={WHO}")],
+        "the grant is what crosses: {asked:?}",
+    );
+    assert!(
+        !asked[0].iter().any(|word| word == "sudo"),
+        "nothing crosses with a sudo on it: {asked:?}",
+    );
+}
+
+/// And a dialog somebody dismissed is not a failure to report as one: the switch
+/// stays off, which is the truth about the machine, and the line stays on the
+/// pane for whoever would rather type it.
+#[tokio::test]
+async fn a_dialog_somebody_dismissed_leaves_the_switch_off_and_the_line_shown() {
+    let dialog = Dialog::dismissed();
+    let (_dir, app) = app_pressing_through(Some(dialog.clone())).await;
+
+    let ServePress::Ungranted { grant, trouble } = press(&app, true).await else {
+        panic!("a dismissed dialog leaves the press refused");
+    };
+
+    assert_eq!(grant, format!("sudo tailscale set --operator={WHO}"));
+    assert!(
+        trouble.contains("Access denied"),
+        "what Tailscale said is what is shown under the line: {trouble}"
+    );
+
+    // It was asked, which is the half that says the app tried rather than the
+    // half that says it worked.
+    assert_eq!(dialog.asked().len(), 1);
+
+    // And nothing was served, so the switch the pane draws is still off.
+    assert_eq!(
+        remote(&app).await,
+        RemoteView::Up {
+            node: "workbench.tailnet-name.ts.net".to_owned(),
+            serve: verkstead_render::ServeView::Off,
+        }
+    );
+}
+
+/// A dialog answered on a machine that refuses the serve anyway leaves the line
+/// standing: the grant was taken and did not help, which is still a command
+/// somebody can run where they can read what the machine says back.
+#[tokio::test]
+async fn a_serve_still_refused_after_the_grant_reads_back_the_line() {
+    let dialog = Dialog::answered();
+    let dir = tempfile::tempdir().unwrap();
+    let (_dir, app) = app_asking(dir, STUBBORN.to_owned(), Some(dialog.clone())).await;
+
+    let ServePress::Ungranted { grant, trouble } = press(&app, true).await else {
+        panic!("a serve refused after the grant is still a serve that was refused");
+    };
+
+    assert_eq!(grant, format!("sudo tailscale set --operator={WHO}"));
+    assert!(
+        trouble.contains("Access denied"),
+        "what the machine said the second time: {trouble}"
+    );
+
+    // Once per press, rather than once per refusal: a dialog raised again over
+    // the same press would be the app asking for something it has just been
+    // given.
+    assert_eq!(dialog.asked().len(), 1);
 }

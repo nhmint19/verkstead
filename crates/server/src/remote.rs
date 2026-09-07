@@ -39,11 +39,24 @@
 //! daemon that could make itself the operator would be a daemon that could do
 //! anything. So a denied press hands back the line that grants it —
 //! `sudo tailscale set --operator=<user>`, for this machine's own user — and
-//! the next press is the re-try. The desktop app runs the same line through the
-//! platform's graphical sudo; the daemon on its own only shows it.
+//! the next press is the re-try.
+//!
+//! **Unless whatever started this server handed over a way to ask.** The
+//! desktop app has one — the platform's own password dialog, which is what
+//! [`Elevate`] is — and a server started from a unit file has none, because
+//! there is nobody at that machine to ask. One behaviour with two arms,
+//! therefore, picked by what the process was started as rather than by which
+//! platform it is on: with a way to ask, a refused press takes the grant and
+//! presses again; without one, it shows the line and leaves the re-try to the
+//! human.
+//!
+//! Both arms end in the same place. A dialog somebody dismissed is not a
+//! failure to report as one — the serve is off, which is the truth of the
+//! machine, and the line stands on the pane for whoever would rather type it.
 
 use std::collections::HashMap;
 use std::process::Output;
+use std::sync::Arc;
 
 use serde::Deserialize;
 use tokio::process::Command;
@@ -70,6 +83,72 @@ pub struct Tailscale {
     /// operator grant. Read once, at startup, because it is what the machine's
     /// own user is called and nothing about a request changes it.
     user: String,
+
+    /// And how this process asks for the privilege that grant wants, where
+    /// whatever started it handed over a way to ask — see [`Elevate`].
+    ///
+    /// `None` is the daemon, which has none and never had: a server started
+    /// from a unit file has nobody at the machine to put a dialog in front of,
+    /// so what a refused press leaves it with is the line and the next press.
+    escalation: Option<Arc<dyn Elevate>>,
+}
+
+/// A way for this process to run one command with a privilege it has not got.
+///
+/// The seam the desktop app reaches through. The press is made in a browser and
+/// the escalation is the app's — the platform's own password dialog, which only
+/// something with a screen in front of it can raise — and this crate knows none
+/// of that: the desktop crate depends on this one rather than the other way
+/// round, so what crosses is a handle handed in as the server starts. See
+/// `verkstead_desktop::elevate`.
+///
+/// **Blocking, and called on a thread that can be waited on.** The whole of
+/// what an implementation does is put a dialog on somebody's screen and wait for
+/// them to answer it, and how long that takes is theirs.
+pub trait Elevate: std::fmt::Debug + Send + Sync {
+    /// Run `command` — a program and its arguments, with nothing in front of
+    /// them. Raising the privilege is the implementation's own business, by
+    /// whatever this platform asks a human with.
+    fn raise(&self, command: &[String]) -> Raised;
+}
+
+/// And what came of the asking.
+///
+/// Two answers rather than three: a dialog somebody dismissed and a dialog that
+/// could not be raised at all come to the same thing here — the privilege was
+/// not taken, so the serve is still off and the line still stands. Which is why
+/// the words are carried rather than drawn: they go in the log, and what goes on
+/// the pane is the command the human can run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Raised {
+    /// It ran with the privilege, and exited saying it worked.
+    Done,
+
+    /// It did not — dismissed, refused, or never asked at all — and this is
+    /// what happened.
+    Refused {
+        /// In the platform's own words wherever there were any to take, for the
+        /// same reason [`RemoteView::Down`] carries `tailscale`'s.
+        why: String,
+    },
+}
+
+/// What one run of `tailscale serve` came to, told apart from what is done
+/// about it.
+///
+/// The middle one is the whole reason this is an enum. A refusal for want of the
+/// operator grant is answered two different ways depending on whether this
+/// process has a way to ask for the grant, and both of those answers want the
+/// same run of the same command underneath them.
+enum Served {
+    /// It exited zero, and the machine is where the press was putting it.
+    Done,
+
+    /// Tailscale would not take it from this user, and this is what it said.
+    Ungranted { trouble: String },
+
+    /// And every other way running it can fail.
+    Trouble { trouble: String },
 }
 
 /// What `tailscale status --json` says when the machine is on a tailnet. Every
@@ -94,6 +173,20 @@ impl Tailscale {
             program,
             port,
             user: this_user(),
+            escalation: None,
+        }
+    }
+
+    /// The same again, with a way to ask this machine for the operator grant
+    /// rather than only a line to show for it.
+    ///
+    /// What the desktop app hands the server as it starts it, and what nothing
+    /// else hands it: a daemon has nobody at the machine to ask — see
+    /// [`Elevate`], and `verkstead_desktop::Desktop::run`.
+    pub fn escalating(self, escalation: Arc<dyn Elevate>) -> Tailscale {
+        Tailscale {
+            escalation: Some(escalation),
+            ..self
         }
     }
 
@@ -197,8 +290,24 @@ impl Tailscale {
     /// refuses a serve from a process that is neither root nor the tailnet's
     /// operator, and nothing this server can do lifts that. So the refusal
     /// carries the line that does — for this machine's own user — and the next
-    /// press is the re-try.
+    /// press is the re-try. Where whatever started this process handed over a
+    /// way to ask for that grant, the asking and the re-try both happen inside
+    /// this one press instead — see [`Tailscale::granting`].
     pub(crate) async fn press(&self, on: bool) -> ServePress {
+        match self.serve(on).await {
+            Served::Done => self.settled().await,
+            Served::Trouble { trouble } => ServePress::Trouble { trouble },
+            Served::Ungranted { trouble } => self.granting(on, trouble).await,
+        }
+    }
+
+    /// One run of `tailscale serve`, putting the serve where the switch was
+    /// pressed to.
+    ///
+    /// Apart from [`Tailscale::press`] because a refused one is run twice: what
+    /// a grant taken through the platform's own asking buys is exactly this
+    /// command again, with the same three answers to it.
+    async fn serve(&self, on: bool) -> Served {
         let port = self.port.to_string();
         let off = format!("--https={HTTPS}");
 
@@ -210,7 +319,7 @@ impl Tailscale {
         let told = match self.run(&arguments).await {
             Ok(told) => told,
             Err(trouble) => {
-                return ServePress::Trouble {
+                return Served::Trouble {
                     trouble: trouble.to_string(),
                 };
             }
@@ -220,17 +329,97 @@ impl Tailscale {
             let trouble = complaint(&told);
 
             return match ungranted(&trouble) {
-                true => ServePress::Ungranted {
-                    grant: grant(&self.user),
-                    trouble,
-                },
-                false => ServePress::Trouble { trouble },
+                true => Served::Ungranted { trouble },
+                false => Served::Trouble { trouble },
             };
         }
 
+        Served::Done
+    }
+
+    /// The machine read again, which is what a press that went through answers
+    /// with.
+    async fn settled(&self) -> ServePress {
         ServePress::Done {
             reading: self.reading().await,
         }
+    }
+
+    /// What a refused press comes to.
+    ///
+    /// Two arms, and which one this is was settled when the process started.
+    /// With no way to ask for the grant it is the line and nothing else, which
+    /// is the daemon's answer and was every server's before there was a desktop
+    /// app to hand one over. With a way to ask, the grant is taken through the
+    /// platform's own password dialog and the press is made again — a re-try
+    /// being the whole of what the grant buys.
+    ///
+    /// **A dialog somebody dismissed is not a failure.** It comes back as the
+    /// line, exactly as it would where there was no way to ask at all: the serve
+    /// is off, which is the truth about the machine, and somebody who would
+    /// rather type the command still can. What went wrong is said in the log,
+    /// which is where the reader who wants it is.
+    async fn granting(&self, on: bool, trouble: String) -> ServePress {
+        let grant = grant(&self.user);
+
+        let Some(escalation) = self.escalation.clone() else {
+            return ServePress::Ungranted { grant, trouble };
+        };
+
+        let asking = self.operator();
+
+        // On a thread of its own, because the whole of what it does is wait:
+        // the dialog is on somebody's screen, how long they take over it is
+        // theirs, and what the runtime has to get on with meanwhile is every
+        // other request this server is answering.
+        let raised = tokio::task::spawn_blocking(move || escalation.raise(&asking)).await;
+
+        match raised {
+            Ok(Raised::Done) => (),
+
+            Ok(Raised::Refused { why }) => {
+                tracing::info!(%why, "the operator grant was not taken, so the line stands");
+
+                return ServePress::Ungranted { grant, trouble };
+            }
+
+            // The asking ended without answering, which is a fault in whatever
+            // was asked rather than anything the human did — and the same thing
+            // to do about it, there being no grant either way.
+            Err(ended) => {
+                tracing::warn!("asking for the operator grant ended: {ended}");
+
+                return ServePress::Ungranted { grant, trouble };
+            }
+        }
+
+        match self.serve(on).await {
+            Served::Done => self.settled().await,
+            Served::Trouble { trouble } => ServePress::Trouble { trouble },
+
+            // Refused a second time, with the grant behind it. The line stands
+            // rather than being called something else: what it says is still
+            // true, and it is now a line for somebody to run where they can read
+            // what the machine says back.
+            Served::Ungranted { trouble } => ServePress::Ungranted { grant, trouble },
+        }
+    }
+
+    /// The operator grant as a command to run, which is the line without the
+    /// `sudo` on the front: what raises the privilege is the platform's own
+    /// asking rather than a word in front of the command.
+    ///
+    /// Built off `program` rather than off the word `tailscale`, for the reason
+    /// every other command here is: what the suites put where the binary goes is
+    /// a shell script, and a grant naming the real one would be a grant no test
+    /// could take.
+    fn operator(&self) -> Vec<String> {
+        let mut asking = self.program.clone();
+
+        asking.push("set".to_owned());
+        asking.push(format!("--operator={}", self.user));
+
+        asking
     }
 
     /// Whether anything is proxied to the workbench's port, and where it

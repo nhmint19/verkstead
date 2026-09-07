@@ -33,6 +33,15 @@
 //! container, under a test — is not a failure and not a reason to stop serving,
 //! so there the main thread waits on the server as `verkstead serve` does.
 //!
+//! **And the operator grant is asked for rather than shown.** The Remote access
+//! pane's serve switch runs a command Tailscale refuses from anybody but the
+//! tailnet's operator, and the server has no privilege to raise — so what it
+//! hands a refused press is the line that lifts it. An app has something a
+//! daemon has not, which is somebody at the machine to ask: this one hands the
+//! server the platform's own password dialog on its way in, and a refused press
+//! raises that instead. See [`elevate`], and [`verkstead_server::remote`] for
+//! the other arm.
+//!
 //! **And the logging goes to a file**, which is the other thing about being
 //! started from an icon: there is no terminal for a stdout to be read in, so
 //! the server's `tracing` is written to the Log Directory and the tray gets the
@@ -52,6 +61,8 @@
 
 /// The two things this app draws that carry words.
 pub mod dialog;
+/// Asking this desktop for a privilege the app has not got.
+pub mod elevate;
 /// Where the server's `tracing` goes, and what View Logs opens.
 pub mod logs;
 /// Handing a URL or a file to whatever this desktop opens it with.
@@ -67,6 +78,7 @@ pub mod tray;
 
 use std::fmt;
 use std::net::{SocketAddr, TcpListener};
+use std::sync::Arc;
 use std::sync::mpsc::sync_channel;
 
 use anyhow::{Context, Result};
@@ -174,6 +186,7 @@ impl Desktop {
             listener,
             self.server,
             key.clone(),
+            escalation(screen::there_is_one()),
         ));
 
         // After the socket is bound and before the server is up, which is the
@@ -231,6 +244,24 @@ impl Desktop {
             Err(_) => Ok(()),
         }
     }
+}
+
+/// How this app asks for a privilege it has not got, or `None` where there is
+/// nobody to ask.
+///
+/// The operator grant the Remote access pane wants is a command run with a
+/// privilege the server has not got, and what an app can do about that is put
+/// the platform's own password dialog in front of it — see [`elevate`].
+///
+/// **Only where there is a `screen` to draw one on.** A `verkstead desktop` run
+/// over SSH or in a container is this app with its screen missing, which is the
+/// same thing to the pane as a daemon: nobody would see the dialog, so nothing
+/// is raised and the line is shown — which is what a machine with nobody at it
+/// wanted said anyway. The same question the tray is asked, and asked here
+/// rather than read here, so that both answers are answers a test can ask for —
+/// see [`screen::there_is_one`].
+fn escalation(screen: bool) -> Option<Arc<dyn verkstead_server::remote::Elevate>> {
+    screen.then(|| Arc::new(elevate::Graphical::here()) as Arc<_>)
 }
 
 /// The icon in the tray, or `None` where there is nowhere to put one.
@@ -388,6 +419,15 @@ impl std::error::Error for Taken {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An app with a screen can ask this machine for the operator grant, and one
+    /// without has nobody to ask — which is a daemon, and is the behaviour the
+    /// Remote access pane had before there was an app at all.
+    #[test]
+    fn the_grant_is_asked_for_only_where_there_is_somebody_to_ask() {
+        assert!(escalation(true).is_some());
+        assert!(escalation(false).is_none());
+    }
 
     /// The port is the whole of what the human can act on, so it is in the
     /// message rather than in the operating system's own words alone.
