@@ -24,5 +24,5 @@ depend on each other and could swap; the order here is the one picked.
 
 - [x] 01: Open the boundary — [brief](01-open-the-boundary.md)
 - [x] 02: The workbench key, and Remote access — [brief](02-workbench-key-and-remote-access.md)
-- [ ] 03: The onboarding wizard — [brief](03-onboarding-wizard.md) *(in progress: `onboarding/03-onboarding-wizard`)*
+- [x] 03: The onboarding wizard — [brief](03-onboarding-wizard.md)
 - [ ] 04: The zero-state compose page and the repo modal — [brief](04-zero-state-and-repo-modal.md)
