@@ -87,13 +87,29 @@ use crate::{github, profiles, sandbox, sessions, store};
 const OS_RELEASE: &str = "/etc/os-release";
 
 /// What the sandbox row runs on Linux: a mount namespace holding the machine
-/// read-only, running the one program every machine has.
+/// read-only, running the one program every machine really has.
 ///
 /// The smallest thing that is a sandbox. What it proves is not that this
 /// argument vector works but that `bwrap` can make a namespace at all, which is
 /// the thing a machine with unprivileged user namespaces switched off cannot
-/// do — and it is what a session's own sandbox does first.
-const TRIVIALLY: &[&str] = &["--ro-bind", "/", "/", "/bin/true"];
+/// do.
+///
+/// **`/bin/sh` because it is the one path a Linux is obliged to have.** POSIX
+/// names it and every distribution honours it — NixOS keeps `sh` there and
+/// nothing else, which is exactly the case a `/bin/true` got wrong: a machine
+/// with a working `bwrap` answered `execvp /bin/true: No such file or
+/// directory`, and the row it drew held the wizard on a dependency the human
+/// had already installed. `-c :` is the shell's own do-nothing, so what is run
+/// inside the namespace is still nothing at all.
+const TRIVIALLY: &[&str] = &["--ro-bind", "/", "/", SHELL, "-c", ":"];
+
+/// The program run inside it, which is the half of that vector that is a claim
+/// about the machine rather than about `bwrap`.
+///
+/// Its own constant so that the claim can be asked of a real machine — see
+/// `what_the_sandbox_row_runs_inside_is_a_program_this_machine_has`, which is
+/// the test a stub `bwrap` cannot be.
+const SHELL: &str = "/bin/sh";
 
 /// The program the Linux sandbox row is about.
 const BWRAP: &str = "bwrap";
@@ -1110,14 +1126,42 @@ echo {token}
         let dir = tempfile::tempdir().unwrap();
         program(
             &dir.path().join(BWRAP),
-            "#!/bin/sh\ntest \"$*\" = '--ro-bind / / /bin/true'\n",
+            "#!/bin/sh\ntest \"$*\" = '--ro-bind / / /bin/sh -c :'\n",
         );
 
         assert_eq!(
             state(&machine(Platform::Linux, dir.path()), Dependency::Sandbox),
             DependencyState::Present,
-            "it was asked for a read-only bind of the machine and `/bin/true`, \
-             which is what a session's own sandbox does first",
+            "it was asked for a read-only bind of the machine and the shell's \
+             own do-nothing",
+        );
+    }
+
+    /// And what it is asked to run is a program this machine has.
+    ///
+    /// The one thing the stub above cannot say. A stub agrees with whatever
+    /// argument vector it is written beside, so a payload no Linux ships would
+    /// pass every test here and fail on the machine — which is what `/bin/true`
+    /// did: NixOS keeps `sh` in `/bin` and nothing else, so the row came back
+    /// absent on a `bwrap` that worked, holding the wizard on a dependency that
+    /// was already installed.
+    ///
+    /// Asked of the running machine rather than of a fixture, because the claim
+    /// is about machines: `/bin/sh` is what POSIX obliges a Linux to have, and
+    /// this is the assertion that notices the day something is chosen that is
+    /// not.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn what_the_sandbox_row_runs_inside_is_a_program_this_machine_has() {
+        assert!(
+            TRIVIALLY.contains(&SHELL),
+            "the vector runs whatever this names, so the two have to agree",
+        );
+        assert!(
+            Path::new(SHELL).is_file(),
+            "the sandbox row runs {SHELL} inside the namespace, and this machine \
+             has no such file — every Linux has /bin/sh and not every Linux has \
+             anything else",
         );
     }
 
