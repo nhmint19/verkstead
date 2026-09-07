@@ -224,6 +224,20 @@ async fn once(state: &AppState, conversation_id: i64, repo_id: i64) -> Watching 
         return Watching::Done("driving has stopped");
     }
 
+    // Whether the review is over, read once here and used for every gate below.
+    //
+    // **Read before the comments are, which is what makes the two agree.** The
+    // review folds everything standing on every one of the pull requests into
+    // its own prompt and writes it down as addressed as it starts — see
+    // [`for_the_review`]. A poll that read the comments first and asked about the
+    // review second could hold a list from before that recording and a verdict
+    // from after it, and dispatch a batch about the very comments the review had
+    // just been given. Read this way round the two cannot disagree: either the
+    // comments are read after the recording, or the review was not over when
+    // this poll began and a poll that straddles it decides nothing. The next one
+    // reads both sides of the same moment.
+    let reviewed = reviewed(state, conversation_id).await;
+
     // Before anything is read of GitHub or settled here: a batch session that
     // asked and is no longer running has left the human a question with nobody
     // behind it, and the comments it was dispatched about written down as dealt
@@ -240,9 +254,7 @@ async fn once(state: &AppState, conversation_id: i64, repo_id: i64) -> Watching 
     // once it is: until then there is nothing here for anybody to have left
     // behind, and the review's own Set is [`crate::review`]'s to see to whatever
     // becomes of it.
-    if reviewed(state, conversation_id).await
-        && crate::responding::unattended(state, conversation_id).await
-    {
+    if reviewed && crate::responding::unattended(state, conversation_id).await {
         return Watching::Again;
     }
 
@@ -280,11 +292,11 @@ async fn once(state: &AppState, conversation_id: i64, repo_id: i64) -> Watching 
         // the older reading before the next poll has seen what was said, and what
         // was written goes unanswered on a Conversation that is over. So the
         // settling waits for the review exactly as the dispatching below does,
-        // and the first poll after it is the one that decides. Which is the same
-        // rule read twice: until the review has settled, nothing said on any of
-        // the pull requests is anybody else's to act on — settling it away
+        // and the first poll to begin after it is the one that decides. Which is
+        // the same rule read twice: until the review has settled, nothing said on
+        // any of the pull requests is anybody else's to act on — settling it away
         // included.
-        if !reviewed(state, conversation_id).await {
+        if !reviewed {
             tracing::debug!(
                 conversation_id,
                 repo = watched.repo.name,
@@ -331,7 +343,7 @@ async fn once(state: &AppState, conversation_id: i64, repo_id: i64) -> Watching 
     // standing on the pull requests while it runs is the review's to propose
     // about, and a batch session started over the top of that would be acting on
     // a comment nobody had agreed to act on.
-    if !reviewed(state, conversation_id).await {
+    if !reviewed {
         tracing::debug!(
             conversation_id,
             repo = watched.repo.name,
@@ -552,7 +564,9 @@ async fn reviewed(state: &AppState, conversation_id: i64) -> bool {
 /// alone on purpose — and the caller is holding the Worktree's Turn besides,
 /// which is what makes *present at review start* a moment rather than an
 /// approximation. What lands after this reads is the batch's, once the review is
-/// over.
+/// over — and a poll that read the comments before this recording cannot turn
+/// into one that dispatches after it, because [`once`] takes its reading of the
+/// review before it reads the comments.
 pub(crate) async fn for_the_review(state: &AppState, conversation_id: i64) -> Option<String> {
     let conversation = match store::load_conversation(&state.pool, conversation_id).await {
         Ok(Some(conversation)) => conversation,

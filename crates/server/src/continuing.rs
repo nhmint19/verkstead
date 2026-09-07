@@ -272,6 +272,8 @@ async fn start(
     if let Err(error) = settle(state, id, conversation, &stage).await {
         tracing::error!(error = ?error, settled, stage = id, "preparing the next stage's Conversation failed");
 
+        gave_up(state, id).await;
+
         say(
             state,
             settled,
@@ -283,7 +285,7 @@ async fn start(
         )
         .await;
 
-        return gave_up(state, id).await;
+        return;
     }
 
     let path = worktrees::worktree_path(&state.data_dir, id, &conversation.repo.name, &branch);
@@ -355,9 +357,9 @@ async fn start(
     let (commit, checkouts, making) = match made {
         Ok(Ok(made)) => made,
         Ok(Err(halted)) => {
-            say(state, settled, &halted.said(&stage, &branch, &from)).await;
+            gave_up(state, id).await;
 
-            return gave_up(state, id).await;
+            return say(state, settled, &halted.said(&stage, &branch, &from)).await;
         }
         Err(error) => {
             tracing::error!(error = ?error, settled, stage = id, "making the next stage's worktrees failed");
@@ -916,6 +918,12 @@ fn configured(configured: store::Configured, repo: &str) -> anyhow::Result<()> {
 /// Nothing is left checked out by the time this can run, so there is nothing to
 /// clean up but the row: the stage's worktree and its companions' are made in
 /// one act that unmakes whatever it managed before it halted — see [`make`].
+///
+/// **Before the notice, every time.** Each of these halts ends by saying on the
+/// settled Conversation's Timeline that nothing was started and nothing was left
+/// behind, and that notice is what anybody watching sees first — the workbench,
+/// a device, a test. Closing after it would leave a window in which the promise
+/// is on the Timeline and the half-made record is still drafting.
 async fn gave_up(state: &AppState, id: i64) {
     if let Err(error) = store::close_conversation(&state.pool, id).await {
         tracing::error!(error = ?error, conversation_id = id, "stopping a half-made stage failed");
