@@ -25,9 +25,9 @@ use crate::{
     ConversationUnarchived, ConversationView, DirectoryListing, GrillingStarted, Locked,
     NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice, ProfileChosen,
     ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
-    Registered, Registration, RemoteView, RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved,
-    RepoSwitched, RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit,
-    ServePress, SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
+    Registered, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView,
+    RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen,
+    ServeEdit, ServePress, SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
     SharePublished, SharedConversation, ShowingArchived, Shown, Started, SteerOpened,
     SteerSubmission, Submitted, Subscribed, Subscription, TerminalOpened, TerminalsView,
     TranscriptView, Unsubscribe, UpdateNotice, Watching,
@@ -290,6 +290,11 @@ fn the_viewers_types_are_written_from_these() {
     // serve state it carries writes the state a phone is reached through with
     // it.
     RemoteView::export_all(&config).unwrap();
+
+    // And whether the human is done with the banner that points at that
+    // section, which is the one thing about it that is stored: read back off
+    // the server on every load, so a dismissal made anywhere holds everywhere.
+    RemoteBanner::export_all(&config).unwrap();
 
     // And the one thing on that section that is pressed rather than read: the
     // serve switch. What a press takes in, and the three answers it comes back

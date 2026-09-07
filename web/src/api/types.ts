@@ -2370,6 +2370,30 @@ export type Registered = "Added" | "NotAbsolute" | "Missing" | "NotARepository" 
 export type Registration = { path: string, };
 
 /**
+ * Whether the human is done with the banner that points at this section.
+ *
+ * The banner stands on a Conversation page above the Timeline, at every
+ * grilling start until it is dismissed, while the first Question Set is being
+ * prepared — the one moment the human has nothing to do at the desk, and so
+ * the moment worth telling them they need not stay at it.
+ *
+ * Read off the server on every load rather than out of the browser it was
+ * pressed in, which is the whole of why it is on this wire at all: the banner
+ * is about picking up a phone, and a dismissal that did not travel would meet
+ * the human again on the very device it had just sent them to.
+ *
+ * One direction. There is nothing on any page that puts it back, so what is
+ * sent is a press rather than a position — unlike the archived switch's
+ * [`ShowingArchived`](crate::ShowingArchived), which this is otherwise written
+ * beside.
+ */
+export type RemoteBanner = { 
+/**
+ * True once somebody has pressed it away, on this device or any other.
+ */
+dismissed: boolean, };
+
+/**
  * What this machine's Tailscale is doing.
  *
  * Flat on the wire — `{"tailscale": "Up", "node": "…", "serve": {…}}` — so the

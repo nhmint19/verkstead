@@ -42,6 +42,7 @@ import type {
   PullRequestDetails,
   PushKey,
   Registered,
+  RemoteBanner,
   RemoteView,
   RepoEntry,
   RepoPairingsView,
@@ -969,6 +970,25 @@ export function pressServe(edit: ServeEdit): Promise<ServePress> {
 /// tailnet is a reset made from the only device that can reach this server.
 export function resetKey(): Promise<RemoteView> {
   return post<RemoteView>("/api/ui/remote/key");
+}
+
+/// Whether the human is done with the banner that points at Remote access.
+///
+/// The server's answer rather than this device's, for the archived switch's
+/// reason said stronger: the banner is drawn at a desk and points at a phone,
+/// so a dismissal that stayed in this browser would meet the human again on the
+/// very device it had just sent them to.
+export async function remoteBannerDismissed(): Promise<boolean> {
+  return (await get<RemoteBanner>("/api/ui/remote/banner")).dismissed;
+}
+
+/// And say they are, which is the whole of the press.
+///
+/// Nothing to send: the banner is dismissed and never put back, so there is no
+/// position for a body to carry. What comes back is the flag as it now stands,
+/// so the page that pressed it holds the truth without a second ask.
+export function dismissRemoteBanner(): Promise<RemoteBanner> {
+  return post<RemoteBanner>("/api/ui/remote/banner");
 }
 
 /// Whether a newer Verkstead has been released than the one serving this page.

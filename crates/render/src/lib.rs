@@ -63,7 +63,7 @@ pub use profiles::{
     ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, RepoPairingsView, RoleChoice,
 };
 pub use push::{PushKey, Subscribed, Subscription, Unsubscribe};
-pub use remote::{RemoteView, ServeEdit, ServePress, ServeView};
+pub use remote::{RemoteBanner, RemoteView, ServeEdit, ServePress, ServeView};
 pub use repos::{
     ConflictResolutionEdit, Registered, Registration, RepoEntry, RepoRemoved, RepoView,
 };

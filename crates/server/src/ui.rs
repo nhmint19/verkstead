@@ -37,8 +37,8 @@ use verkstead_render::{
     ConversationStopped, ConversationUnarchived, ConversationView, Cursor, GrillingStarted,
     IgnoreRule, IgnoredCommentsEdit, Lifecycle, Locked, Merging, MissedOut, NewAdoption,
     NewCompanion, NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
-    Registration, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice,
-    RuleField, RuleRefused, ServeEdit, ServePress, SetReading, SetView, SettingsEdit,
+    Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed,
+    RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress, SetReading, SetView, SettingsEdit,
     SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation,
     ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription,
     TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice,
@@ -403,6 +403,16 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // Under the section it is drawn in rather than under a namespace of its
         // own, because that is the one place it is pressed from.
         .route("/api/ui/remote/key", post(reset_key))
+        // And the banner that points at this section, which is the one thing
+        // about it that is stored: whether the human is done with it. Under the
+        // section it points at rather than under the Conversation it is drawn
+        // on, because what it is about is Remote access — every Conversation
+        // page reads the one flag, and one press on any device ends it on all
+        // of them.
+        .route(
+            "/api/ui/remote/banner",
+            get(remote_banner).post(dismiss_remote_banner),
+        )
 }
 
 /// `GET /api/ui/sets/{id}` — one Set, rendered, with where it stands.
@@ -4258,6 +4268,47 @@ async fn reset_key(State(state): State<AppState>) -> HttpResponse {
     let view: RemoteView = state.remote.reading().await;
 
     ([(SET_COOKIE, key.set_cookie())], Json(view)).into_response()
+}
+
+/// `GET /api/ui/remote/banner` — whether the human is done with the banner that
+/// points at the Remote access section.
+///
+/// Asked by every Conversation page on load, which is what makes it worth
+/// keeping on the server at all: the banner is drawn at a desk and points at a
+/// phone, so a dismissal held in the browser it was pressed in would meet the
+/// human again on the device it had just sent them to.
+///
+/// One row read, and nothing about any Conversation in it. Which Conversation
+/// draws the banner is the page's own question — a grilling with a session
+/// running and no Question Set on its Timeline yet — and this is the one answer
+/// that silences it on all of them.
+async fn remote_banner(State(state): State<AppState>) -> HttpResponse {
+    match store::remote_banner_dismissed(&state.pool).await {
+        Ok(dismissed) => Json(RemoteBanner { dismissed }).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "reading whether the Remote access banner was dismissed failed");
+            unavailable("the banner's dismissal could not be read")
+        }
+    }
+}
+
+/// `POST /api/ui/remote/banner` — and saying they are.
+///
+/// A press rather than a position, unlike the archived switch this is written
+/// beside: nothing anywhere puts the banner back, so there is nothing for a
+/// body to say. Answered with the flag as it now stands, so the page that
+/// pressed it holds the truth without a second ask.
+///
+/// Idempotent. A second press says what the first one said, which is not
+/// something to refuse.
+async fn dismiss_remote_banner(State(state): State<AppState>) -> HttpResponse {
+    match store::dismiss_remote_banner(&state.pool).await {
+        Ok(()) => Json(RemoteBanner { dismissed: true }).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "dismissing the Remote access banner failed");
+            unavailable("the banner could not be dismissed")
+        }
+    }
 }
 
 /// `GET /api/ui/update` — whether a newer Verkstead has been released than

@@ -1,0 +1,81 @@
+/* The banner above the Timeline that points at Remote access. See
+   `RemoteBanner.tsx`.
+
+   Drawn as the Update Notice above the Repo list is — the same paper, edge,
+   radius and accented leading edge — because it is the same kind of thing said
+   in the same voice: one line about the workbench as a whole, standing over a
+   list it is not part of. A second design for the one idea would read as two
+   different kinds of interruption.
+
+   It takes the pane's measure and no more, so the record below starts where it
+   always did. Nothing is written here for the pane without one: an undrawn
+   banner is no element at all, and there is no reserved strip for it to leave
+   behind.
+
+   The two halves wrap onto their own lines on a narrow window rather than
+   squeezing the sentence: on a phone this is a line of prose with the way out
+   under it. */
+
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.35rem 1rem;
+  margin-bottom: 1rem;
+  padding: 0.7rem 0.9rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-inline-start: 3px solid var(--accent);
+  border-radius: 0.6rem;
+  font-size: 0.9rem;
+}
+
+/* The sentence takes the room; being done with it is a word at the end of the
+   line rather than half the row. */
+.banner span {
+  flex: 1;
+  min-width: 0;
+}
+
+.banner a {
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+/* Under the pointer, the underline this line took off it — said here for the
+   reason the Update Notice says it: the rule above is what took it away, and
+   which of the two won would otherwise be whichever sheet the bundler wrote
+   last. */
+@media (hover: hover) {
+  .banner a:hover {
+    text-decoration: underline;
+  }
+}
+
+/* And the way to be done with it. Quiet, the way a toast's dismiss is: what the
+   banner is for is the link, and a control competing with it would be offering
+   the way out ahead of the way in. */
+.done {
+  flex: none;
+  padding: 0 0.3rem;
+  font: inherit;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+  border-radius: 0.3rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.done:focus-visible {
+  color: var(--ink);
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (hover: hover) {
+  .done:hover {
+    color: var(--ink);
+  }
+}

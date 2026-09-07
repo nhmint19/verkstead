@@ -30,6 +30,7 @@ use verkstead_schema::{QuestionSet, Response, ResponseAccepted, ValidationError}
 
 mod archives;
 mod attachments;
+mod banners;
 mod captures;
 mod cleanup;
 mod commits;
@@ -59,6 +60,7 @@ pub use archives::{
     unarchive_conversation,
 };
 pub use attachments::{Attachment, Origin, attach, attachment, attachments, detach};
+pub use banners::{dismiss_remote_banner, remote_banner_dismissed};
 pub use captures::{Summary, append_capture, capture, start_capture, summarise_capture};
 pub use cleanup::{
     Deletion, Trimming, deletable, delete_conversation, deleted_tables, reclaim, trim_conversation,
@@ -758,6 +760,12 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // several of, a Conversation taking as many files as the human has to hand.
     // See [`attachments`].
     attachments::apply_schema(pool).await?;
+
+    // And the one flag on this database that is about nothing on it: whether the
+    // human is done with the banner pointing at Remote access. It hangs off
+    // nothing, being a fact about the person rather than about any Conversation
+    // — see [`banners`].
+    banners::apply_schema(pool).await?;
 
     // And last of all, whatever a database written by an older Verkstead
     // still needs done to it. After every table above, because what a rewrite

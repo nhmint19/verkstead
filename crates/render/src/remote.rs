@@ -37,6 +37,12 @@
 //! link it is about to draw as a QR code. Re-issuing the key answers with the
 //! whole reading again — see [`RemoteView::Up`] — so that the QR and the link
 //! beside it redraw on the new one rather than being asked for a second time.
+//!
+//! **And one field that is not about the machine at all**: whether the human is
+//! done with the banner that points at this section — see [`RemoteBanner`]. It
+//! is the one thing here that is stored rather than read off `tailscale`, and it
+//! is here because what it is about is Remote access rather than any of the
+//! Conversations the banner is drawn on.
 
 use serde::{Deserialize, Serialize};
 
@@ -164,4 +170,27 @@ pub enum ServePress {
 
     /// And every other way running it can fail.
     Trouble { trouble: String },
+}
+
+/// Whether the human is done with the banner that points at this section.
+///
+/// The banner stands on a Conversation page above the Timeline, at every
+/// grilling start until it is dismissed, while the first Question Set is being
+/// prepared — the one moment the human has nothing to do at the desk, and so
+/// the moment worth telling them they need not stay at it.
+///
+/// Read off the server on every load rather than out of the browser it was
+/// pressed in, which is the whole of why it is on this wire at all: the banner
+/// is about picking up a phone, and a dismissal that did not travel would meet
+/// the human again on the very device it had just sent them to.
+///
+/// One direction. There is nothing on any page that puts it back, so what is
+/// sent is a press rather than a position — unlike the archived switch's
+/// [`ShowingArchived`](crate::ShowingArchived), which this is otherwise written
+/// beside.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct RemoteBanner {
+    /// True once somebody has pressed it away, on this device or any other.
+    pub dismissed: bool,
 }

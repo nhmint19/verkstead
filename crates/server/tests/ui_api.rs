@@ -20,8 +20,8 @@ use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
-    ConversationView, Locked, PushKey, QuestionSetEvent, SetReading, SetView, Standing, Submitted,
-    Subscribed, Subscription, TimelineEvent,
+    ConversationView, Locked, PushKey, QuestionSetEvent, RemoteBanner, SetReading, SetView,
+    Standing, Submitted, Subscribed, Subscription, TimelineEvent,
 };
 use verkstead_schema::{Answer, ApiError, Liveness, QuestionSet, Response, SetCreated};
 use verkstead_server::{open_database, router, store};
@@ -924,4 +924,70 @@ async fn settle_at(pool: &SqlitePool, id: i64, submitted_at: &str) {
         .execute(pool)
         .await
         .unwrap();
+}
+
+/// The banner that points at Remote access: whether the human is done with it.
+///
+/// Under `/api/ui/remote/` rather than under a Conversation, because what it is
+/// about is Remote access rather than any one piece of work — every Conversation
+/// page reads the one flag.
+async fn banner_dismissed(app: &Router) -> bool {
+    get::<RemoteBanner>(app, "/api/ui/remote/banner")
+        .await
+        .dismissed
+}
+
+/// And the press that ends it, which carries nothing: the banner is dismissed
+/// and never put back, so there is no position for a body to say.
+async fn dismiss_banner(app: &Router) -> RemoteBanner {
+    post(app, "/api/ui/remote/banner", serde_json::json!({})).await
+}
+
+/// A workbench nobody has pressed it in still has the banner to draw, which is
+/// where every install starts.
+#[tokio::test]
+async fn the_banner_starts_undismissed() {
+    let (_dir, _pool, app) = fresh_app().await;
+
+    assert!(!banner_dismissed(&app).await);
+}
+
+/// The press ends it, and the answer says so — so the page that made it has the
+/// truth in hand rather than a second ask ahead of it.
+#[tokio::test]
+async fn the_press_ends_the_banner() {
+    let (_dir, _pool, app) = fresh_app().await;
+
+    assert_eq!(dismiss_banner(&app).await, RemoteBanner { dismissed: true });
+    assert!(banner_dismissed(&app).await);
+}
+
+/// And it ends on every device, which is the whole reason the flag is here
+/// rather than in the browser the press landed in: the banner points at a phone,
+/// and a dismissal that stayed put would meet the human again on it.
+///
+/// A second router over the same database is that other device — nothing of the
+/// dismissal is in the memory of the one that took the press.
+#[tokio::test]
+async fn a_dismissal_made_anywhere_holds_everywhere() {
+    let (_dir, pool, app) = fresh_app().await;
+    let elsewhere = router(pool);
+
+    assert!(!banner_dismissed(&elsewhere).await);
+
+    dismiss_banner(&app).await;
+
+    assert!(banner_dismissed(&elsewhere).await);
+}
+
+/// Two devices whose loads crossed press it twice, and the second press says
+/// what the first one said rather than being refused.
+#[tokio::test]
+async fn dismissing_it_twice_says_the_same_thing() {
+    let (_dir, _pool, app) = fresh_app().await;
+
+    dismiss_banner(&app).await;
+
+    assert_eq!(dismiss_banner(&app).await, RemoteBanner { dismissed: true });
+    assert!(banner_dismissed(&app).await);
 }
