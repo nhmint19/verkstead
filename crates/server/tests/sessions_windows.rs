@@ -714,7 +714,7 @@ async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
     let repo = repository(repo);
     let registered: Registered =
         post(&app, "/api/ui/repos", &serde_json::json!({ "path": repo })).await;
-    assert_eq!(registered, Registered::Added);
+    assert!(matches!(registered, Registered::Added(_)));
 
     let repos: Vec<verkstead_render::RepoEntry> = get(&app, "/api/ui/repos").await;
     let repo_id = repos[0].id;
