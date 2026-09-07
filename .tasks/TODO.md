@@ -23,4 +23,4 @@ Roadmap stage: [04: The zero-state compose page and the repo modal](docs/roadmap
 - [x] 03: Create repo on the server — [details](03-create-repo-on-the-server.md)
 - [x] 04: The Create repo modal — [details](04-create-repo-modal.md)
 - [x] 05: Create on GitHub too — [details](05-create-on-github-too.md)
-- [ ] 06: Docs and vocabulary — [details](06-docs-and-vocabulary.md)
+- [x] 06: Docs and vocabulary — [details](06-docs-and-vocabulary.md)

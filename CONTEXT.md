@@ -18,16 +18,32 @@ Conversations attach to one — and while one is still a Draft with nothing chec
 out, the Repo dropdown on its composer moves it onto another. Its files stay the
 source of truth for task lists (`.tasks/`) and roadmaps (`docs/roadmaps/`) —
 Verkstead parses and renders them, and never owns them.
+**One is made or opened from the dropdown that lists them**, and not only from
+the settings page. Two rows sit at the foot of that dropdown behind a rule,
+wherever it is drawn — the compose page and a draft's composer both, it being one
+control. **Open repo** registers a repository that already exists, over the same
+path field and with the same refusals the settings page's own registration has.
+**Create repo** makes one first: a directory under a parent that is browsed for,
+`git init` onto `main`, a `README.md` naming it and one commit by the configured
+git author — an empty repository has no commit for a Conversation to take a base
+from, which is why there is a README at all — and, where a GitHub token is saved
+and the tick is left on, a private repository of the same name with `origin` set
+and `main` pushed. Both land on the one registry the settings page's registration
+lands on, and either way the Repo becomes the draft's the moment it is there: the
+compose page's own state, or a move on a saved draft. A create that made the
+directory and then failed at GitHub is still a create — what it made is
+registered and picked, and what failed is said.
 **Registering one can be taken back, and that is an unregistering rather than a
 delete**: Verkstead stops offering it for new work — the settings list, the Repo
-dropdown on the compose page, the roadmaps waiting to be adopted — while every
-Conversation ever worked in it goes on naming it, because a record that could
-not say which repository its work was done in would be no record. The directory
-is untouched either way. Refused while a Conversation that is neither Done nor
-Closed is on it — unlike removing an Agent Profile, which is refused for
-nothing: a Repo is the directory a session is standing in, where a Profile is
-only the account the next one would have been launched under. Registering the
-same path again brings the same Repo back rather than making a second one.
+dropdown on the compose page and on a draft's composer, the roadmaps waiting to
+be adopted — while every Conversation ever worked in it goes on naming it,
+because a record that could not say which repository its work was done in would
+be no record. The directory is untouched either way. Refused while a
+Conversation that is neither Done nor Closed is on it — unlike removing an Agent
+Profile, which is refused for nothing: a Repo is the directory a session is
+standing in, where a Profile is only the account the next one would have been
+launched under. Registering the same path again brings the same Repo back rather
+than making a second one.
 One thing about a registered Repo is configured rather than read off the
 repository: its **resolution strategy**, where its conflicts are to be resolved
 differently from every other Repo's.
@@ -591,6 +607,20 @@ when it is pressed, the way the press on a draft's own composer does. Either way
 the page lands in the Conversation it made and this device stops holding
 anything. A field the server refuses leaves the rest of the work on that draft,
 and the refusal is said on the draft's own composer.
+
+**And where there is nothing to list, that page is the whole of Verkstead.** The
+sidebar's list *as filtered* being empty — no unarchived Conversation, and the
+archived ones either absent or hidden — is the **zero state**: `/` goes to the
+compose page, and the page is drawn with no conversations pane beside it. The
+wordmark stands where the pane title and the way back to the list would, the gear
+after it, and the switch that shows the archived is pinned to the page's
+bottom-left — drawn only where something is archived, a switch that could bring
+nothing back being a control with no state to be in. The settings page keeps its
+sidebar through all of it, being a list of its own that nobody should have to
+type their way out of. It is a fact about the list rather than about a first run,
+so it is left the moment there is anything in that list: a Conversation created,
+or *Show archived* switched on with archived ones present, which brings the
+sidebar back with them in it.
 
 **Adopting a roadmap is that page too**, from an **Adopt a roadmap** dropdown
 under the box, at the near edge of the row the two presses are at the far edge
