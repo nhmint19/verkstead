@@ -9,6 +9,13 @@
 //! one thing: on the pane a path already registered is a refusal, and in the
 //! modal it is the repository somebody named.
 //!
+//! Beside that modal is the other way a Repo arrives, which is this file's too:
+//! [`CreateRepo`], where a parent and a name *make* one. Not the same form —
+//! a repository that is not there yet has nowhere to be browsed to, so the
+//! question is two fields rather than one — but the same card, the same words
+//! for the refusals, and the same rule about what a refusal does to the card
+//! it was made on.
+//!
 //! The path is written into the shared path field — see `PathField.tsx` — which
 //! is the box it always was with a dropdown under it that browses the filesystem
 //! a directory at a time. What the form is for has not moved: it names a path,
@@ -88,6 +95,7 @@ import { RESOLUTION, RESOLVES, forcePushed } from "../settings/Conflicts";
 import { Picker } from "../picking";
 import {
   RefusedError,
+  createRepo,
   listRepos,
   loadRepo,
   registerRepo,
@@ -95,12 +103,14 @@ import {
   setRepoResolution,
 } from "../api/client";
 import type {
+  Created,
   Registered,
   RepoEntry,
   RepoRemoved,
   RepoView,
   ConflictResolution,
 } from "../api/types";
+import { repoParent, setRepoParent } from "../device";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
@@ -126,6 +136,24 @@ export const REFUSAL: Record<RepoRefused, string> = {
   NoDefaultBranch:
     "That repository has no branch to call its default. Check one out first.",
   AlreadyRegistered: "That repo is registered already.",
+};
+
+/// The ways a create is answered with a sentence rather than a Repo, in the same
+/// shape and for the same reason: every outcome that is a bare word on the wire.
+///
+/// `Refused` is not among them — it carries git's own account of what went
+/// wrong, which is a sentence the server wrote rather than one this file has —
+/// and neither is `Made`, a create that worked being said by the Repo the draft
+/// lands on.
+export type CreateRefused = Extract<Created, string>;
+
+/// And what each of those says.
+export const CREATE_REFUSAL: Record<CreateRefused, string> = {
+  ParentMissing: "There is no directory at that path to make it in.",
+  AlreadyThere: "Something of that name is in that directory already.",
+  BadName: "That is not a name a directory can have.",
+  NoAuthor:
+    "Nobody is configured to commit as. Settings has a Git author, and the first commit needs one.",
 };
 
 /// And what each way of being refused a removal says.
@@ -773,6 +801,172 @@ export function OpenRepo(props: {
           Cancel
         </button>
       </RepoRegistration>
+    </Modal>
+  );
+}
+
+/// And the other row at that foot: **Create repo**, which makes one rather than
+/// taking on one that is there.
+///
+/// Two fields, because the two halves are answered differently: the parent is
+/// browsed for — the same field the Open modal beside it stands on, without
+/// repositories marked, since what is being picked is where a repository will go
+/// rather than one that is already there — and the name is typed. They are sent
+/// as two, joining them into a path here being the one place the browser would
+/// build one out of a separator the server never agreed to.
+///
+/// **The parent is remembered on the device.** Somebody making a second
+/// repository is almost certainly putting it beside the first, and where they
+/// keep their code is a fact about the machine in front of them rather than
+/// something to tell the server — so it is kept where the wrap setting is, in
+/// `device.ts`, and the field opens inside it. Where there is none, which a
+/// first run always is, the field stands empty and browses the server's own
+/// home, which is where an unbounded browse already opens.
+///
+/// A refusal keeps the modal up with the reason under the fields, for the
+/// registration's reason: what answers a refusal is correcting what was typed,
+/// and a modal that closed on one would take the correction away with it.
+export function CreateRepo(props: {
+  /// Said when the modal has closed itself — Escape, a press on the backdrop,
+  /// or the Cancel beside the press.
+  close: () => void;
+  /// And what a create that landed does with the Repo it made, which is the
+  /// caller's: the draft goes onto it.
+  landed: (repo: RepoView) => void;
+}): JSX.Element {
+  const queries = useQueryClient();
+
+  // The heading's own id, for [`OpenRepo`]'s reason: two Repo dropdowns may be
+  // drawn on one page, and an id is the page's to keep unique.
+  const id = createUniqueId();
+
+  // Where the last repo on this device went, which is where this one starts —
+  // and, because that is a path handed over rather than one being typed, where
+  // its browse opens: see `opened` on `PathField`, which is the tap that wrote
+  // it, made on an earlier visit. Empty on the first run, and an empty field
+  // browses the server's own home.
+  const remembered = repoParent();
+
+  const [parent, setParent] = createSignal(remembered);
+
+  // And what it is called, which is the directory's name and so the Repo's.
+  const [name, setName] = createSignal("");
+
+  // Why the last pair offered was refused, in the words it is shown in — or
+  // `null` while nothing has been offered. Worded as it arrives rather than
+  // where it is drawn, because one of the five is git's own sentence and the
+  // other four are this file's. Cleared as soon as either field is touched, the
+  // registration's refusal being cleared the same way: a refusal is about what
+  // was sent, and it stops being about what is being typed.
+  const [refused, setRefused] = createSignal<string | null>(null);
+
+  const create = useMutation(() => ({
+    mutationFn: (asked: { parent: string; name: string }) =>
+      createRepo(asked.parent, asked.name),
+    onSuccess: (outcome: Created) => {
+      // Four of the refusals are a bare word, which this file has the sentence
+      // for; the fifth is git's own account of what it would not do, said in
+      // git's words because nothing here could put it better.
+      if (typeof outcome === "string") {
+        setRefused(CREATE_REFUSAL[outcome]);
+        return;
+      }
+
+      if ("Refused" in outcome) {
+        setRefused(outcome.Refused);
+        return;
+      }
+
+      const repo = outcome.Made;
+
+      // The parent as the server resolved it rather than as it was typed: that
+      // is the directory the repository is actually in, and so the one the next
+      // create should open in.
+      const cut = repo.path.lastIndexOf("/");
+      setRepoParent(cut > 0 ? repo.path.slice(0, cut) : "/");
+
+      // The list this was made over is now out of date, and so are the roadmaps
+      // waiting to be adopted — a registration invalidates both for the same
+      // reason, and a repository that was just made is a repository that has
+      // just arrived.
+      void queries.invalidateQueries({ queryKey: ["repos"] });
+      void queries.invalidateQueries({ queryKey: ["abandoned-roadmaps"] });
+      props.landed(repo);
+    },
+  }));
+
+  const make = (ev: SubmitEvent) => {
+    ev.preventDefault();
+
+    const where = parent().trim();
+    const called = name().trim();
+    if (where === "" || called === "") {
+      return;
+    }
+
+    create.mutate({ parent: where, name: called });
+  };
+
+  return (
+    <Modal class={styles.createRepo!} open close={props.close} labelledBy={id}>
+      <h3 id={id}>Create a repo</h3>
+
+      <form class={styles.form} onSubmit={make}>
+        <label for="repo-parent">Where it goes</label>
+        <PathField
+          id="repo-parent"
+          opened={remembered !== ""}
+          placeholder="/home/you/src"
+          value={parent()}
+          write={(where) => {
+            setParent(where);
+            setRefused(null);
+          }}
+        />
+
+        <label class={styles.second} for="repo-name">
+          What it is called
+        </label>
+        <input
+          id="repo-name"
+          class={styles.name}
+          type="text"
+          placeholder="verkstead"
+          value={name()}
+          onInput={(ev) => {
+            setName(ev.currentTarget.value);
+            setRefused(null);
+          }}
+        />
+
+        <div class={styles.buttons}>
+          <button
+            type="submit"
+            disabled={
+              create.isPending || parent().trim() === "" || name().trim() === ""
+            }
+          >
+            Create
+          </button>
+          {/* Drawn as well as the ways out the modal already has, for the reason
+              the Open modal draws one: Escape and a press on the backdrop are
+              for a keyboard and a cursor, and this is the one a thumb has. */}
+          <button type="button" class={styles.cancel} onClick={props.close}>
+            Cancel
+          </button>
+        </div>
+
+        <Show when={refused()}>
+          {(why) => <ErrorLine class={styles.failure}>{why()}</ErrorLine>}
+        </Show>
+        {/* A server that could not answer at all, which is the one thing here
+            that is an error rather than an outcome. */}
+        <Show when={create.isError}>
+          <ErrorLine class={styles.failure}>
+            The repo could not be made: {create.error?.message}
+          </ErrorLine>
+        </Show>
+      </form>
     </Modal>
   );
 }

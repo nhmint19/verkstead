@@ -41,6 +41,7 @@ import type {
   PinnedEvent,
   PullRequestDetails,
   RemoteBanner,
+  RepoView,
   Resolved,
   Resumed,
   RoadmapPane,
@@ -284,6 +285,7 @@ import transcript from "./fixtures/transcript.json" with { type: "json" };
 import more from "./fixtures/transcript-more.json" with { type: "json" };
 import screenOfIt from "./fixtures/screen.json" with { type: "json" };
 import wrapping from "./fixtures/conversation-wrapping.json" with { type: "json" };
+import repoView from "./fixtures/repo.json" with { type: "json" };
 
 /// The renderer, which is each pane's own doing rather than this file's: what is
 /// asked here is whether a commit's pane reached for it at all, and never what it
@@ -4031,6 +4033,39 @@ describe("switching a draft's repo", () => {
     await waitFor(() =>
       expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/repo`)).toEqual({
         repo_id: opened.id,
+      }),
+    );
+  });
+
+  /// And the row beside it, which lands the same way: what a create answers with
+  /// is the Repo it made, and a saved draft goes onto it by the move a pick
+  /// makes. What the modal asks for is `composing.test.tsx`'s.
+  it("moves the work onto a repo made from Create repo", async () => {
+    const fetching = theWorkbench(
+      whenever(
+        "/api/ui/repos/new",
+        json({ Made: { ...(repoView as RepoView), id: 4343 } }),
+        "POST",
+      ),
+      json("Switched"),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await repoRows(container);
+    press("Repo", "Create repo");
+
+    fireEvent.input(
+      await waitFor(() => screen.getByLabelText("Where it goes")),
+      { target: { value: "/home/ada/src" } },
+    );
+    fireEvent.input(screen.getByLabelText("What it is called"), {
+      target: { value: "widgets" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() =>
+      expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/repo`)).toEqual({
+        repo_id: 4343,
       }),
     );
   });

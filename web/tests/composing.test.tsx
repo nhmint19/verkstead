@@ -19,9 +19,12 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type {
   AbandonedRepo,
   Adopted,
+  Created,
+  DirectoryListing,
   ProfileEntry,
   RepoEntry,
   RepoPairingsView,
+  RepoView,
 } from "../src/api/types";
 import menu from "../src/Menu.module.css";
 import pill from "../src/Attaching.module.css";
@@ -31,7 +34,11 @@ import setup from "../src/workbench/Setup.module.css";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
 import { ATTACH_REFUSAL } from "../src/workbench/Composer";
 import { BRANCH_REFUSAL } from "../src/workbench/Setup";
-import { REFUSAL as REPO_REFUSAL } from "../src/repos/RepoList";
+import {
+  CREATE_REFUSAL,
+  REFUSAL as REPO_REFUSAL,
+} from "../src/repos/RepoList";
+import { repoParent, setRepoParent } from "../src/device";
 import {
   COMPOSING,
   blank,
@@ -42,9 +49,12 @@ import {
 } from "../src/workbench/composing";
 import { OPEN, PROFILES, REPOS, drawn, mount, theWorkbench } from "./bench";
 import { carrying, drag, dropOn } from "./dragging";
+import { browse, held, listingAt } from "./fields";
 import { actionRows, offered, opened, pick, press, rows, showing } from "./pickers";
-import { json, serving, whenever } from "./serving";
+import { askedFor, json, serving, whenever } from "./serving";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
+import listing from "./fixtures/directories.json" with { type: "json" };
+import made from "./fixtures/repo.json" with { type: "json" };
 
 /// The roadmaps nothing is driving, as the server answers for them: three of
 /// them in one repo, the last found on a branch that has not merged.
@@ -836,6 +846,180 @@ describe("registering a repo from the Repo dropdown", () => {
     await waitFor(() => screen.getByText(REPO_REFUSAL.NotARepository));
     expect(screen.getByLabelText(/absolute path/i)).toBeTruthy();
     expect(field.value).toBe("/srv/repos/notes");
+    expect(stored().repo).toBeNull();
+  });
+});
+
+/// The other row at that foot: **Create repo**, which *makes* a repository
+/// rather than taking on one that is already there.
+///
+/// The pick lands the same way the registration's does — that half is asked
+/// above — so what is asked here is what a create has of its own: the two fields
+/// going out as two, the parent this device remembers, and a refusal that keeps
+/// the card up.
+describe("making a repo from the Repo dropdown", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    leaveRefusals(0, []);
+  });
+
+  /// The repository the create made, as the server answers for it: not one of
+  /// the fixture's, so a draft landing on it is unmistakably the answer's doing.
+  /// Under the directory the browse fixture lists, so the parent it comes home
+  /// with is one a browse could have reached.
+  const MADE: RepoView = {
+    ...(made as RepoView),
+    id: 4343,
+    name: "widgets",
+    path: "/home/ada/src/widgets",
+  };
+
+  /// The one directory there is to browse, which is the fixture's own.
+  const LISTING = listing as DirectoryListing;
+
+  /// The workbench with the create answered however the test says, and that
+  /// directory served both by name and as the server's home.
+  const creating = (answer: () => Promise<Response>) =>
+    theWorkbench(
+      whenever("/api/ui/repos/new", answer, "POST"),
+      whenever(listingAt("/home/ada/src"), json(LISTING)),
+      whenever(listingAt(null), json(LISTING)),
+      json(null),
+    );
+
+  /// Open the modal off the dropdown's foot.
+  async function createRepoModal(): Promise<void> {
+    await waitFor(() => expect(offered("Repo").length).toBe(REPOS.length));
+    press("Repo", "Create repo");
+
+    await waitFor(() => expect(screen.getByLabelText(WHERE)).toBeTruthy());
+  }
+
+  /// What the two fields are labelled, which is how they are found.
+  const WHERE = "Where it goes";
+  const CALLED = "What it is called";
+
+  /// Fill them in and send them.
+  function make(parent: string, name: string): void {
+    fireEvent.input(screen.getByLabelText(WHERE), {
+      target: { value: parent },
+    });
+    fireEvent.input(screen.getByLabelText(CALLED), {
+      target: { value: name },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+  }
+
+  it("puts the draft on the repo it made", async () => {
+    const fetching = creating(json({ Made: MADE }));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await createRepoModal();
+    make("/home/ada/src", "widgets");
+
+    // The two halves went out as two: joining them into a path here would be
+    // the browser building one out of a separator the server never agreed to.
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/repos/new")).toEqual({
+        parent: "/home/ada/src",
+        name: "widgets",
+      }),
+    );
+
+    // And the draft is on what it made, which is what picking a registered one
+    // writes.
+    await waitFor(() => expect(stored().repo).toBe(MADE.id));
+    // The modal is spent, and the row it was opened from has become the panel.
+    await waitFor(() => expect(screen.queryByLabelText(WHERE)).toBeNull());
+  });
+
+  /// Where this device keeps its code is a fact about the machine in front of
+  /// you, so the parent is remembered here and the browse opens *inside* it —
+  /// among what is in it rather than among its siblings, which is what the same
+  /// text typed by hand would mean.
+  it("opens the browse in the parent the last repo on this device went in", async () => {
+    setRepoParent("/home/ada/src");
+    const fetching = creating(json({ Made: MADE }));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await createRepoModal();
+
+    expect(held(WHERE)).toBe("/home/ada/src");
+    // The memory alone says nothing to the server: what is read is the browse
+    // the human asked for.
+    expect(askedFor(fetching, listingAt("/home/ada/src"))).toBe(0);
+
+    browse(WHERE);
+    await waitFor(() =>
+      expect(askedFor(fetching, listingAt("/home/ada/src"))).toBe(1),
+    );
+    expect(askedFor(fetching, listingAt("/home/ada"))).toBe(0);
+  });
+
+  /// And where there is none — which a first run always is — the field stands
+  /// empty and the browse opens at the server's own home, which is where an
+  /// unbounded browse already opens.
+  it("opens at the server's home where this device has made none", async () => {
+    const fetching = creating(json({ Made: MADE }));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await createRepoModal();
+
+    expect(held(WHERE)).toBe("");
+    browse(WHERE);
+
+    await waitFor(() => expect(askedFor(fetching, listingAt(null))).toBe(1));
+  });
+
+  /// What it comes home with is the parent the server resolved rather than the
+  /// text that was typed: that is the directory the repository is actually in,
+  /// and so the one the next create should open in.
+  it("remembers where it put one, for the next one", async () => {
+    creating(json({ Made: MADE }));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await createRepoModal();
+    make("/home/ada/src/", "widgets");
+
+    await waitFor(() => expect(stored().repo).toBe(MADE.id));
+    expect(repoParent()).toBe("/home/ada/src");
+  });
+
+  /// A refusal keeps the modal up with the reason under the fields, for the
+  /// registration's reason: what answers one is correcting what was typed, and a
+  /// modal that closed on one would take the correction away with it.
+  it("says why a create was refused, and stays up to say it", async () => {
+    creating(json("AlreadyThere" satisfies Created));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await createRepoModal();
+    make("/home/ada/src", "widgets");
+
+    await waitFor(() => screen.getByText(CREATE_REFUSAL.AlreadyThere));
+    expect(held(WHERE)).toBe("/home/ada/src");
+    expect(
+      (screen.getByLabelText(CALLED) as HTMLInputElement).value,
+    ).toBe("widgets");
+    expect(stored().repo).toBeNull();
+    expect(repoParent()).toBe("");
+  });
+
+  /// And the one refusal that is not a word this app has: what git would not do,
+  /// in git's own words, because nothing here could put it better.
+  it("says what git would not do, in git's words", async () => {
+    creating(json({ Refused: "git init: permission denied" } satisfies Created));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await createRepoModal();
+    make("/home/ada/src", "widgets");
+
+    await waitFor(() => screen.getByText("git init: permission denied"));
     expect(stored().repo).toBeNull();
   });
 });

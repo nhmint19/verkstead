@@ -365,3 +365,22 @@
     border-color: var(--accent);
   }
 }
+
+/* And the create asked from the same foot, on the same modal: two fields rather
+   than one, so the second label needs the air the first gets from the heading
+   above it. */
+.createRepo h3 {
+  margin: 0 0 0.85rem;
+  font-size: 1rem;
+}
+
+.form .second {
+  margin-top: 0.85rem;
+}
+
+/* The name is typed rather than browsed for, so it stands on a line of its own
+   with nothing beside it — where the path field's box shares its line with the
+   press that drops the rows. */
+.form .name {
+  width: 100%;
+}

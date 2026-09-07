@@ -31,6 +31,7 @@ import type {
   ConversationStopped,
   ConversationUnarchived,
   ConversationView,
+  Created,
   DirectoryListing,
   GrillingStarted,
   OnboardingView,
@@ -217,6 +218,22 @@ export function listDirectory(path: string | null): Promise<DirectoryListing> {
 /// front of the human.
 export function registerRepo(path: string): Promise<Registered> {
   return post<Registered>("/api/ui/repos", { path });
+}
+
+/// Ask Verkstead to *make* a repository under `parent` and take it on.
+///
+/// The other way a Repo arrives, and the one that ends in the same
+/// registration: a directory of that name, `git init` onto `main`, a `README.md`
+/// committed as the configured author, and the opened Repo back.
+///
+/// Two fields rather than a joined path, because the two halves are answered
+/// differently — the parent is browsed for and the name is typed — and joining
+/// them here would be the one place a path is built out of a separator the
+/// server never agreed to. Every refusal is in the body for the registration's
+/// reason: each is a different sentence to put in front of the human, and none
+/// of them is something to retry.
+export function createRepo(parent: string, name: string): Promise<Created> {
+  return post<Created>("/api/ui/repos/new", { parent, name });
 }
 
 /// Take one off the registry, which is an unregistering rather than a delete:

@@ -50,6 +50,10 @@
 //! ceiling on the way back out. A field standing empty opens on the server's own
 //! home, which is the endpoint's answer to an ask with no path — a starting
 //! point rather than a boundary, so the row above it goes there like any other.
+//! And a field *handed* a path rather than typed into can say so — see `opened`
+//! — which puts the browse inside that directory instead of among its siblings:
+//! the Create repo modal's remembered parent is the tap that wrote it, made on
+//! some earlier visit.
 //!
 //! What the field is looking *for* is the caller's. One of them is looking for a
 //! repository — the Repos' form, which is the only place a `.git` means
@@ -178,6 +182,17 @@ export function PathField(props: {
   /// On for the fields that exist to point at one — an account is kept in a
   /// `.claude` beside a `.claude.json` — and off everywhere else.
   dotfiles?: boolean;
+  /// Whether the value this field is *given* is a directory to browse inside
+  /// rather than a path halfway through being typed.
+  ///
+  /// The one thing a starting value cannot say for itself. `/home/ada/src`
+  /// typed by hand means *the entries of `/home/ada` beginning with `src`*,
+  /// which is right while somebody is typing and wrong for a path handed to the
+  /// field whole — the Create repo modal's remembered parent, which is where the
+  /// last repo went and so where a browse should open. Set on such a field, and
+  /// it lasts exactly as a tap's own drilling does: until the text is rewritten,
+  /// after which the text steers again.
+  opened?: boolean;
   /// What the field holds, and how it comes to hold something else — typed into
   /// or tapped together, which the caller cannot tell apart and has no reason
   /// to.
@@ -228,7 +243,12 @@ export function PathField(props: {
   /// `/home/ada/src`, which is the drilling in. Held only for as long as the
   /// field still holds what the tap wrote, so a field cleared or rewritten from
   /// anywhere else is text again and the text steers.
-  const [drilled, setDrilled] = createSignal<string | null>(null);
+  ///
+  /// A field told its starting value is a directory starts there — see
+  /// `opened`, which is a tap that happened on some earlier visit.
+  const [drilled, setDrilled] = createSignal<string | null>(
+    props.opened === true && props.value !== "" ? props.value : null,
+  );
 
   const drilling = (): string | null =>
     drilled() === props.value ? drilled() : null;

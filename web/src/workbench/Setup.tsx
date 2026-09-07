@@ -95,7 +95,7 @@ import { Empty, ErrorLine, Note } from "../notices";
 import * as pairing from "../pairing";
 import { Listbox, Picker, type Action } from "../picking";
 import { BROKEN } from "../profiles/ProfileList";
-import { OpenRepo } from "../repos/RepoList";
+import { CreateRepo, OpenRepo } from "../repos/RepoList";
 import { AUTOMATIC, chosen } from "./naming";
 import styles from "./Setup.module.css";
 import { keeping } from "./settling";
@@ -439,11 +439,12 @@ export function RepoSelect(props: {
 /// the same modal over the same page. A component would have had to be the
 /// dropdown as well as the rows, and there are two dropdowns.
 ///
-/// What a registration lands on is still the caller's, exactly as a pick is: the
+/// What either row lands on is still the caller's, exactly as a pick is: the
 /// compose state's repo id where the page is composing, a move where the draft is
-/// saved. Which is the whole reason the registration answers with the Repo — the
-/// path that was typed is not the one it is recorded under, so there is nothing
-/// here to match against the list.
+/// saved. Which is the whole reason both answer with the Repo — a create is told
+/// what to call the directory rather than where it ends up, and the path a
+/// registration was given is not the one it is recorded under, so there is
+/// nothing here to match against the list either way.
 function repoRows(pick: (repoId: number) => void): {
   /// The rows themselves, for the [`Listbox`] to draw behind its rule.
   rows: Action[];
@@ -451,29 +452,33 @@ function repoRows(pick: (repoId: number) => void): {
   /// press that opened the modal.
   modal: () => JSX.Element;
 } {
-  const [opening, setOpening] = createSignal(false);
+  // Which of the two is up, or `null` while neither is. One signal rather than
+  // two, because they are two cards over one page and the second is opened from
+  // the same shut dropdown as the first: a pair of booleans could say both were
+  // up, which is a state there is no way to reach and no way to draw.
+  const [opening, setOpening] = createSignal<"create" | "open" | null>(null);
+
+  const shut = () => setOpening(null);
+
+  const landed = (repoId: number) => {
+    shut();
+    pick(repoId);
+  };
 
   return {
     rows: [
-      {
-        label: "Create repo",
-        // Drawn with the row beside it and opened by the task after this one:
-        // the two are one foot behind one rule, and a foot that grew a row at a
-        // time would be laid out twice.
-        press: () => undefined,
-      },
-      { label: "Open repo", press: () => setOpening(true) },
+      { label: "Create repo", press: () => setOpening("create") },
+      { label: "Open repo", press: () => setOpening("open") },
     ],
     modal: () => (
-      <Show when={opening()}>
-        <OpenRepo
-          close={() => setOpening(false)}
-          landed={(repo) => {
-            setOpening(false);
-            pick(repo.id);
-          }}
-        />
-      </Show>
+      <>
+        <Show when={opening() === "create"}>
+          <CreateRepo close={shut} landed={(repo) => landed(repo.id)} />
+        </Show>
+        <Show when={opening() === "open"}>
+          <OpenRepo close={shut} landed={(repo) => landed(repo.id)} />
+        </Show>
+      </>
     ),
   };
 }
