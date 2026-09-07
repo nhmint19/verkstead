@@ -360,6 +360,36 @@ async fn what_a_phone_installs_the_viewer_from_is_open() {
     }
 }
 
+/// And nothing else under that prefix, which is what makes exempting a
+/// directory safe at all.
+///
+/// The viewer answers a path whose last segment carries no extension with the
+/// workbench's own document — that is how every route it draws is served — so a
+/// prefix let past on its own would hand `/icons/anything` the very page `/` is
+/// refused for, under a name nobody thinks to ask about.
+#[tokio::test]
+async fn a_route_dressed_as_an_icon_is_still_refused() {
+    let (_dir, _pool, _key, app, _conversation) = keyed().await;
+
+    for path in ["/icons/anything", "/icons/", "/icons/deeper/still"] {
+        let response = get(&app, path).await;
+
+        assert_eq!(
+            response.status(),
+            StatusCode::UNAUTHORIZED,
+            "GET {path} names no file, so it is the workbench asked for sideways",
+        );
+    }
+
+    // And a file under it that is genuinely not there is missing rather than
+    // refused: it was let past the gate, and the viewer had nothing to hand
+    // over.
+    assert_eq!(
+        get(&app, "/icons/icon-512.png").await.status(),
+        StatusCode::NOT_FOUND,
+    );
+}
+
 #[test]
 fn the_key_is_kept_to_the_account_verkstead_runs_as() {
     let dir = tempfile::tempdir().unwrap();

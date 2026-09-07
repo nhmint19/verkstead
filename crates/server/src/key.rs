@@ -348,10 +348,35 @@ async fn gate(State(key): State<WorkbenchKey>, request: Request, next: Next) -> 
     refused()
 }
 
-/// The three files a phone installs the viewer from, which are open — see this
+/// The files a phone installs the viewer from, which are open — see this
 /// module's own documentation for why.
+///
+/// **The icons are a prefix, and so have to name a file.** The other two are one
+/// exact path each; the icons are a directory, because there is one per size and
+/// the document names them by hand. What makes that safe is the second half of
+/// the test. A path whose last segment carries no extension is a route rather
+/// than a file, and the viewer answers a route with the workbench's own document
+/// — so an exemption on the prefix alone would hand `/icons/anything` the very
+/// page `/` is refused for. With it, a miss under here is a file that is not
+/// there, which the viewer answers with a 404.
 fn installable(path: &str) -> bool {
-    path == "/sw.js" || path == "/manifest.webmanifest" || path.starts_with("/icons/")
+    path == "/sw.js"
+        || path == "/manifest.webmanifest"
+        || (path.starts_with("/icons/") && names_a_file(path))
+}
+
+/// Whether `path` was asking for a file rather than naming a route: a dot in the
+/// last segment.
+///
+/// The same test the viewer sorts the two by — see `viewer::names_a_file` — and
+/// said again here rather than shared, because what the two of them have to
+/// agree about is a judgement rather than a helper: this one decides what is
+/// let past the gate, and one that drifted from the viewer's would be an
+/// exemption for a path the viewer answers with a page.
+fn names_a_file(path: &str) -> bool {
+    path.rsplit('/')
+        .next()
+        .is_some_and(|last| last.contains('.'))
 }
 
 /// The key on the link, where there is one.
