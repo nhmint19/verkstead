@@ -16,24 +16,33 @@ import { MemoryRouter, Route, createMemoryHistory } from "@solidjs/router";
 import { QueryClientProvider, QueryClient } from "@tanstack/solid-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ConversationEntry, ShowingArchived } from "../src/api/types";
+import type {
+  ConversationEntry,
+  ConversationView,
+  ShowingArchived,
+} from "../src/api/types";
+import act from "../src/workbench/Actions.module.css";
+import dropdown from "../src/Menu.module.css";
 import shell from "../src/Panes.module.css";
 import shellCss from "../src/Panes.module.css?raw";
 import { SettingsPage, panes as settingsPanes } from "../src/settings/SettingsPage";
 import archived from "../src/workbench/Archived.module.css";
 import wordmark from "../src/workbench/Wordmark.module.css";
 import {
+  BRANCHES,
   HIDING_ARCHIVED,
   HIDING_SOMETHING,
   PROFILES,
   REPOS,
+  SET_UP,
   SIDEBAR,
   drawn,
   mount,
   nudged,
   theWorkbench,
 } from "./bench";
-import { json, serving, whenever } from "./serving";
+import { hangs, json, serving, whenever } from "./serving";
+import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -42,6 +51,10 @@ afterEach(() => {
 /// The archived Conversation the switch brings back: the fixture's own first
 /// row, which is what an archived one looks like once it is on the list again.
 const PUT_AWAY: ConversationEntry[] = [SIDEBAR[0]!];
+
+/// The one Conversation the press test archives: a Grilling one, which is a row
+/// with the actions menu on it — a Draft has no press that puts it away.
+const GRILLING = grilling as ConversationView;
 
 /// A workbench whose list is whatever the test hands in, and whose switch stands
 /// wherever it says. Everything else is the fixtures' own.
@@ -194,6 +207,54 @@ describe("the sidebar coming and going under the zero state", () => {
     // And the page it was already on is the page the state lands on, so nothing
     // moves under the human but the pane going.
     expect(history.get()).toBe("/compose");
+  });
+
+  /// And on *this* device the press is what moves it, rather than the read
+  /// behind the press.
+  ///
+  /// The sidebar draws its list with whatever a press has already said about it
+  /// laid over (`eager.ts`), so a state read off the server's last answer alone
+  /// would disagree with what is on the screen for as long as the archiving was
+  /// in the air: the compose page would arrive with the sidebar still beside it,
+  /// saying there was nothing in it, and the frame would change under the human
+  /// a round trip later. Here the archiving never lands at all and the server
+  /// goes on saying there is one Conversation, so the sidebar going is the
+  /// press's doing and nothing else's.
+  it("takes the sidebar with the press rather than with the read behind it", async () => {
+    const only = SIDEBAR.find((row) => row.id === GRILLING.id)!;
+
+    serving(
+      whenever("/api/ui/conversations", json([only])),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
+      whenever("/api/ui/repos", json(REPOS)),
+      whenever("/api/ui/profiles", json(PROFILES)),
+      whenever("/api/ui/onboarding", json(SET_UP)),
+      whenever("/api/ui/abandoned-roadmaps", json([])),
+      whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
+      whenever(`/api/ui/repos/${GRILLING.repo.id}/branches`, json(BRANCHES)),
+      whenever(
+        `/api/ui/conversations/${GRILLING.id}/close-and-archive`,
+        hangs(),
+        "POST",
+      ),
+      json(null),
+    );
+
+    const { container, history } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(
+      await drawn(
+        container,
+        `.${act.conversationActions} > .${dropdown.trigger}`,
+      ),
+    );
+    fireEvent.click(await drawn(container, `.${act.closeAndArchive}`));
+
+    // The one row is off the list the human is looking at, so there is nothing
+    // to list — and the page that says so is the one they land on, whole.
+    await waitFor(() => expect(history.get()).toBe("/compose"));
+    await drawn(container, `h1.${wordmark.wordmark}`);
+    expect(sidebar(container)).toBeNull();
   });
 
   /// And the other way about: something on the list is something to list, so the

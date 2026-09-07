@@ -9,6 +9,15 @@
 //! sidebar draws itself from: a redirect written into the route table would be a
 //! second opinion about a list only the sidebar reads.
 //!
+//! **The list as the sidebar draws it**, which is not quite the list the server
+//! last sent: a press the server has not caught up with is already off the
+//! sidebar (`eager.ts`), and a state read off the server's answer alone would
+//! disagree with what is on the screen for exactly as long as a press is
+//! outstanding. Archiving the last Conversation is that press, so the
+//! disagreement was the one the human would have met: the compose page with the
+//! sidebar still beside it saying there was nothing in it, and the frame
+//! changing under them a round trip later. One list, read one way.
+//!
 //! Two pages ask. The workbench asks because the bare workbench has no sidebar
 //! to be the left of and nothing beside it, so it sends the human to the compose
 //! page; the compose page asks because it draws the sidebar or does without it,
@@ -27,6 +36,7 @@ import type { Accessor } from "solid-js";
 
 import { listConversations, showingArchived } from "../api/client";
 import { useReading } from "../freshness";
+import { pressedRows } from "./eager";
 
 /// What the two pages are asking about the list.
 export type Zero = {
@@ -66,11 +76,24 @@ export function useZero(): Accessor<Zero> {
     // would move the one thing on it that is meant to stay put.
     pending: conversations.isPending || archived.isPending,
 
+    // The list *as the sidebar draws it*, presses and all — see `eager.ts`.
+    // Read off the server's answer alone, this would go on saying there was
+    // something to list for as long as the archiving of the last Conversation
+    // was still in the air: the human would land on the compose page with the
+    // sidebar still beside it, reading *Nothing is being worked on yet*, and
+    // watch the whole frame change under them when the read caught up. Two
+    // readings of one list is what that was; there is one now.
+    //
     // A list that could not be read is not an empty list. What the sidebar
     // draws then is the failure and the way to try again, which is a page with
     // something on it — and a redirect fired at a request that timed out would
-    // take the human somewhere they could not read the failure from.
-    holds: conversations.data?.length === 0,
+    // take the human somewhere they could not read the failure from. Which is
+    // why the answer's absence is asked about first rather than handed to
+    // `pressedRows` as an empty list.
+    holds:
+      conversations.data !== undefined &&
+      pressedRows(conversations.data, archived.data?.showing ?? false).length ===
+        0,
 
     archived: archived.data?.any ?? false,
   });
