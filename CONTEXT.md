@@ -185,8 +185,14 @@ the Conversation's **Attachments** and the Verkstead executable read-only in a
 directory of Verkstead's own, and nothing else of the machine at all — not
 even the checkout the Worktree was made from. The directories a session's own
 `PATH` names under the home of whoever runs the server are read-only inside
-with them, so the harness a human installed for themselves is one a session
-can run; nothing else of that home is. Nothing at all stands where the
+with them, and so is the directory each program a session runs by name links
+into, where that too is under the home — which is how the harness a human
+installed for themselves is one a session can run, a native install being a
+link on the `PATH` into a versions directory no `PATH` names. A link leading
+anywhere else, or leading nowhere, is a name a session is not given at all,
+and nothing else of that home is. A Claude session is told not to update the
+install it runs, which is read-only inside and the human's own besides, so
+nothing a session does moves it. Nothing at all stands where the
 account's own skills would be found: they are hidden rather than merged with,
 and where the mechanism has no mount to hide one with it refuses the path
 instead. Each Companion Repo the Conversation was configured with is inside as

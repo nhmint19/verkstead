@@ -10,6 +10,13 @@
 //! `~/.local/bin`, where the vendor's own installer puts one, being a program a
 //! session can actually start.
 //!
+//! **And the install it is a link into with it.** That installer leaves
+//! `~/.local/bin/claude` a symlink into `~/.local/share/claude/versions/`, so
+//! the directory on the `PATH` holds a link and the program is somewhere no
+//! `PATH` names at all. The fixture is that shape rather than a plain file,
+//! because a plain file would prove the grant a real machine does not have: what
+//! has to run inside is the link *and* what it lands on.
+//!
 //! **One test per machine, in a binary of its own, and that is the whole design
 //! of this file.** The `PATH` and the home a session composes from are the
 //! *process's* own — read once at startup, held for the run — so the only way
@@ -54,9 +61,23 @@ const LISTENING: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8
 /// What stands in for the server's own image, as in every other sandbox suite.
 const SAYS_WHICH_BUILD: &str = "#!/bin/sh\nprintf 'verkstead 0.0.0-the-servers-own\\n'\n";
 
-/// Where the vendor's own installer puts a harness: under the home of whoever
-/// ran it, which is the install this whole feature is about.
+/// Where the vendor's own installer puts a harness: a link under the home of
+/// whoever ran it, and the version it lands on somewhere else under that home.
+/// The install this whole feature is about.
 const NATIVE_INSTALL: &str = ".local/bin";
+const NATIVE_VERSION: &str = ".local/share/claude/versions/0.0.0";
+
+/// And the half of that path a session must *not* be given: the directory the
+/// version's own is under, which holds everything else a machine keeps there —
+/// and a file of the human's in it, which is how a session is asked whether it
+/// got the whole of that directory or the one version it runs.
+///
+/// Asked as a file rather than as the directory, because the directory is
+/// *there* inside on Linux either way: the grant below it is a mount, and a
+/// mount has parents. What says whether it is the human's own is whether what
+/// they keep in it came with it.
+const ABOVE_THE_VERSIONS: &str = ".local/share/claude";
+const BESIDE_THE_VERSIONS: &str = ".local/share/claude/what-the-human-keeps-there";
 
 /// The `claude` that install left there, and what it says when it runs.
 ///
@@ -86,6 +107,11 @@ struct Standing {
     /// Where the human's own install is, which is on the server's `PATH` and
     /// under the server's home.
     install: PathBuf,
+
+    /// And where the `claude` in it links to: the version's own directory,
+    /// which no `PATH` names and which a session reaches on the program's
+    /// account alone.
+    version: PathBuf,
 
     /// And a directory that is on that `PATH` and under neither the home nor
     /// the platform's own floor — which the composing drops, and which nothing
@@ -137,10 +163,20 @@ async fn standing() -> Standing {
     let state = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
 
-    // What the human installed, where their installer put it.
+    // What the human installed, in the shape their installer left it: the
+    // program under a versions directory of its own, and a link to it on the
+    // `PATH`.
     let install = home.path().join(NATIVE_INSTALL);
+    let version = home.path().join(NATIVE_VERSION);
     std::fs::create_dir_all(&install).unwrap();
-    program(&install.join("claude"), A_CLAUDE);
+    std::fs::create_dir_all(&version).unwrap();
+    program(&version.join("claude"), A_CLAUDE);
+    std::os::unix::fs::symlink(version.join("claude"), install.join("claude")).unwrap();
+    std::fs::write(
+        home.path().join(BESIDE_THE_VERSIONS),
+        "what the human keeps beside their install\n",
+    )
+    .unwrap();
 
     // And a directory on the same `PATH` that is nobody's home and no part of
     // the machine's own toolchain — an `/opt/something/bin`, which is what the
@@ -260,6 +296,7 @@ async fn standing() -> Standing {
         state,
         home,
         install,
+        version,
         outside,
         conversation,
         profile,
@@ -409,12 +446,17 @@ async fn the_harness_under_the_servers_home_is_what_a_linux_session_runs() {
         &format!(
             r#"
             say path "$PATH"
+            say updater "${{DISABLE_AUTOUPDATER-unset}}"
             dir {install} install
+            dir {version} version
+            file {beside} beside-the-versions
             dir {outside} outside
             file "$HOME/.claude/skills/the-accounts-own/SKILL.md" the-accounts-own
             dir "$HOME/.claude/skills" account-skills
             "#,
             install = quoted(&standing.install),
+            version = quoted(&standing.version),
+            beside = quoted(&standing.home.path().join(BESIDE_THE_VERSIONS)),
             outside = quoted(&standing.outside),
         ),
     );
@@ -423,6 +465,22 @@ async fn the_harness_under_the_servers_home_is_what_a_linux_session_runs() {
         reported["install"], "read",
         "the human's own install is read-only inside: a session that could \
          write there could rewrite the harness the next one runs",
+    );
+    assert_eq!(
+        reported["version"], "read",
+        "and the versions directory the link lands in is read-only with it — \
+         a `PATH` grant alone would leave a session a dangling link",
+    );
+    assert_eq!(
+        reported["beside-the-versions"], "absent",
+        "the directory holding the file and nothing above it: what a session \
+         needs is the version it runs, and what the human keeps beside it is \
+         theirs",
+    );
+    assert_eq!(
+        reported["updater"], "1",
+        "and a Claude session is told not to update itself, that install being \
+         read-only inside and the human's own besides",
     );
     assert_eq!(
         reported["outside"], "absent",
@@ -480,6 +538,23 @@ async fn the_harness_under_the_servers_home_is_read_and_run_by_a_macs_policy() {
         !policy.contains(&in_policy(&real(&standing.outside))),
         "while a `PATH` entry under neither the home nor the machine's own \
          floor is in no rule at all:\n{policy}",
+    );
+
+    let version = in_policy(&real(&standing.version));
+
+    assert!(
+        policy.contains(&format!(
+            "(allow file-read* file-map-executable process-exec* (subpath {version}))"
+        )),
+        "the versions directory the `claude` on the `PATH` links into is read \
+         and run the same way, a link nothing followed being a link to \
+         nothing:\n{policy}",
+    );
+    assert!(
+        !policy.contains(&in_policy(&real(
+            &standing.home.path().join(ABOVE_THE_VERSIONS)
+        ))),
+        "and nothing above it is in a rule at all:\n{policy}",
     );
 }
 

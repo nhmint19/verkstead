@@ -30,8 +30,13 @@
 //! session cannot come to disagree: a harness found somewhere no session looks
 //! would be a row that ticked and a session that could not start, which is
 //! exactly the failure the wizard exists to move forward in time. The names are
-//! [`crate::sessions::binary`]'s, for the same reason: what a row is about is
-//! the program a session is launched as.
+//! [`crate::sandbox::PROGRAMS`]'s, which is the harness names
+//! [`crate::sessions::binary`] gives with `git` and `gh` beside them: what a row
+//! is about is a program a session is launched as or reaches for, and every one
+//! of them is followed into its install by the sandbox and by the probe alike —
+//! see [`crate::sandbox::install`]. So a name that is a link into somewhere no
+//! session can reach reads absent here, a row promising a session that starts
+//! rather than a file that happens to be on a list.
 //!
 //! **The accounts are found in the server's own home**, which is where an
 //! agent that has been logged into once wrote one. What a shape is made of is
@@ -116,13 +121,15 @@ const SHELL: &str = "/bin/sh";
 /// The program the Linux sandbox row is about.
 const BWRAP: &str = "bwrap";
 
-/// And the two rows that are neither a sandbox nor a harness: the one that
-/// gates and the one that never does.
-const GIT: &str = "git";
-const GH: &str = "gh";
-
 /// Which harness row is which agent's, so that the name each is probed under is
 /// the program a session of that type is launched as.
+///
+/// The names themselves are the sandbox module's — [`sandbox::PROGRAMS`], which
+/// holds these four with the `git` and `gh` a row is drawn for beside them —
+/// because what is done with a name is that module's: every name here is
+/// followed into its install and granted where that install is the human's own.
+/// What holds the two lists together is
+/// `every_name_the_wizard_has_a_row_for_is_a_name_a_session_is_followed_into`.
 const HARNESSES: &[(Dependency, store::AgentType)] = &[
     (Dependency::Claude, store::AgentType::Claude),
     (Dependency::Codex, store::AgentType::Codex),
@@ -232,13 +239,13 @@ impl Machine {
     fn rows(&self) -> Vec<DependencyView> {
         let mut rows = vec![row(Dependency::Sandbox, self.sandbox())];
 
-        rows.push(row(Dependency::Git, self.installed(GIT)));
+        rows.push(row(Dependency::Git, self.installed(sandbox::GIT)));
 
         rows.extend(HARNESSES.iter().map(|(dependency, agent_type)| {
             row(*dependency, self.installed(sessions::binary(*agent_type)))
         }));
 
-        rows.push(row(Dependency::Gh, self.installed(GH)));
+        rows.push(row(Dependency::Gh, self.installed(sandbox::GH)));
 
         rows
     }
@@ -276,13 +283,34 @@ impl Machine {
     /// say is whether to install one, and a path would be a fact about this
     /// machine that no instruction is written from.
     fn installed(&self, program: &str) -> DependencyState {
-        match self.found(program) {
+        match self.reaches(program) {
             Some(_) => DependencyState::Present,
             None => DependencyState::Absent { trouble: None },
         }
     }
 
-    /// Where `program` is on the `PATH` a session gets, or nothing.
+    /// Where `program` really is for a session: resolved on the `PATH` a
+    /// session gets and followed into whatever it links into — see
+    /// [`sandbox::install`], which is the rule and is the same one the sandbox
+    /// grants by.
+    ///
+    /// So a `~/.local/bin/claude` linking into the versions directory the
+    /// native installer keeps is a row that ticks, and one linking into
+    /// somewhere no session can reach is a row that says absent: what a row
+    /// promises is a session that can start.
+    fn reaches(&self, program: &str) -> Option<PathBuf> {
+        sandbox::install(
+            self.platform,
+            program,
+            Some(self.path.as_os_str()),
+            self.pathext.as_deref(),
+            self.home.as_deref(),
+        )
+    }
+
+    /// And where `program` is for the *server*, which is a different question
+    /// and has one asker: the Linux sandbox row runs `bwrap` out here rather
+    /// than inside anything, so what it needs is a file this process can start.
     fn found(&self, program: &str) -> Option<PathBuf> {
         sandbox::on_the_path(
             self.platform,
@@ -340,7 +368,7 @@ impl Machine {
             return None;
         }
 
-        let git = self.found(GIT)?;
+        let git = self.found(sandbox::GIT)?;
         let run = Command::new(git)
             .args(["config", "--global", "--get", key])
             .stdin(Stdio::null())
@@ -752,6 +780,19 @@ mod tests {
         )
     }
 
+    /// A Linux machine whose session `PATH` is `dir` and whose server is
+    /// running under `servers_home` — the two the per-user rules are read
+    /// against, which the one-directory machine above cannot say apart.
+    fn looking_in(dir: &Path, servers_home: &Path) -> Machine {
+        Machine::stated(
+            Platform::Linux,
+            dir.as_os_str().to_owned(),
+            None,
+            None,
+            &home(Platform::Linux, servers_home),
+        )
+    }
+
     /// An environment naming `dir` as the home, in whichever variable this
     /// platform keeps one in.
     fn home(platform: Platform, dir: &Path) -> Environment {
@@ -836,7 +877,7 @@ mod tests {
         };
 
         program(
-            &dir.join(GIT),
+            &dir.join(sandbox::GIT),
             &format!(
                 r#"#!/bin/sh
 test "$1 $2 $3" = 'config --global --get' || exit 2
@@ -855,7 +896,7 @@ esac
     /// And a `gh` that is logged in as somebody, or is not.
     #[cfg(unix)]
     fn a_gh(dir: &Path, token: Option<&str>) -> Gh {
-        let path = dir.join(GH);
+        let path = dir.join(sandbox::GH);
 
         program(
             &path,
@@ -1026,6 +1067,101 @@ echo {token}
             state(&machine, Dependency::Codex),
             DependencyState::Absent { trouble: None },
             "and the three that are not there say so, with nothing to say about it",
+        );
+    }
+
+    /// A harness the vendor's own installer left is a link into a versions
+    /// directory, and the row that ticks for it is the row for the file that
+    /// link lands on.
+    ///
+    /// The install this whole feature is about, asked of the wizard: the sandbox
+    /// grants the directory it lands in — see [`sandbox::installs`] — so the row
+    /// and the session are saying the one thing.
+    #[cfg(unix)]
+    #[test]
+    fn a_harness_linked_into_its_own_install_under_the_home_is_present() {
+        let servers_home = tempfile::tempdir().unwrap();
+        let local = servers_home.path().join(".local/bin");
+        let version = servers_home
+            .path()
+            .join(".local/share/claude/versions/0.0.0");
+
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::create_dir_all(&version).unwrap();
+        program(&version.join("claude"), "#!/bin/sh\n");
+        std::os::unix::fs::symlink(version.join("claude"), local.join("claude")).unwrap();
+
+        let machine = looking_in(&local, servers_home.path());
+
+        assert_eq!(
+            state(&machine, Dependency::Claude),
+            DependencyState::Present,
+            "a session would follow that link and run what is at the end of it",
+        );
+    }
+
+    /// And a link into somewhere no session can reach, or one that leads
+    /// nowhere at all, reads absent: what a row promises is a session that can
+    /// start, rather than a file that happens to be on a list.
+    #[cfg(unix)]
+    #[test]
+    fn a_harness_linking_out_of_the_home_or_to_nothing_is_absent() {
+        let servers_home = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let local = servers_home.path().join(".local/bin");
+
+        std::fs::create_dir_all(&local).unwrap();
+
+        // An install nothing binds — an `/opt/claude`, which a session opens
+        // and finds absent.
+        program(&elsewhere.path().join("claude"), "#!/bin/sh\n");
+        std::os::unix::fs::symlink(elsewhere.path().join("claude"), local.join("claude")).unwrap();
+
+        // And what an uninstall leaves behind.
+        std::os::unix::fs::symlink(servers_home.path().join("gone/codex"), local.join("codex"))
+            .unwrap();
+
+        let machine = looking_in(&local, servers_home.path());
+
+        assert_eq!(
+            state(&machine, Dependency::Claude),
+            DependencyState::Absent { trouble: None },
+            "a link into somewhere a session cannot reach is not a harness a \
+             session has",
+        );
+        assert_eq!(
+            state(&machine, Dependency::Codex),
+            DependencyState::Absent { trouble: None },
+            "and neither is a link with nothing at the end of it",
+        );
+    }
+
+    /// Every name the wizard draws a row for is a name the sandbox follows into
+    /// its install, because they are the one list — see [`sandbox::PROGRAMS`].
+    ///
+    /// What this holds together is a rule and its reach: a name a row ticked for
+    /// and nothing followed would be a session handed a dangling link, and a
+    /// name followed with no row would be a program nobody is told to install.
+    #[test]
+    fn every_name_the_wizard_has_a_row_for_is_a_name_a_session_is_followed_into() {
+        let mut names: Vec<&str> = std::iter::once(sandbox::GIT)
+            .chain(
+                HARNESSES
+                    .iter()
+                    .map(|(_, agent_type)| sessions::binary(*agent_type)),
+            )
+            .chain(std::iter::once(sandbox::GH))
+            .collect();
+
+        let mut followed: Vec<&str> = sandbox::PROGRAMS.to_vec();
+
+        names.sort_unstable();
+        followed.sort_unstable();
+
+        assert_eq!(
+            names, followed,
+            "one list: a backend that lands is a row and a name followed, and \
+             neither is a second place to say so",
         );
     }
 

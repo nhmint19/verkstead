@@ -459,6 +459,22 @@ pub(crate) const OPENCODE_DB_FILE: &str = "opencode.db";
 const OPENCODE_BASH_DEFAULT_TIMEOUT: &str = "OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS";
 const OPENCODE_BASH_DEFAULT_TIMEOUT_MS: &str = "86400000";
 
+/// What tells a Claude session not to update itself.
+///
+/// Claude's native binary keeps its versions under
+/// `~/.local/share/claude/versions/` and writes a new one there when it finds
+/// one, and that directory is read-only inside a session — see [`installs`],
+/// which is what puts it inside at all. So an updater in there is a session
+/// spending its first minutes on a write that cannot land, and a human's own
+/// install is not a session's to move on either: what version the human runs is
+/// theirs to say, and a session that changed it would change what every later
+/// session runs.
+///
+/// Claude's own spelling, which is why it is named here rather than composed:
+/// moving it costs one edit. Nothing but that backend reads it, so nothing else
+/// is told it.
+const DISABLE_AUTOUPDATER: &str = "DISABLE_AUTOUPDATER";
+
 /// Which backend a session is running, in its own environment.
 ///
 /// Set for the Guide alone. Nothing else inside a sandbox needs to know — the
@@ -728,11 +744,12 @@ pub fn machine_path(platform: Platform) -> OsString {
 ///   directory, which is a Worktree here rather than somewhere to go looking
 ///   for a program.
 /// - **An entry neither under the server's home nor under the platform's own
-///   floor is dropped**, because a session cannot reach it: what a sandbox
-///   makes readable is [`SYSTEM`] and the per-user directories the `PATH`
-///   itself named, and nothing else. That is what takes the `/mnt/c/...`
-///   entries WSL appends off the end of it, and `/snap/bin` and an
-///   `/opt/something/bin` with them.
+///   floor is dropped**, because a session cannot reach it — see
+///   [`reachable`], which is the one question and is asked of a followed link's
+///   target too: what a sandbox makes readable is [`SYSTEM`] and the per-user
+///   directories the `PATH` itself named, and nothing else. That is what takes
+///   the `/mnt/c/...` entries WSL appends off the end of it, and `/snap/bin`
+///   and an `/opt/something/bin` with them.
 ///
 /// Then [`LINUX_PATH`] or [`APPLE_PATH`] under it, deduplicated against what is
 /// already there: a server started from a unit file with a `PATH` of two
@@ -746,20 +763,15 @@ pub fn machine_path(platform: Platform) -> OsString {
 /// a grant written on the entry rather than by a mount table, so an entry that
 /// is not the human's own is an entry a session finds nothing in.
 pub(crate) fn composed(platform: Platform, servers: &OsStr, home: Option<&Path>) -> OsString {
-    let (floor, reachable) = match platform {
-        Platform::Linux => (LINUX_PATH, LINUX_SYSTEM),
-        Platform::MacOs => (APPLE_PATH, APPLE_SYSTEM),
+    let floor = match platform {
+        Platform::Linux => LINUX_PATH,
+        Platform::MacOs => APPLE_PATH,
         Platform::Windows => return servers.to_owned(),
     };
 
     let named = apart(servers)
         .filter(|entry| rooted(entry))
-        .filter(|entry| {
-            home.is_some_and(|home| within(entry, home.as_os_str()))
-                || reachable
-                    .iter()
-                    .any(|directory| within(entry, OsStr::new(directory)))
-        });
+        .filter(|entry| reachable(platform, entry, home));
 
     let mut kept: Vec<&OsStr> = Vec::new();
 
@@ -887,6 +899,223 @@ pub(crate) fn per_user(platform: Platform, path: &OsStr, home: &Path) -> Vec<Pat
 /// itself — [`within`] less the one case that would hand over a whole home.
 fn beneath(path: &OsStr, directory: &OsStr) -> bool {
     within(path, directory) && !same(path, directory)
+}
+
+/// Whether a session could reach `path` at all, which is the one question a
+/// `PATH` entry is kept by and a followed link's target is found by.
+///
+/// Two ways to be reachable and no third. **Under the home of whoever runs the
+/// server**, where a grant of Verkstead's own is what puts it inside — see
+/// [`per_user`] for the `PATH`'s own entries and [`installs`] for the
+/// directories a program's links land in, which are the two things that make
+/// this true rather than merely hoped. Or **under the platform's own floor**,
+/// which is the system every sandbox holds already — see [`system`].
+///
+/// Nothing else, and that is the boundary rather than a shortcut: a path this
+/// says nothing of is a path a session opens and finds absent, so a `PATH`
+/// entry naming one is worth nothing and a link leading to one is a program
+/// that would fail to exec.
+fn reachable(platform: Platform, path: &OsStr, home: Option<&Path>) -> bool {
+    home.is_some_and(|home| within(path, home.as_os_str()))
+        || system(platform)
+            .iter()
+            .any(|directory| within(path, OsStr::new(directory)))
+}
+
+/// The system directories a session on `platform` holds read-only — [`SYSTEM`]
+/// asked of a platform rather than of the build, the way every other arm here
+/// is a value rather than a `cfg`.
+///
+/// Nothing at all on Windows, where no directory is bound and reach is decided
+/// by a grant written on the real path instead — which is why the two callers
+/// return before ever asking this with one.
+fn system(platform: Platform) -> &'static [&'static str] {
+    match platform {
+        Platform::Linux => LINUX_SYSTEM,
+        Platform::MacOs => APPLE_SYSTEM,
+        Platform::Windows => &[],
+    }
+}
+
+/// Every program a session is launched as or reaches for by name: the four
+/// harnesses, then `git` and `gh`.
+///
+/// **One list, and it is every name the wizard has a row for** — see
+/// [`crate::onboarding`], whose rows are drawn from the same names and whose
+/// probe is [`install`] below, so a row and a session cannot come to disagree
+/// about which file a name is. Adding a name here is the whole of extending the
+/// rule: it is resolved on a session's `PATH`, followed into whatever install
+/// it links into, and granted where that install is the human's own.
+///
+/// The harness names are [`crate::sessions::binary`]'s rather than written
+/// again, because what a row is about is the program a session of that type is
+/// launched as.
+pub(crate) const PROGRAMS: &[&str] = &[
+    crate::sessions::binary(store::AgentType::Claude),
+    crate::sessions::binary(store::AgentType::Codex),
+    crate::sessions::binary(store::AgentType::Grok),
+    crate::sessions::binary(store::AgentType::OpenCode),
+    GIT,
+    GH,
+];
+
+/// The two names on that list that are nobody's harness: the one every session
+/// works with and the one it opens a pull request with.
+pub(crate) const GIT: &str = "git";
+pub(crate) const GH: &str = "gh";
+
+/// Where `program` really is for a session: the name resolved on `path` the way
+/// `platform` reads one, and then its symlink chain followed to the file that
+/// would actually run.
+///
+/// **A name that is a link is followed, and where it lands has to be somewhere
+/// a session can reach** — see [`reachable`], the same question a `PATH` entry
+/// is kept by. Claude's native installer leaves `~/.local/bin/claude` a link
+/// into `~/.local/share/claude/versions/`, which is under the home and is
+/// granted on the program's account — see [`installs`]. A link into
+/// `/opt/claude`, and one that leads nowhere at all, are `None` here: a session
+/// given that name would find a path with nothing behind it, and a row that
+/// ticked on one would be a row promising a session that cannot start.
+///
+/// **A name that resolves to a file where it stands is found as it is.** The
+/// entry it was found in is one [`composed`] already kept, which is that same
+/// question asked of the directory, so there is nothing left to ask of the
+/// file.
+///
+/// **And the search goes on past one that lands nowhere**, rather than stopping
+/// at the first entry holding the name. That is what a session's own `execvp`
+/// does: a link with nothing behind it is `ENOENT`, and `ENOENT` is what makes
+/// a `PATH` search a search. So a stale link in `~/.local/bin` leaves the
+/// distribution's own `claude` further down the list still found — which is
+/// [`on_the_path`]'s walk with one more thing asked of each candidate, and is
+/// why this does not simply call it.
+///
+/// **Windows follows nothing here.** What a session reaches on that platform is
+/// granted on the real path rather than bound, and what a name means there is
+/// `%PATHEXT%`'s — see [`on_the_path`], which is the whole of the resolving
+/// there.
+///
+/// Blocks: a handful of `stat` calls, and a `readlink` per hop.
+pub(crate) fn install(
+    platform: Platform,
+    program: &str,
+    path: Option<&OsStr>,
+    pathext: Option<&OsStr>,
+    home: Option<&Path>,
+) -> Option<PathBuf> {
+    match platform {
+        Platform::Windows => on_the_path(platform, program, path, pathext),
+        Platform::Linux | Platform::MacOs => apart(path?)
+            .map(|directory| Path::new(directory).join(program))
+            .find_map(|candidate| {
+                // Nothing at that name, or a chain with nothing at the end of
+                // it: the next entry is where the search goes.
+                let landed = lands_on(&candidate)?;
+
+                (landed == candidate || reachable(platform, landed.as_os_str(), home))
+                    .then_some(landed)
+            }),
+    }
+}
+
+/// The file `program` finally is: its symlink chain followed to the end, or
+/// `None` where the chain leads to nothing or goes round in circles.
+///
+/// The chain rather than [`std::fs::canonicalize`], which would resolve every
+/// directory above the file as well: what is being followed is the link an
+/// installer left, and a home reached through a symlink of the machine's own —
+/// which is every Mac's `/var` and every temporary directory under it — would
+/// otherwise come back spelled a way the home it is measured against is not.
+///
+/// A relative target is read against the directory the link is in, the way the
+/// kernel reads one, and [`HOPS`] is where a chain that never ends stops.
+fn lands_on(program: &Path) -> Option<PathBuf> {
+    let mut at = program.to_owned();
+
+    for _ in 0..HOPS {
+        let Ok(target) = std::fs::read_link(&at) else {
+            // Not a link, or nothing at all: the first is the end of the chain
+            // and the second is a chain that led nowhere, and what tells them
+            // apart is whether there is a file there.
+            return at.is_file().then_some(at);
+        };
+
+        at = match target.is_absolute() {
+            true => target,
+            false => at.parent()?.join(target),
+        };
+    }
+
+    None
+}
+
+/// How many links are followed before a chain is one nothing is at the end of.
+///
+/// The kernel's own limit, so that what this gives up on is what an `exec`
+/// would have given up on: a chain longer than this is `ELOOP` to whoever runs
+/// the program, which is a program that is not there.
+const HOPS: usize = 40;
+
+/// The directories a session has to be granted on a *program's* account: for
+/// every name on [`PROGRAMS`], the directory holding the file that name lands
+/// on, where that is under the home of whoever runs the server.
+///
+/// [`per_user`]'s sibling and the other half of the same hole. That one grants
+/// the directories a session's `PATH` names, which is `~/.local/bin`; this one
+/// grants what the program in there is a link *into*, which for Claude's native
+/// install is `~/.local/share/claude/versions/X` — a directory no `PATH` names
+/// and one a session without it finds a dangling link at.
+///
+/// **The directory holding the file and nothing above it.** A version's own
+/// directory rather than the versions directory it is in, and an install's own
+/// rather than the `~/.local/share` half the machine keeps everything else in
+/// too: what a session needs is the file it runs and what sits beside it.
+///
+/// **Read-only, strictly under the home, and only what [`install`] found.** A
+/// link into somewhere else is not on this list, which is what keeps the hole
+/// where [`per_user`] left it — nothing outside the home is bound on a link's
+/// account. A directory the `PATH` itself already names is not on it either:
+/// that one is [`per_user`]'s, and a path said twice in a description is a path
+/// said once.
+///
+/// **Nothing at all on Windows**, for [`per_user`]'s reason: the same rule is
+/// the boundary's own there, written on the real path as the container is made.
+pub(crate) fn installs(platform: Platform, path: &OsStr, home: &Path) -> Vec<PathBuf> {
+    let mut directories: Vec<PathBuf> = Vec::new();
+
+    if platform == Platform::Windows {
+        return directories;
+    }
+
+    for program in PROGRAMS {
+        let Some(landed) = install(platform, program, Some(path), None, Some(home)) else {
+            continue;
+        };
+
+        let Some(directory) = holding(&landed, home) else {
+            continue;
+        };
+
+        if !apart(path).any(|entry| same(entry, directory.as_os_str()))
+            && !directories.contains(&directory)
+        {
+            directories.push(directory);
+        }
+    }
+
+    directories
+}
+
+/// The directory holding `landed` where that is a directory to grant: strictly
+/// under `home`, for [`per_user`]'s reason — a file the human keeps in their
+/// home itself would otherwise grant their whole account read-only.
+///
+/// `None` where it is anywhere else, which is a file a session reaches through
+/// the floor already or not at all.
+fn holding(landed: &Path, home: &Path) -> Option<PathBuf> {
+    let directory = landed.parent()?;
+
+    beneath(directory.as_os_str(), home.as_os_str()).then(|| directory.to_owned())
 }
 
 /// Where `program` is on `path`, read the way `platform` reads a name, or
@@ -3006,6 +3235,20 @@ impl Sandbox {
             surface.own(directory, Reach::ReadOnly);
         }
 
+        // And where a program on that `PATH` is a link into an install of the
+        // human's own, the directory it lands in with them — see [`installs`],
+        // which is where that rule and its bounds are. Claude's native
+        // installer leaves `~/.local/bin/claude` linking into
+        // `~/.local/share/claude/versions/`, and the grant above alone would
+        // give a session a dangling link.
+        //
+        // Beside the entries rather than before or after them: both are the
+        // human's own directories read-only, and the same later word stands
+        // over the two.
+        for directory in installs(self.platform, &session_path, &self.servers_home) {
+            surface.own(directory, Reach::ReadOnly);
+        }
+
         surface
             .own(&self.worktree, Reach::ReadWrite)
             .own(&self.git_dir, Reach::ReadWrite);
@@ -3163,6 +3406,19 @@ impl Sandbox {
         // host's profile the moment it starts.
         if self.shell.is_some() {
             surface.set(NIXOS_ENVIRONMENT_DONE, "1");
+        }
+
+        // What a Claude session is told about itself: that it is not to update
+        // the install it is running. The native binary writes a new version
+        // into `~/.local/share/claude/versions/`, which is read-only inside —
+        // see [`installs`], which is what puts it inside — so an updater in
+        // there is a session spending its first minutes failing at something
+        // nobody asked it to do, and the install is the human's own besides.
+        // Every Claude session wherever `claude` was found, rather than only
+        // the ones that found the human's: a session is never what moves an
+        // install on, whosever it is.
+        if matches!(self.account, store::Account::Claude { .. }) {
+            surface.set(DISABLE_AUTOUPDATER, "1");
         }
 
         // The two an OpenCode session is told about itself: where its store
@@ -3841,6 +4097,236 @@ mod tests {
             per_user(Platform::Windows, local.as_os_str(), home.path()).is_empty(),
             "what a Windows session reaches is an access-control entry rather \
              than a bind, and the description carries none of it",
+        );
+    }
+
+    /// A harness the vendor's own installer left is a link into a versions
+    /// directory no `PATH` names, and that directory is what a session is
+    /// granted on the program's account.
+    ///
+    /// The install this whole feature is about: `~/.local/bin/claude` linking
+    /// into `~/.local/share/claude/versions/`, which the `PATH` grant alone
+    /// leaves a session a dangling link at.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_into_an_install_under_the_home_is_granted_the_directory_it_lands_in() {
+        let home = tempfile::tempdir().unwrap();
+        let (local, version) = (
+            home.path().join(".local/bin"),
+            home.path().join(".local/share/claude/versions/0.0.0"),
+        );
+
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::create_dir_all(&version).unwrap();
+        std::fs::write(version.join("claude"), "#!/bin/sh\n").unwrap();
+        std::os::unix::fs::symlink(version.join("claude"), local.join("claude")).unwrap();
+
+        let path = joined(&[local.as_os_str(), OsStr::new("/usr/bin")]);
+
+        for platform in [Platform::Linux, Platform::MacOs] {
+            assert_eq!(
+                install(platform, "claude", Some(&path), None, Some(home.path()),).as_deref(),
+                Some(version.join("claude").as_path()),
+                "what a session runs is the file the link lands on",
+            );
+            assert_eq!(
+                installs(platform, &path, home.path()),
+                vec![version.clone()],
+                "so the directory holding it is granted, and nothing above it",
+            );
+        }
+    }
+
+    /// And a program that is a file where it stands grants nothing further: the
+    /// directory it is in is the `PATH` entry [`per_user`] already granted, and
+    /// a description that said it twice would say it once.
+    #[cfg(unix)]
+    #[test]
+    fn a_program_that_is_no_link_is_granted_nothing_beyond_its_path_entry() {
+        let home = tempfile::tempdir().unwrap();
+        let local = home.path().join(".local/bin");
+
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::write(local.join("claude"), "#!/bin/sh\n").unwrap();
+
+        let path = joined(&[local.as_os_str()]);
+
+        assert_eq!(
+            install(
+                Platform::Linux,
+                "claude",
+                Some(&path),
+                None,
+                Some(home.path())
+            )
+            .as_deref(),
+            Some(local.join("claude").as_path()),
+            "the file is found where it stands",
+        );
+        assert!(
+            installs(Platform::Linux, &path, home.path()).is_empty(),
+            "and the directory it is in is the entry itself, which is \
+             `per_user`'s to grant",
+        );
+    }
+
+    /// A link into somewhere outside the home, and one that leads nowhere at
+    /// all, are both a name a session does not have: the row reads absent, and
+    /// neither directory is bound on the link's account.
+    ///
+    /// Which is what keeps the hole where [`per_user`] left it — nothing
+    /// outside the home becomes reachable because a program pointed at it — and
+    /// what keeps a session from being handed a name that would fail to exec.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_out_of_the_home_and_a_link_to_nothing_are_both_a_name_not_found() {
+        let home = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let local = home.path().join(".local/bin");
+
+        std::fs::create_dir_all(&local).unwrap();
+
+        // An install of the machine's own, somewhere no sandbox binds: an
+        // `/opt/claude` is what this stands for, and a temporary directory is
+        // under neither the home nor the floor the same way.
+        std::fs::write(elsewhere.path().join("claude"), "#!/bin/sh\n").unwrap();
+        std::os::unix::fs::symlink(elsewhere.path().join("claude"), local.join("claude")).unwrap();
+
+        // And a link whose target was taken away, which is what an uninstall
+        // leaves behind.
+        std::os::unix::fs::symlink(home.path().join("gone/codex"), local.join("codex")).unwrap();
+
+        let path = joined(&[local.as_os_str()]);
+
+        for program in ["claude", "codex"] {
+            assert_eq!(
+                install(
+                    Platform::Linux,
+                    program,
+                    Some(&path),
+                    None,
+                    Some(home.path())
+                ),
+                None,
+                "a session given `{program}` would find a path with nothing \
+                 behind it, so the name is not found at all",
+            );
+        }
+
+        assert!(
+            installs(Platform::Linux, &path, home.path()).is_empty(),
+            "and nothing is bound on either link's account",
+        );
+    }
+
+    /// And a link that lands nowhere a session reaches does not end the search:
+    /// the entry after it is where a session's own `execvp` would go next, an
+    /// `ENOENT` being what makes a `PATH` search a search.
+    ///
+    /// Which is the case a machine really has: a `~/.local/bin/claude` left over
+    /// from an install that has gone, and the distribution's own further down
+    /// the list.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_landing_nowhere_leaves_the_entry_after_it_still_found() {
+        let home = tempfile::tempdir().unwrap();
+        let (local, system) = (home.path().join(".local/bin"), home.path().join("system"));
+
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::create_dir_all(&system).unwrap();
+        std::os::unix::fs::symlink(home.path().join("gone/claude"), local.join("claude")).unwrap();
+        std::fs::write(system.join("claude"), "#!/bin/sh\n").unwrap();
+
+        let path = joined(&[local.as_os_str(), system.as_os_str()]);
+
+        assert_eq!(
+            install(
+                Platform::Linux,
+                "claude",
+                Some(&path),
+                None,
+                Some(home.path())
+            )
+            .as_deref(),
+            Some(system.join("claude").as_path()),
+            "the stale link is passed over rather than answered with",
+        );
+        assert_eq!(
+            installs(Platform::Linux, &path, home.path()),
+            Vec::<std::path::PathBuf>::new(),
+            "and what was found is a `PATH` entry's own file, which grants \
+             nothing further",
+        );
+    }
+
+    /// A link into the machine's own toolchain is found all the same, and
+    /// nothing is granted for it: the floor is a directory every session holds
+    /// already.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_into_the_machines_own_floor_is_found_and_granted_nothing() {
+        assert!(
+            reachable(Platform::Linux, OsStr::new("/usr/lib/git/git"), None),
+            "what a `/usr/bin/git` linking into the machine's own lands on is \
+             under the floor, which is bound in every sandbox there is",
+        );
+        assert!(
+            !reachable(Platform::Linux, OsStr::new("/opt/claude/claude"), None),
+            "and an install nothing binds is somewhere a session opens and \
+             finds absent",
+        );
+        assert!(
+            reachable(
+                Platform::Linux,
+                OsStr::new("/home/you/.local/bin/claude"),
+                Some(Path::new("/home/you"))
+            ),
+            "while the human's own home is reachable because Verkstead grants \
+             it — see `per_user` and `installs`",
+        );
+    }
+
+    /// And on Windows nothing is followed and nothing is granted: what a
+    /// session reaches there is written on the real path as the container is
+    /// made, and what a name means is `%PATHEXT%`'s.
+    #[test]
+    fn a_windows_name_is_resolved_and_left_where_it_was_found() {
+        let home = tempfile::tempdir().unwrap();
+        let local = home.path().join("AppData/Roaming/npm");
+
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::write(local.join("claude.CMD"), "@echo off\n").unwrap();
+
+        assert_eq!(
+            install(
+                Platform::Windows,
+                "claude",
+                Some(local.as_os_str()),
+                Some(OsStr::new(".COM;.EXE;.BAT;.CMD")),
+                Some(home.path()),
+            )
+            .as_deref(),
+            Some(local.join("claude.CMD").as_path()),
+            "the name resolves by that platform's rules and nothing more is \
+             asked of it",
+        );
+        assert!(
+            installs(Platform::Windows, local.as_os_str(), home.path()).is_empty(),
+            "and the description carries none of it, the rule being the \
+             boundary's own there",
+        );
+    }
+
+    /// The names followed are one list, and it is every name the wizard has a
+    /// row for: a backend that lands adds one arm to
+    /// [`crate::sessions::binary`] and appears here with it.
+    #[test]
+    fn the_names_a_session_is_followed_into_are_the_harnesses_and_the_two_tools() {
+        assert_eq!(
+            PROGRAMS,
+            &["claude", "codex", "grok", "opencode", "git", "gh"],
+            "the four harnesses, then the one every session works with and the \
+             one it opens a pull request with",
         );
     }
 
