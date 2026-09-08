@@ -697,18 +697,60 @@ Conversation gets that directory **read-only** at `/verkstead/attachments`
 itself), and its prompt ends with a neutral `# Attached files` listing of each
 file's path and size, in the tone of the companions listing: what is there and
 where, and nothing about what to do with it, because the Brief says what a
-file is for. The copy is the record, and an agent that wants to work on one
-copies it into the Worktree.
+file is for. **The listing is grouped under what each file was attached to** —
+the Brief's under one line, and an Answer's under the title of the Set it was
+put on and the label of the Question it answers — in the order they were
+attached, which puts the Brief's group first. The copy is the record, and an
+agent that wants to work on one copies it into the Worktree.
+**The directory is there at every launch, made empty where nothing has been
+attached**, because a session blocked on an ask goes on running while the human
+answers it: a file put on an Answer an hour in lands in a directory that
+session already reads, and the Response names it there. Nothing is said about
+an empty one — the listing is of the files there are, so a Conversation with
+none is told nothing at all.
 
-**What a file is attached to is its origin.** The Brief is the one origin
-there is, and an Answer to a Question Set is the one planned next — a second
-value on the same record rather than a second kind of thing, the upload being
-the Conversation's and not the Brief's. Attachments freeze with the Brief:
-attached and removed while the round drafts, fixed once the work starts, and
-the frozen Brief pane draws them as a read-only row under the text. A Share
-carries the names and sizes and never the bytes. A same-named file is not
-replaced: the newcomer is renamed `name-2.ext`, and both stay. One flat
-directory per Conversation, 32 MB a file, any kind of file, folders skipped.
+**What a file is attached to is its origin, and there are two of them.** The
+Brief, and an Answer to a Question Set — a second value on the same record
+rather than a second kind of thing, the upload being the Conversation's and
+not the Brief's. **An Answer's file is keyed by the Set it was put on and the
+label of the Question it answers**, which is what its pills are drawn under
+and what a later session finds it named by; the Brief's are keyed by neither.
+The two share the one directory, so a file named like one already there is
+renamed whichever origin either of them has.
+
+**An Answer's file reaches a session three ways, and every one of them names
+the same path.** The agent waiting on the Set is handed it on the Response, in
+that Answer's `attachments` list. Every session started afterwards has it in
+the prompt's `# Attached files` listing, under the Set's title and the
+Question. And a session primed with an exchange it was not there for — the
+digest a Deferred Ask is folded into a prompt as, and the summary a relaunched
+grilling or a picked-up follow-up is started on — has it named under the
+decision it came with, because a file handed over with an Answer is part of the
+answer.
+
+**One is put on an Answer from the answer sheet**, where every Question and
+Sub-question's free-text field carries a paperclip of its own and the whole of
+the question takes a drop; a Heading has neither, asking nothing, and the
+set-level comment box has neither either. A chosen file goes up the moment it
+is chosen rather than waiting for Submit — so its pill comes back from the
+record and survives a reload, a × takes it off again, and a Set the agent locks
+unanswered keeps what was attached as record.
+
+**Each freezes when what it is a file of does.** The Brief's are attached and
+removed while the round drafts and fixed once the work starts, and the frozen
+Brief pane draws them as a read-only row under the text. An Answer's are
+attached and removed while the Set waits, and fixed the moment it settles —
+answered or locked unanswered — or its Conversation is Closed; a Set the agent
+locked unanswered keeps what was put on it as record. **A settled Set draws
+them the way the frozen Brief does**: the record under each Answer, name and
+size and nothing to press, with no paperclip anywhere on the page — the sheet
+read back, the Set page reached from the Timeline and a Share all being one
+drawing of one record. A file may only be put
+under a label the Set actually asks, which is every Question that is not a
+Heading and every Sub-question. A Share carries the names and sizes and never
+the bytes. A same-named file is not replaced: the newcomer is renamed
+`name-2.ext`, and both stay. One flat directory per Conversation, 32 MB a
+file, any kind of file, folders skipped.
 
 **On the compose page they are held in the page until the press**, because
 nothing exists on the server until Start or Save as draft: the files ride with
@@ -2035,7 +2077,11 @@ its prompt, oldest first, under the documents the prompt is built from — a
 Deferred Ask, which had nobody to tell from the start, and a store-and-nudge one
 whose session went before it fetched. Each is
 folded once, and that it was folded is recorded rather than worked out from what
-is answered. The one session never folded into is a relaunched grilling, which
+is answered. **The digest names whatever was attached to each Answer**, under
+the decision it came with and by the path the session reads it at, because the
+session it is folded into never saw the file handed over — and the summary a
+relaunched grilling is primed with, being the same digest, names them the same
+way. The one session never folded into is a relaunched grilling, which
 is already primed with everything the Conversation has answered.
 _Avoid_: sync/async ask, hard/soft question, urgent question
 
@@ -2114,9 +2160,12 @@ _Avoid_: options table, comparison table (the Guide's generic layout
 advice), grid
 
 **Answer**:
-The human's resolution of one Question or Sub-question: a selected Option
-and/or free text. A Question left without an Answer at submission is
-Unanswered.
+The human's resolution of one Question or Sub-question: a selected Option,
+free text, and/or a file put on it — **a file alone is an Answer**, handing
+something over being answering, so the sheet sends a question carrying one and
+nothing else as answered rather than Unanswered, and the record's own rows are
+what the server counts where it checks a Response. A Question left without any
+of the three at submission is Unanswered.
 _Avoid_: reply, response (that's the whole Set)
 
 **Unanswered**:
@@ -2129,6 +2178,11 @@ _Avoid_: skipped, blank
 The submitted collection of Answers (and Unanswered markers) for a Question
 Set, plus an optional set-level comment. What the waiting agent receives.
 May contain zero Answers.
+**An Answer with files on it carries them as an `attachments` list**, each by
+the path that session reads the file at — filled in from the record on the way
+out rather than sent in, so what is stored is what the human submitted and one
+Response shape comes back from a held wait and a fetch alike. An Answer with
+no files carries no list.
 _Avoid_: submission, result
 
 **Diff**:

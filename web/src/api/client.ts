@@ -8,6 +8,8 @@
 import type {
   AbandonedRepo,
   Adopted,
+  AnswerAttached,
+  AnswerAttachmentRemoved,
   ApiError,
   Attached,
   AttachmentRemoved,
@@ -668,6 +670,56 @@ export function removeAttachment(
 ): Promise<AttachmentRemoved> {
   return post<AttachmentRemoved>(
     `/api/ui/conversations/${id}/attachments/${attachment}/remove`,
+  );
+}
+
+/// Put a file on one of a waiting Set's Answers, under the label of the
+/// Question it answers.
+///
+/// The Brief's upload said from the other page: one request per file, the raw
+/// bytes as the body, and the label and the name in the path — both encoded, so
+/// a name with a separator in it reaches the server to be refused rather than
+/// turning the request into a path that matches no route.
+///
+/// Addressed by the Set rather than by the Conversation, because that is what
+/// the sheet is a page about: where the file goes is the server's to work out.
+/// A body it would not even read comes back as `TooLarge` the way the Brief's
+/// does, and for the same reason.
+export async function attachToAnswer(
+  set: number,
+  label: string,
+  file: File,
+): Promise<AnswerAttached> {
+  const response = await fetch(
+    `/api/ui/sets/${set}/answers/${encodeURIComponent(
+      label,
+    )}/attachments/${encodeURIComponent(file.name)}`,
+    {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/octet-stream",
+      },
+      body: file,
+    },
+  );
+
+  if (response.status === 413) {
+    return "TooLarge";
+  }
+
+  return taken<AnswerAttached>(response);
+}
+
+/// And take one off an Answer again, by the row's own id — which is what the
+/// path names it by, under the Set it was put on: two files on one Set may
+/// share a name, and neither of them is a key.
+export function removeAnswerAttachment(
+  set: number,
+  attachment: number,
+): Promise<AnswerAttachmentRemoved> {
+  return post<AnswerAttachmentRemoved>(
+    `/api/ui/sets/${set}/attachments/${attachment}/remove`,
   );
 }
 

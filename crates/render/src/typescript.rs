@@ -17,21 +17,22 @@
 use ts_rs::TS;
 
 use crate::{
-    AbandonedRepo, Adopted, Attached, AttachmentRemoved, BacklogPane, BaseBranchChoice,
-    BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefSaved, Capture, CommitPane,
-    CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionModeChoice,
-    CompanionModeChosen, CompanionRemoved, ConflictResolutionEdit, ConversationArchived,
-    ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
-    ConversationUnarchived, ConversationView, Created, Creation, DirectoryListing, GrillingStarted,
-    Locked, NewAdoption, NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption,
-    OnboardingView, OpenPullRequestRepo, PrefillView, ProfileChoice, ProfileChosen, ProfileDeleted,
-    ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
-    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched,
-    RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress,
-    SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
-    SharedConversation, ShowArchived, ShowingArchived, Shown, Started, SteerOpened,
-    SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalOpened, TerminalsView,
-    TranscriptView, Unsubscribe, UpdateNotice, Watching,
+    AbandonedRepo, Adopted, AnswerAttached, AnswerAttachmentRemoved, Attached, AttachmentRemoved,
+    BacklogPane, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed, BriefEdit,
+    BriefSaved, Capture, CommitPane, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
+    CompanionModeChoice, CompanionModeChosen, CompanionRemoved, ConflictResolutionEdit,
+    ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
+    ConversationStopped, ConversationUnarchived, ConversationView, Created, Creation,
+    DirectoryListing, GrillingStarted, Locked, NewAdoption, NewCompanion, NewConversation,
+    NewOrder, NewPullRequestAdoption, OnboardingView, OpenPullRequestRepo, PrefillView,
+    ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved,
+    PullRequestDetails, PushKey, Registered, Registration, RemoteBanner, RemoteView, RepoChoice,
+    RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed,
+    RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress, SetReading, SettingsEdit,
+    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedConversation, ShowArchived,
+    ShowingArchived, Shown, Started, SteerOpened, SteerSubmission, Submitted, Subscribed,
+    Subscription, TakenUp, TerminalOpened, TerminalsView, TranscriptView, Unsubscribe,
+    UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -162,6 +163,12 @@ fn the_viewers_types_are_written_from_these() {
     // record it just made rather than with a word.
     Attached::export_all(&config).unwrap();
     AttachmentRemoved::export_all(&config).unwrap();
+
+    // And the same two presses on the answer sheet, which put a file on an
+    // Answer instead: the same record back, and refusals of their own — what
+    // fixes an Answer's files is the Set settling rather than the Brief.
+    AnswerAttached::export_all(&config).unwrap();
+    AnswerAttachmentRemoved::export_all(&config).unwrap();
 
     // And the two actions that make and unmake what a Conversation works in.
     // Neither takes a request shape — which Conversation is in the path, and

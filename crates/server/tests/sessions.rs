@@ -68,12 +68,12 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tower::ServiceExt;
 use verkstead_render::{
-    Adopted, AgentOutputEvent, Attached, BriefSaved, Capture, CommitEvent, CommitPane,
-    CompanionAdded, CompanionMode, CompanionModeChosen, CompanionView, ConflictResolution,
-    ConversationClosed, ConversationSteered, ConversationStopped, ConversationView,
-    GrillingStarted, Lifecycle, NoticeEvent, PickedView, PinnedEvent, ProfileSaved,
-    PullRequestEvent, Registered, Resolved, Resumed, Shown, Size, StageListReached, Started,
-    SteerOpened, Submitted, TaskListEvent, TaskListReached, TerminalOpened, TerminalsView,
+    Adopted, AgentOutputEvent, AnswerAttached, Attached, BriefSaved, Capture, CommitEvent,
+    CommitPane, CompanionAdded, CompanionMode, CompanionModeChosen, CompanionView,
+    ConflictResolution, ConversationClosed, ConversationSteered, ConversationStopped,
+    ConversationView, GrillingStarted, Lifecycle, NoticeEvent, PickedView, PinnedEvent,
+    ProfileSaved, PullRequestEvent, Registered, Resolved, Resumed, Shown, Size, StageListReached,
+    Started, SteerOpened, Submitted, TaskListEvent, TaskListReached, TerminalOpened, TerminalsView,
     TimelineEvent, TranscriptView, Turn, Watching,
 };
 use verkstead_schema::{Direction, Nudge};
@@ -24622,6 +24622,21 @@ async fn an_answered_deferred_set_is_folded_into_the_next_session_and_no_later_o
     // without it, and the human answers it in their own time — here, before the
     // direction is picked, so that what follows is deterministic.
     let deferred = fixture.ask_deferred(DEFERRED).await;
+
+    // And they hand a file over with the Answer, off the sheet's own paperclip.
+    // Before the Response, which is the only time a Set takes one: attaching is
+    // refused the moment it settles.
+    let attached: AnswerAttached = upload(
+        &fixture.app,
+        &format!("/api/ui/sets/{deferred}/answers/Q9/attachments/wording.txt"),
+        "429, and name the limit\n",
+    )
+    .await;
+    assert!(
+        matches!(attached, AnswerAttached::Attached { .. }),
+        "the file goes up as it is chosen: {attached:?}",
+    );
+
     assert_eq!(
         fixture
             .respond(
@@ -24673,6 +24688,24 @@ async fn an_answered_deferred_set_is_folded_into_the_next_session_and_no_later_o
         first.contains("# The Brief this started from"),
         "under the documents the prompt is built from, where the newest and \
          least general thing said goes: {first:?}",
+    );
+
+    // And what came with the Answer, twice over: named under the decision inside
+    // the digest, so the session knows what was handed over with it, and listed
+    // at the end of the prompt under the Set and the Question, where every file
+    // the Conversation holds is listed.
+    assert!(
+        first.contains("_Attached:_ `/verkstead/attachments/wording.txt`"),
+        "the file the Answer came with is named under the decision: {first:?}",
+    );
+    assert!(
+        first.contains("Attached to the Answer to Q9 of \"The wording of the rate-limit error\":"),
+        "and the listing groups it under the Set it was put on and the Question \
+         it answers: {first:?}",
+    );
+    assert!(
+        first.contains("- `/verkstead/attachments/wording.txt`, 24 bytes."),
+        "with the path and the size the Brief's own files are listed with: {first:?}",
     );
 
     for (step, prompt) in &started[1..] {

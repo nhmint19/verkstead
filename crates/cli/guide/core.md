@@ -161,8 +161,8 @@ Set shape — `title` (required), `preface`, `postscript`, and
 `questions[].{label, text, columns, options[].{n, text, recommended, cells},
 subquestions[].{letter, text, columns, options}}`.
 
-Response shape — `answers[].{label, selected, free_text, unanswered}` plus a
-set-level `comment`.
+Response shape — `answers[].{label, selected, free_text, unanswered,
+attachments}` plus a set-level `comment`.
 
 ## Authoring the Set
 
@@ -374,6 +374,12 @@ omission, and there is nothing there to follow up:
   Options, and it wins over the Options offered.
 - `unanswered: true` → **still open.** Ask a brief follow-up. Never read it as
   accepting the Recommendation.
+- `attachments` → files the human handed over with that answer, each by the
+  path this session opens it at — read-only, and there whether or not the entry
+  says anything else. **A file on its own is an answer**, so an entry carrying
+  one and nothing else has been answered rather than passed over; on an entry
+  marked `unanswered` it is something handed over with a question still open.
+  Absent where they attached nothing, which is most entries.
 - `comment` → about the Set as a whole rather than any one Question, and the
   reply to the `postscript` where the Set closed with one. Read it before acting
   on the answers; it may reframe them. **An absent `comment` means they had

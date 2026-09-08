@@ -67,6 +67,7 @@ function everySection(): SetView {
     standing: { Waiting: "waiting" },
     proposal: null,
     follow_up: false,
+    attachments: [],
   };
 }
 

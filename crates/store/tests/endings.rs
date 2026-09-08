@@ -100,6 +100,7 @@ fn answering() -> Response {
             selected: None,
             free_text: Some("Yes, seconds rather than a timestamp.".to_owned()),
             unanswered: false,
+            attachments: Vec::new(),
         }],
         comment: Some("Reads well otherwise.".to_owned()),
         direction: None,

@@ -9,6 +9,16 @@
 //! Everything the human puts in is written to `localStorage` as they put it in,
 //! and read back the next time the page is opened. The draft is per device and
 //! never sent anywhere: a phone and a laptop keep their own of the same Set.
+//!
+//! **The files are the exception, and they are not in the page at all.** Every
+//! Question and Sub-question carries a paperclip, and a file chosen or dropped
+//! on one goes up the moment it is chosen — onto the Set, under that Question's
+//! label — so what the row of pills draws is read back off the Set like the
+//! Questions themselves. Which is what makes them survive a reload the draft
+//! cannot help with, and what lets a × take one off the record rather than out
+//! of a list waiting to be sent. The attaching itself is the one piece the
+//! composers share — see [`Attaching`](../Attaching.tsx) — and what is here is
+//! the one thing that differs: where a chosen file goes.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import type { JSX } from "solid-js";
@@ -16,10 +26,18 @@ import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
 
 import app from "../App.module.css";
+import { attaching, type Shown } from "../Attaching";
 import { Modal } from "../Modal";
-import { submitResponse } from "../api/client";
+import {
+  attachToAnswer,
+  removeAnswerAttachment,
+  submitResponse,
+} from "../api/client";
 import type {
+  AnswerAttached,
+  AnswerAttachmentRemoved,
   AskView,
+  AttachmentView,
   Direction,
   OptionView,
   ProposalView,
@@ -84,6 +102,14 @@ export function Answering(props: {
   /// puts the Nothing-else option in the closing section. `false` on every
   /// other Set, which leaves the option off it.
   followUp: boolean;
+
+  /// The files already put on this Set's Answers, oldest first, each naming the
+  /// Question it was put under.
+  ///
+  /// The record rather than anything this page is holding: a pill is drawn from
+  /// this, so a reload draws the same row, and the × that takes one off is
+  /// answered by the Set being read again.
+  attachments: AttachmentView[];
 }): JSX.Element {
   // Read once rather than through a memo: the fields are the Set's own shape,
   // and rebuilding them under a human who is typing into them would throw away
@@ -127,9 +153,27 @@ export function Answering(props: {
     keepDraft(props.id, draft);
   });
 
+  // What becomes of a file put on one of these Answers, held once for the
+  // sheet: the pills each Question draws, the requests a choice and a × make,
+  // and what came back refused from either.
+  const files = putting({
+    set: () => props.id,
+    attached: () => props.attachments,
+  });
+
   /// What the sheet says right now, as a Response.
+  ///
+  /// The labels a file was put on go with it: a Question with one on it and
+  /// nothing typed or picked is answered rather than open, and the record's own
+  /// rows are what say which those are.
   const response = (): Decided =>
-    drafted(sheet.filled, sheet.comment, sheet.direction, sheet.nothing_else);
+    drafted(
+      sheet.filled,
+      sheet.comment,
+      sheet.direction,
+      sheet.nothing_else,
+      files.answered(),
+    );
 
   const queries = useQueryClient();
 
@@ -227,7 +271,11 @@ export function Answering(props: {
                   </div>
                 }
               >
-                <Asking ask={question.ask} fields={fields(question.ask.name)} />
+                <Asking
+                  ask={question.ask}
+                  fields={fields(question.ask.name)}
+                  files={files}
+                />
               </Show>
               {/* Sub-questions get no anchor of their own: one scrolls into
                   view with its parent. */}
@@ -239,6 +287,7 @@ export function Answering(props: {
                         <Asking
                           ask={subquestion}
                           fields={fields(subquestion.name)}
+                          files={files}
                         />
                       </li>
                     )}
@@ -484,14 +533,37 @@ function Ending(props: {
 }
 
 /// A Question or a Sub-question — both are asked the same way: the name it
-/// answers to, its text, its Options as a radio group, then a free-text field.
+/// answers to, its text, its Options as a radio group, then a free-text field
+/// with a paperclip in it and whatever has been put on it under that.
 ///
 /// The name is what a Response answers by (`Q7`, `Q7a`), so it names the fields
-/// too.
-function Asking(props: { ask: AskView; fields: Fields }): JSX.Element {
+/// too — and the paperclip and the row of pills, there being one of each per
+/// question and nothing else to tell them apart by.
+///
+/// **The whole of the question is what a file is dropped onto**, its text, its
+/// Options and its field alike, the way the composer's whole box is: what the
+/// human is dropping onto is the thing they are answering. It highlights while
+/// a drag carrying files is over it. A Question that heads Sub-questions keeps
+/// its own region and each of them keeps theirs, because a file names the
+/// Answer it was put on and a card holding four of them could not say which.
+function Asking(props: {
+  ask: AskView;
+  fields: Fields;
+  files: Putting;
+}): JSX.Element {
   const group = () => `${props.ask.name}-option`;
   const field = () => `${props.ask.name}-free-text`;
   const options = () => props.ask.options;
+
+  // The attaching piece, one per question: the pills under the field, the
+  // paperclip inside it, and the drop the question itself takes. What becomes
+  // of a chosen file is the sheet's — see [`putting`] — and everything the
+  // human touches is the composer's.
+  const clip = attaching({
+    shown: () => props.files.shown(props.ask.name),
+    add: (chosen) => props.files.send(props.ask.name, chosen),
+    onto: props.ask.name,
+  });
 
   // With no Options the free text *is* the answer; with them it is whatever the
   // human has to say, which may stand instead of an Option or beside one. Hence
@@ -508,7 +580,11 @@ function Asking(props: { ask: AskView; fields: Fields }): JSX.Element {
     }`;
 
   return (
-    <div class={page.ask}>
+    <div
+      class={page.ask}
+      classList={{ [styles.taking!]: clip.over() }}
+      {...clip.dropping}
+    >
       <AskText name={props.ask.name} html={props.ask.text_html} />
       {/* The Options, as a table where the agent declared the axes to compare
           them along and as the list they have always been where it did not. The
@@ -545,17 +621,42 @@ function Asking(props: { ask: AskView; fields: Fields }): JSX.Element {
           it to give the field its height — see `.grow` in `App.module.css`. It
           is the field's own value, so a restored draft arrives at the right
           height rather than one line tall with the rest of it hidden. */}
-      <div class={app.grow} data-value={props.fields.free_text()}>
-        <textarea
-          id={field()}
-          name={field()}
-          rows="1"
-          placeholder={prompt()}
-          aria-label={prompt()}
-          value={props.fields.free_text()}
-          onInput={(event) => props.fields.say(event.currentTarget.value)}
-        />
+      <div class={styles.writing}>
+        <div
+          class={`${app.grow} ${styles.field}`}
+          data-value={props.fields.free_text()}
+        >
+          <textarea
+            id={field()}
+            name={field()}
+            rows="1"
+            placeholder={prompt()}
+            aria-label={prompt()}
+            value={props.fields.free_text()}
+            onInput={(event) => props.fields.say(event.currentTarget.value)}
+          />
+        </div>
+        {/* Inside the field's own padding at its far bottom corner, which on a
+            field nothing has been typed into yet is the middle of it: an icon
+            and nothing else, in the quiet ink everything that is not the
+            answering is drawn in. */}
+        <clip.Clip class={styles.attach} />
       </div>
+      {/* And what has been put on this one, under the field it was put beside:
+          the record's own pills, and a file still on its way up drawn dimmed at
+          the end of them. */}
+      <clip.Pills class={styles.attachments} />
+      {/* What could not be attached, one line per file: a choice is several
+          files and each of them was refused for its own reason. */}
+      <For each={props.files.refusals(props.ask.name)}>
+        {(said) => <ErrorLine class={styles.attachFailure}>{said}</ErrorLine>}
+      </For>
+      {/* And what could not be taken off again — one line for the row rather
+          than one inside a pill, a pill being a name on a line with nowhere in
+          it to say a sentence. */}
+      <Show when={props.files.refusedRemoval(props.ask.name)}>
+        {(said) => <ErrorLine class={styles.attachFailure}>{said()}</ErrorLine>}
+      </Show>
     </div>
   );
 }
@@ -718,6 +819,214 @@ function marks(option: OptionView): string {
   return [page.option, option.recommended && page.recommended]
     .filter(Boolean)
     .join(" ");
+}
+
+/// What could not be put on an Answer, one sentence per way of being refused.
+///
+/// The Brief's own list said from the other page — see `ATTACH_REFUSAL` in
+/// `workbench/Composer.tsx` — with the freeze in the other place: what fixes an
+/// Answer's files is the Set settling, and each way that can have happened is
+/// something different to know.
+export const ANSWER_ATTACH_REFUSAL: Record<
+  Exclude<AnswerAttached, { Attached: unknown }>,
+  string
+> = {
+  NoSuchSet: "This set is gone.",
+  Answered: "This set has been answered, so its files are settled.",
+  Locked: "This set was locked unanswered, so its files are settled.",
+  Closed: "This conversation is closed.",
+  NoSuchLabel: "This set does not ask that question.",
+  TooLarge: "That file is larger than 32 MB.",
+  NotAName:
+    "That name cannot be a file here: no folders, and nothing starting with a dot.",
+};
+
+/// And taking one off again, which is refused by the same four.
+export const ANSWER_ATTACHMENT_REMOVAL_REFUSAL: Record<
+  AnswerAttachmentRemoved,
+  string
+> = {
+  Removed: "",
+  NoSuchSet: "This set is gone.",
+  Answered: "This set has been answered, so its files are settled.",
+  Locked: "This set was locked unanswered, so its files are settled.",
+  Closed: "This conversation is closed.",
+};
+
+/// One file this device is still sending, and the Answer it is going onto.
+///
+/// Its own key rather than its name, because two files chosen together may
+/// share one — and what the key is for is taking the right one out of the row
+/// when the right request lands.
+type Landing = { key: number; label: string; name: string };
+
+/// Something said about one Answer's files.
+type Said = { label: string; said: string };
+
+/// What the sheet does about the files on its Answers, held once for the page:
+/// the row of pills each question hands the attaching piece, the requests a
+/// choice and a × make, and what came back refused from either of them.
+type Putting = {
+  /// The row under one question: what the record holds for it, and what this
+  /// device is still sending after that.
+  shown: (label: string) => Array<Shown>;
+
+  /// Every question the record says a file was put on, which is what makes an
+  /// entry carrying nothing else an Answer rather than a question left open.
+  answered: () => string[];
+
+  /// What could not be attached under one question, one line per file.
+  refusals: (label: string) => string[];
+
+  /// And what could not be taken off again, one line for its row.
+  refusedRemoval: (label: string) => string | null;
+
+  /// Send every file chosen under one question, each on a request of its own.
+  send: (label: string, files: Array<File>) => void;
+};
+
+/// The whole of that, made once by the sheet.
+///
+/// The composer's own arrangement said again for a page holding a row per
+/// question — see `sendingOn` in `workbench/Composer.tsx`, which this is the
+/// answer sheet's half of, and which says why none of it is a mutation. What is
+/// different here is only what a file is addressed by: the Set and the label of
+/// the Question it answers, rather than the Conversation.
+function putting(what: {
+  set: () => number;
+
+  /// The files the Set says are on its Answers, which is where every pill that
+  /// is not still in flight comes from.
+  attached: () => AttachmentView[];
+}): Putting {
+  const queries = useQueryClient();
+
+  const [landing, setLanding] = createSignal<Array<Landing>>([]);
+  const [refusals, setRefusals] = createSignal<Array<Said>>([]);
+  const [refusedRemoval, setRefusedRemoval] = createSignal<Array<Said>>([]);
+
+  // Which of the record's files have a removal in flight, by id: the one thing
+  // a × can be truly disabled for is a press already made.
+  const [removing, setRemoving] = createSignal<Array<number>>([]);
+
+  let keys = 0;
+
+  /// The record's own files under one label, in the order they were attached.
+  const on = (label: string) =>
+    what.attached().filter((attachment) => attachment.label === label);
+
+  const send = (label: string, files: Array<File>) => {
+    // A fresh choice clears what the last one under this question had to say:
+    // the lines are about files the human has moved on from.
+    setRefusals((said) => said.filter((one) => one.label !== label));
+
+    for (const file of files) {
+      const key = (keys += 1);
+      setLanding((held) => [...held, { key, label, name: file.name }]);
+
+      void attachToAnswer(what.set(), label, file)
+        .then(async (outcome: AnswerAttached) => {
+          if (typeof outcome === "string") {
+            setRefusals((said) => [
+              ...said,
+              { label, said: `${file.name}: ${ANSWER_ATTACH_REFUSAL[outcome]}` },
+            ]);
+            return;
+          }
+
+          // What came back is the record it made, and the pill is drawn from
+          // the Set — so the read is both how the pill arrives and how it
+          // arrives under the name the server renamed it to.
+          //
+          // Waited on, because the dimmed pill comes off the row in the
+          // `finally` below and the pill that replaces it is the one this read
+          // brings back: firing the read and carrying straight on would be the
+          // file blinking out of the row and back into it.
+          await queries.invalidateQueries({ queryKey: ["set"] });
+        })
+        .catch((error: unknown) => {
+          setRefusals((said) => [
+            ...said,
+            {
+              label,
+              said: `${file.name} could not be attached: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            },
+          ]);
+        })
+        .finally(() =>
+          setLanding((held) => held.filter((one) => one.key !== key)),
+        );
+    }
+  };
+
+  /// And taking one off the record, which is the × on a pill.
+  const forget = (attachment: AttachmentView) => {
+    const label = attachment.label ?? "";
+    setRemoving((was) => [...was, attachment.id]);
+
+    void removeAnswerAttachment(what.set(), attachment.id)
+      .then((outcome: AnswerAttachmentRemoved) => {
+        setRefusedRemoval((said) => [
+          ...said.filter((one) => one.label !== label),
+          ...(outcome === "Removed"
+            ? []
+            : [{ label, said: ANSWER_ATTACHMENT_REMOVAL_REFUSAL[outcome] }]),
+        ]);
+
+        // Either way: what came back is about a Set this page read a moment
+        // ago, so reading it again is both the correction and — where the pill
+        // is simply gone — the whole of what there was to do.
+        void queries.invalidateQueries({ queryKey: ["set"] });
+      })
+      .catch((error: unknown) =>
+        setRefusedRemoval((said) => [
+          ...said.filter((one) => one.label !== label),
+          {
+            label,
+            said: `${attachment.name} could not be removed: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          },
+        ]),
+      )
+      .finally(() =>
+        setRemoving((was) => was.filter((id) => id !== attachment.id)),
+      );
+  };
+
+  const shown = (label: string): Array<Shown> => [
+    ...on(label).map((attachment) => ({
+      name: attachment.name,
+      remove: () => forget(attachment),
+      removing: removing().includes(attachment.id),
+    })),
+    ...landing()
+      .filter((one) => one.label === label)
+      .map((one) => ({ name: one.name, landing: true })),
+  ];
+
+  /// The record's word on which questions have a file, which is what the submit
+  /// counts as an Answer. A file still on its way up is not among them: what
+  /// the server will count is its own rows, and a pill that has not landed is
+  /// not one of those yet.
+  const answered = () =>
+    what
+      .attached()
+      .map((attachment) => attachment.label)
+      .filter((label): label is string => label !== null);
+
+  const said = (held: Array<Said>, label: string) =>
+    held.filter((one) => one.label === label).map((one) => one.said);
+
+  return {
+    shown,
+    answered,
+    refusals: (label) => said(refusals(), label),
+    refusedRemoval: (label) => said(refusedRemoval(), label)[0] ?? null,
+    send,
+  };
 }
 
 /// Every question of the Set in the order it was asked, Sub-questions under the

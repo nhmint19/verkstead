@@ -16,15 +16,22 @@
 //! read is the row the app builds from the endpoint's own answer.
 
 import { fireEvent, screen, waitFor } from "@solidjs/testing-library";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
   AttachmentView,
   BriefEvent,
   ConversationView,
+  // Under another name: the one every other line in this file means is the
+  // browser's own.
+  Response as Decided,
+  SetView,
 } from "../src/api/types";
 import { sized } from "../src/Attaching";
 import pill from "../src/Attaching.module.css";
+import { ANSWER_ATTACH_REFUSAL } from "../src/set/Answering";
+import submitting from "../src/set/Answering.module.css";
+import sheet from "../src/set/Sheet.module.css";
 import briefPane from "../src/workbench/Brief.module.css";
 import composer from "../src/workbench/Composer.module.css";
 import shell from "../src/Panes.module.css";
@@ -34,9 +41,15 @@ import {
 } from "../src/workbench/Composer";
 import { OPEN, drawn, mount, theWorkbench } from "./bench";
 import { carrying, carryingNothing, drag, dropOn } from "./dragging";
-import { json, serving, whenever } from "./serving";
+import { answering, withHeading } from "./reading";
+import { json, readable, serving, whenever } from "./serving";
 import adopting from "./fixtures/conversation-adopting.json" with { type: "json" };
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
+import waiting from "./fixtures/set-answering.json" with { type: "json" };
+
+/// The Set page's renderer is a page's own doing and this fixture has no
+/// Diagram anyway; mocked so nothing here loads megabytes of mermaid.
+vi.mock("../src/set/diagrams", () => ({ drawDiagrams: () => () => {} }));
 
 /// The adopting draft, whose Brief arrives frozen: the one composer in the
 /// fixtures where the files are settled rather than the human's.
@@ -273,6 +286,7 @@ describe("the files on a draft", () => {
       name: "notes.md",
       bytes: 4,
       origin: "Brief",
+      label: null,
     };
 
     // The read the upload asks for, held: the whole of what this is about is
@@ -746,5 +760,412 @@ describe("the files on a frozen brief", () => {
     expect(sized(1_240_000)).toBe("1.2 MB");
     expect(sized(32 * 1024 * 1024)).toBe("33.6 MB");
     expect(sized(2_500_000_000)).toBe("2.5 GB");
+  });
+});
+
+/// And the third page a file is handed over on: the answer sheet, where every
+/// Question and Sub-question carries its own paperclip and a chosen file goes
+/// onto the Set under that Question's label.
+///
+/// Over the golden fixture of a waiting Set, so the rows these are drawn beside
+/// are the Questions the server really sent — and over the same
+/// `/api/ui/sets/{id}` the pane really reads, because a pill on this page comes
+/// off the record rather than out of the page.
+describe("the files on an answer", () => {
+  /// The Set the sheet is filled in on: `Q1`, `Q2` with `Q2a` and `Q2b` under
+  /// it, and `Q3`.
+  const WAITING = readable(waiting);
+
+  /// The same Set with `file` on the Answer to `label`, which is what the
+  /// record says once an upload has landed.
+  function holding(name: string, label: string, id = 9): SetView {
+    return {
+      ...WAITING,
+      attachments: [
+        ...WAITING.attachments,
+        { id, name, bytes: 4, origin: "Answer", label },
+      ],
+    };
+  }
+
+  /// Where one file goes up: the Set, the label of the Question it answers, and
+  /// the name.
+  const upload = (label: string, name: string) =>
+    `/api/ui/sets/${WAITING.id}/answers/${label}/attachments/${name}`;
+
+  /// And what the server says when it takes one.
+  const attached = (id: number, name: string, label: string) =>
+    json({
+      Attached: {
+        attachment: { id, name, bytes: 4, origin: "Answer", label },
+      },
+    });
+
+  /// The paperclip of one question, which is named for it: five of them named
+  /// alike would be five controls nothing tells apart.
+  const clipOn = (label: string) =>
+    screen.getByRole("button", { name: `Attach a file to ${label}` });
+
+  /// And the pills under it, in the order the row has them.
+  function attachedTo(label: string): string[] {
+    const row = screen.queryByRole("list", { name: `Files attached to ${label}` });
+    return row === null ? [] : names(row);
+  }
+
+  /// The question `label` is asked in: the whole of what a file is dropped
+  /// onto, and what the paperclip stands inside.
+  function questionOf(page: ParentNode, label: string): HTMLElement {
+    const field = page.querySelector(`textarea[name="${label}-free-text"]`)!;
+    return field.closest(`.${sheet.ask}`) as HTMLElement;
+  }
+
+  /// The button reading `text`, which is how the submit and its warning are
+  /// pressed.
+  function press(page: ParentNode, text: string) {
+    const button = [...page.querySelectorAll("button")].find(
+      (found) => found.textContent === text,
+    );
+    expect(button, `expected a button reading "${text}"`).toBeTruthy();
+    fireEvent.click(button!);
+  }
+
+  beforeEach(() => localStorage.clear());
+  afterEach(() => localStorage.clear());
+
+  /// One per answerable question, Sub-questions included — and none on a
+  /// Heading, which asks nothing and has no field to put one in.
+  it("draws a paperclip in every field and none on a heading", async () => {
+    const { page } = await answering(withHeading(WAITING));
+
+    for (const label of ["Q1", "Q2a", "Q2b", "Q3"]) {
+      expect(clipOn(label), `${label} has one`).toBeTruthy();
+    }
+
+    expect(
+      screen.queryByRole("button", { name: "Attach a file to Q2" }),
+      "the Heading has none",
+    ).toBeNull();
+    expect(
+      page.querySelector("#set-comment")!.closest("section")!.querySelector(
+        'input[type="file"]',
+      ),
+      "and neither has the comment box",
+    ).toBeNull();
+  });
+
+  /// Inside the field it belongs to, at its bottom right — which is what puts
+  /// it in the middle of one nothing has been typed into yet.
+  it("stands inside the field it belongs to", async () => {
+    await answering(WAITING);
+
+    const clip = clipOn("Q1");
+    const writing = clip.closest(`.${submitting.writing}`)!;
+
+    expect(writing.querySelector('textarea[name="Q1-free-text"]')).toBeTruthy();
+    expect(clip.classList.contains(submitting.attach!)).toBe(true);
+  });
+
+  /// A chosen file goes up at once, under the label of the question it was
+  /// chosen on — and the pill that comes back is the record's.
+  it("puts a chosen file on the set under that question's label", async () => {
+    const { page, fetching, settles } = await answering(
+      WAITING,
+      whenever(upload("Q1", "counter.png"), attached(9, "counter.png", "Q1"), "POST"),
+    );
+
+    settles(holding("counter.png", "Q1"));
+
+    choose(questionOf(page, "Q1"), new File(["png"], "counter.png"));
+
+    await waitFor(() =>
+      expect(writes(fetching, upload("Q1", "counter.png"))).toHaveLength(1),
+    );
+    await waitFor(() => expect(attachedTo("Q1")).toEqual(["counter.png"]));
+
+    expect(attachedTo("Q2a"), "and on that question alone").toEqual([]);
+  });
+
+  /// The row is read off the Set rather than held in the page, which is what a
+  /// reload is: the sheet is drawn again from the record and the pills are
+  /// there.
+  it("draws the pills the record holds, under the question each names", async () => {
+    await answering({
+      ...holding("counter.png", "Q1"),
+      attachments: [
+        ...holding("counter.png", "Q1").attachments,
+        { id: 10, name: "window.md", bytes: 7, origin: "Answer", label: "Q2a" },
+      ],
+    });
+
+    expect(attachedTo("Q1")).toEqual(["counter.png"]);
+    expect(attachedTo("Q2a")).toEqual(["window.md"]);
+    expect(attachedTo("Q3")).toEqual([]);
+  });
+
+  /// And the × takes one off the record, by the row's own id under the Set.
+  it("takes one off from its own ×", async () => {
+    const { fetching } = await answering(
+      holding("counter.png", "Q1"),
+      whenever(
+        `/api/ui/sets/${WAITING.id}/attachments/9/remove`,
+        json("Removed"),
+        "POST",
+      ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove counter.png" }));
+
+    await waitFor(() =>
+      expect(
+        writes(fetching, `/api/ui/sets/${WAITING.id}/attachments/9/remove`),
+      ).toHaveLength(1),
+    );
+  });
+
+  /// A refused upload is said on the sheet, under the question it was refused
+  /// on and named for the file it was about — the way the composer says one.
+  it("says under the question what could not be attached", async () => {
+    const { page } = await answering(
+      WAITING,
+      whenever(upload("Q1", "huge.bin"), json("TooLarge"), "POST"),
+    );
+
+    choose(questionOf(page, "Q1"), new File(["x"], "huge.bin"));
+
+    await waitFor(() =>
+      expect(questionOf(page, "Q1").textContent).toContain(
+        `huge.bin: ${ANSWER_ATTACH_REFUSAL.TooLarge}`,
+      ),
+    );
+
+    expect(
+      questionOf(page, "Q2a").textContent,
+      "and said about the question it happened on",
+    ).not.toContain("huge.bin");
+  });
+
+  /// And a refused removal is one line under the row it happened in.
+  it("says under the row what could not be removed", async () => {
+    const { page } = await answering(
+      holding("counter.png", "Q1"),
+      whenever(
+        `/api/ui/sets/${WAITING.id}/attachments/9/remove`,
+        json("Answered"),
+        "POST",
+      ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove counter.png" }));
+
+    await waitFor(() =>
+      expect(questionOf(page, "Q1").textContent).toContain(
+        ANSWER_ATTACH_REFUSAL.Answered,
+      ),
+    );
+  });
+
+  /// A file is an Answer: the question it was put on goes back answered rather
+  /// than marked Unanswered, and the ones with nothing on them go back open.
+  it("submits a question carrying only a file as answered", async () => {
+    const { page, fetching } = await answering(
+      holding("counter.png", "Q1"),
+      whenever(`/api/ui/sets/${WAITING.id}/response`, json("Accepted"), "POST"),
+    );
+
+    press(page, "Submit");
+    press(page, "Send anyway");
+
+    await waitFor(() =>
+      expect(
+        writes(fetching, `/api/ui/sets/${WAITING.id}/response`),
+      ).toHaveLength(1),
+    );
+
+    const response = JSON.parse(
+      String(writes(fetching, `/api/ui/sets/${WAITING.id}/response`)[0]!.body),
+    ) as Decided;
+
+    const answer = (label: string) =>
+      response.answers.find((one) => one.label === label);
+
+    expect(answer("Q1")).toEqual({ label: "Q1" });
+    expect(answer("Q3")).toEqual({ label: "Q3", unanswered: true });
+  });
+
+  /// And once the Response has landed, the sheet is read back as the record:
+  /// the same file, drawn as the pill the frozen Brief pane draws — the name
+  /// with its size — and no way of changing any of it. The endpoints refuse
+  /// both presses from that moment too; see `an_answered_set_takes_no_more_files`
+  /// in `crates/server/tests/attaching.rs`.
+  it("draws no paperclip and no × once the set has been answered", async () => {
+    const settled: SetView = {
+      ...holding("counter.png", "Q1"),
+      standing: {
+        Answered: {
+          submitted_at: "2026-08-03T09:07:11.000Z",
+          response: {
+            answers: [
+              // Answered with the file and nothing else, which is what was
+              // sent — and the four the human left open.
+              { label: "Q1" },
+              { label: "Q2", unanswered: true },
+              { label: "Q2a", unanswered: true },
+              { label: "Q2b", unanswered: true },
+              { label: "Q3", unanswered: true },
+            ],
+          },
+        },
+      },
+    };
+
+    const { page, settles } = await answering(
+      holding("counter.png", "Q1"),
+      whenever(`/api/ui/sets/${WAITING.id}/response`, json("Accepted"), "POST"),
+    );
+
+    // What the next read of the Set comes back with, which is what the page
+    // does after a submit: it stays where it is and reads the Set again.
+    settles(settled);
+
+    press(page, "Submit");
+    press(page, "Send anyway");
+
+    await waitFor(() =>
+      expect(
+        page.querySelector(`.${sheet.questions}.${sheet.decided}`),
+        "the record should have replaced the sheet",
+      ).toBeTruthy(),
+    );
+
+    const row = screen.getByRole("list", { name: "Files attached to Q1" });
+    expect(names(row)).toEqual(["counter.png"]);
+    expect(
+      [...row.querySelectorAll(`.${pill.attachmentSize}`)].map(
+        (size) => size.textContent,
+      ),
+      "the record says how large the file was; the sheet's own row does not",
+    ).toEqual([sized(4)]);
+
+    // Nothing to add one with and nothing to take this one off with.
+    expect(row.querySelector("button")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Attach a file to Q1" }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Remove counter.png" }),
+    ).toBeNull();
+    expect(page.querySelector('input[type="file"]')).toBeNull();
+  });
+
+  /// And the warning before the submit is about what is still open, so a
+  /// question carrying a file is not among them.
+  it("does not warn about a question a file was put on", async () => {
+    const { page } = await answering(holding("counter.png", "Q1"));
+
+    press(page, "Submit");
+
+    const warning = await screen.findByText("Going back unanswered:");
+    const open = [
+      ...warning.parentElement!.querySelectorAll("li"),
+    ].map((one) => one.textContent);
+
+    expect(open).not.toContain("Q1");
+    expect(open, "Q2, which offered Options and has nothing on it").toContain(
+      "Q2",
+    );
+  });
+});
+
+/// The other way a file is put on an Answer: dropped on the question rather
+/// than picked through its paperclip.
+describe("dropping files on a question", () => {
+  const WAITING = readable(waiting);
+
+  const upload = (label: string, name: string) =>
+    `/api/ui/sets/${WAITING.id}/answers/${label}/attachments/${name}`;
+
+  const attached = (id: number, name: string, label: string) =>
+    json({
+      Attached: {
+        attachment: { id, name, bytes: 4, origin: "Answer", label },
+      },
+    });
+
+  /// The question `label` is asked in, which is the whole of what takes the
+  /// drop.
+  function questionOf(page: ParentNode, label: string): HTMLElement {
+    const field = page.querySelector(`textarea[name="${label}-free-text"]`)!;
+    return field.closest(`.${sheet.ask}`) as HTMLElement;
+  }
+
+  it("attaches every file dropped on the question it was dropped on", async () => {
+    const { page, fetching } = await answering(
+      WAITING,
+      whenever(upload("Q2a", "window.md"), attached(9, "window.md", "Q2a"), "POST"),
+    );
+
+    dropOn(
+      questionOf(page, "Q2a"),
+      carrying({ files: [new File(["a minute"], "window.md")] }),
+    );
+
+    await waitFor(() =>
+      expect(writes(fetching, upload("Q2a", "window.md"))).toHaveLength(1),
+    );
+    expect(
+      writes(fetching, upload("Q1", "window.md")),
+      "and on no other question",
+    ).toHaveLength(0);
+  });
+
+  /// Highlighted while a drag carrying files is over it, and not otherwise.
+  it("highlights the question while files are dragged over it", async () => {
+    const { page } = await answering(WAITING);
+
+    const question = questionOf(page, "Q1");
+    const carried = carrying({ files: [new File(["png"], "counter.png")] });
+
+    expect(question.classList.contains(submitting.taking!)).toBe(false);
+
+    drag(question, "dragenter", carried);
+    await waitFor(() =>
+      expect(question.classList.contains(submitting.taking!)).toBe(true),
+    );
+
+    drag(question, "dragleave", carried);
+    await waitFor(() =>
+      expect(question.classList.contains(submitting.taking!)).toBe(false),
+    );
+  });
+
+  /// A folder dragged along with the files is skipped without a word, the way
+  /// the composer's box skips one.
+  it("attaches the files in a drop and skips the folder beside them", async () => {
+    const { page, fetching } = await answering(
+      WAITING,
+      whenever(upload("Q1", "counter.png"), attached(9, "counter.png", "Q1"), "POST"),
+    );
+
+    const question = questionOf(page, "Q1");
+
+    dropOn(
+      question,
+      carrying({
+        files: [new File(["png"], "counter.png")],
+        folders: ["screenshots"],
+      }),
+    );
+
+    await waitFor(() =>
+      expect(writes(fetching, upload("Q1", "counter.png"))).toHaveLength(1),
+    );
+
+    expect(
+      writes(fetching, upload("Q1", "screenshots")),
+      "and nothing went up for the folder",
+    ).toHaveLength(0);
+    expect(question.textContent, "and nothing was said about it").not.toContain(
+      "screenshots",
+    );
   });
 });
