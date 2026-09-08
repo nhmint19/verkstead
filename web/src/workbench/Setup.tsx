@@ -117,6 +117,8 @@ export const REPO_SWITCH_REFUSAL: Record<RepoSwitched, string> = {
     "The branch exists by now, so which repo the work is in is settled.",
   Adopting:
     "The stage being continued is in this repo, so the work cannot be moved off it.",
+  HoldingPullRequest:
+    "The pull request being wrapped up is in this repo, so the work cannot be moved off it.",
   NoSuchRepo: "That repo is not registered any more.",
 };
 
@@ -279,6 +281,12 @@ function RepoOption(props: { conversation: ConversationView }): JSX.Element {
   /// offer.
   const adopting = () => props.conversation.adopting !== null;
 
+  /// And whether it was settled by the pull request the conversation is holding,
+  /// which is the same fact about the other thing a draft adopts: `#41` is a
+  /// number in one repository, and the same number over there is a different
+  /// pull request or none at all.
+  const holding = () => props.conversation.adopting_pull_request !== null;
+
   return (
     <RepoOptions name={props.conversation.repo.name} alongside={alongside()}>
       {() => (
@@ -287,18 +295,23 @@ function RepoOption(props: { conversation: ConversationView }): JSX.Element {
               one this picks. */}
           <RepoPicker
             conversation={props.conversation}
-            disabled={branched() || adopting()}
+            disabled={branched() || adopting() || holding()}
           />
 
           <Show when={!branched()}>
             {/* No branch field where the conversation is adopting a roadmap: a
                 stage is worked on its own slug, so the name invented when the
                 row was made is discarded when the stage is adopted, and naming
-                it here would be a field with nothing behind it. */}
-            <Show when={!props.conversation.adopting}>
+                it here would be a field with nothing behind it. The same is
+                true of a pull request, whose branch is the head branch GitHub
+                names — and of the base under it, which is recorded at the
+                take-up as the head commit rather than picked here. */}
+            <Show when={!adopting() && !holding()}>
               <BranchName conversation={props.conversation} />
             </Show>
-            <BaseBranch conversation={props.conversation} />
+            <Show when={!holding()}>
+              <BaseBranch conversation={props.conversation} />
+            </Show>
             <AddCompanion conversation={props.conversation} />
 
             {/* And the ones already added, under the control they were added
@@ -684,19 +697,27 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
         <>
           {/* One of the two pickers with a row that is not an account: a
               brief can go straight to the work, with no interview between
-              the two. */}
-          <PairingPicker
-            conversation={props.conversation}
-            saved={saved()}
-            role="grilling"
-            label="Grilling"
-            away="No grilling"
-            chosen={pairing.settled(props.conversation.grilling_pairing)}
-            pairing={pairing.under(props.conversation.grilling_pairing)}
-            choose={(id, picked) =>
-              chooseGrillingPairing(id, pairing.role(picked))
-            }
-          />
+              the two.
+
+              Not drawn at all on a conversation holding a pull request. The
+              work on it is built and the take-up moves it straight into the
+              wrap-up, so there is no round for a grilling to open and no later
+              stage to inherit the choice — which is what an adopting
+              conversation's own is carried for. */}
+          <Show when={props.conversation.adopting_pull_request === null}>
+            <PairingPicker
+              conversation={props.conversation}
+              saved={saved()}
+              role="grilling"
+              label="Grilling"
+              away="No grilling"
+              chosen={pairing.settled(props.conversation.grilling_pairing)}
+              pairing={pairing.under(props.conversation.grilling_pairing)}
+              choose={(id, picked) =>
+                chooseGrillingPairing(id, pairing.role(picked))
+              }
+            />
+          </Show>
           <PairingPicker
             conversation={props.conversation}
             saved={saved()}

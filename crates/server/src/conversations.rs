@@ -83,6 +83,42 @@ pub(crate) async fn start(state: &AppState, repo_id: i64) -> Result<Started> {
 /// default branch would draw *nothing to adopt at this base commit* about the
 /// very roadmap that was just clicked. `None` is the default branch, which is
 /// what a Conversation with no base fixed already reads.
+/// Start a Conversation to wrap `pull_request` up in a registered Repo with.
+///
+/// [`start_adopting`]'s sibling over the other kind of thing that can be taken
+/// up, and the same start underneath: a Draft with the pull request written
+/// beside it, which is what draws the page that names one. The branch name is
+/// the server's here too and is discarded at the take-up — the Conversation's
+/// name is the pull request's own head branch — so what it does until then is
+/// stand in the record for a branch nobody has named.
+///
+/// Nothing about the pull request is checked here, and nothing about the
+/// repository is touched. Whether the head branch is still where GitHub said it
+/// was, and whether anything is standing on it, are questions about a repository
+/// *now*: they are the take-up's, and asking them at the moment a row was
+/// pressed would answer them a page too early.
+///
+/// No base is fixed either, unlike an adoption's. The base commit a taken-up
+/// Conversation gets is the pull request's head at take-up, so there is nothing
+/// to record until then.
+pub(crate) async fn start_wrapping_up(
+    state: &AppState,
+    repo_id: i64,
+    pull_request: &store::AdoptedPullRequest,
+) -> Result<Started> {
+    Ok(
+        match store::start_pull_request_adoption(&state.pool, repo_id, &branch_name(), pull_request)
+            .await?
+        {
+            Some(id) => {
+                prefill(state, id, repo_id).await;
+                Started::Started { id }
+            }
+            None => Started::NoSuchRepo,
+        },
+    )
+}
+
 pub(crate) async fn start_adopting(
     state: &AppState,
     repo_id: i64,
@@ -790,13 +826,14 @@ pub(crate) async fn set_base_branch(
 /// nothing has been checked out to ask git about. The two refusals that matter
 /// are the ones saying something *has* been settled elsewhere: a worktree, which
 /// the store answers off the row it wrote, and an adoption, whose repository was
-/// settled by the roadmap rather than by the human.
+/// settled by the roadmap — or by the pull request — rather than by the human.
 pub(crate) async fn switch_repo(pool: &SqlitePool, id: i64, repo_id: i64) -> Result<RepoSwitched> {
     Ok(match store::switch_repo(pool, id, repo_id).await? {
         store::Switched::Switched => RepoSwitched::Switched,
         store::Switched::NoSuchConversation => RepoSwitched::NoSuchConversation,
         store::Switched::NotDrafting => RepoSwitched::NotDrafting,
         store::Switched::Adopting => RepoSwitched::Adopting,
+        store::Switched::HoldingPullRequest => RepoSwitched::HoldingPullRequest,
         store::Switched::NoSuchRepo => RepoSwitched::NoSuchRepo,
     })
 }

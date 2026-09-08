@@ -41,6 +41,7 @@ import type {
   PinnedEvent,
   PullRequestDetails,
   RemoteBanner,
+  RepoSwitched,
   RepoView,
   Resolved,
   Resumed,
@@ -207,6 +208,9 @@ import { STATE } from "../src/workbench/states";
 import setup from "../src/workbench/Setup.module.css";
 import setupCss from "../src/workbench/Setup.module.css?raw";
 import steerModal from "../src/workbench/Steer.module.css";
+// The band naming the pull request a draft is holding, over the box it writes
+// its Brief in.
+import takeUp from "../src/workbench/TakeUp.module.css";
 // The status button at the foot of the sticky block over the Conversation pane,
 // both ways: the hashed names its line is queried by, and the source of the
 // paint that says when it is in the accent.
@@ -268,6 +272,9 @@ import {
 } from "./serving";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
 import adopting from "./fixtures/conversation-adopting.json" with { type: "json" };
+import holdingPull from "./fixtures/conversation-pull-request.json" with {
+  type: "json",
+};
 import building from "./fixtures/conversation-building.json" with { type: "json" };
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
 import stopped from "./fixtures/conversation-stopped.json" with { type: "json" };
@@ -323,6 +330,10 @@ const ABANDONED = abandoned as AbandonedRepo[];
 /// The conversation that clicking one of those roadmaps made: a draft adopting
 /// `mvp`, on the page shaped for adopting.
 const ADOPTING = adopting as ConversationView;
+
+/// And the one that pressing a free row of the level beside it made: a draft
+/// holding a pull request, on the page shaped for wrapping one up.
+const HOLDING = holdingPull as ConversationView;
 
 /// The one the fixture opens, which is the second row of the sidebar.
 const DRAFTING = SIDEBAR.find((entry) => entry.id === OPEN.id)!;
@@ -2355,6 +2366,121 @@ describe("the adoption page", () => {
 
       unmount();
     }
+  });
+});
+
+/// And the page a conversation started from the level beside that notice opens
+/// on: the pull request named over a Brief the human still writes, the two
+/// pairings that will run the wrap-up, and none of the three things the pull
+/// request has already settled.
+describe("the page of a draft holding a pull request", () => {
+  /// What the server said the draft is holding — written down when the row was
+  /// pressed rather than read off GitHub again, a re-read being a `gh` call to
+  /// name what is already on the screen.
+  const PULL = HOLDING.adopting_pull_request!;
+
+  /// The workbench with that draft opened instead of the ordinary one. Every
+  /// conversation fixture carries the same id, which is what the sidebar row and
+  /// the URL are shared through.
+  function theHolding(...answers: Parameters<typeof serving>) {
+    return theWorkbench(
+      whenever(`/api/ui/conversations/${HOLDING.id}`, json(HOLDING)),
+      ...answers,
+    );
+  }
+
+  it("names the pull request over the box, with its branches and a way out", async () => {
+    theHolding();
+    const { container } = mount(`/conversations/${HOLDING.id}`);
+
+    const band = await drawn(container, `.${takeUp.held}`);
+    expect(band.textContent).toContain(HOLDING.repo.name);
+    expect(band.textContent).toContain(`#${PULL.number}`);
+    expect(band.textContent).toContain(PULL.title);
+    expect(band.textContent).toContain(PULL.head);
+    expect(band.textContent).toContain(PULL.base);
+
+    expect(band.querySelector("a")!.getAttribute("href")).toBe(PULL.url);
+
+    // And no way to put it down: the conversation was created holding this, and
+    // the way out of one is to close it.
+    expect(
+      screen.queryByRole("button", { name: `Clear #${PULL.number}` }),
+    ).toBeNull();
+  });
+
+  /// The Brief is the human's here, unlike an adopting draft's: a pull request
+  /// brings words of its own, they were put in the box when the row was loaded,
+  /// and what is left there is what the wrap-up reads.
+  it("holds the brief in a field, prefilled as the compose page left it", async () => {
+    theHolding();
+    const { container } = mount(`/conversations/${HOLDING.id}`);
+
+    const field = (await drawn(
+      container,
+      `.${composer.box} textarea`,
+    )) as HTMLTextAreaElement;
+
+    expect(field.value).toBe(briefOf(HOLDING).markdown);
+    expect(field.value).toContain(PULL.title);
+  });
+
+  /// The two pairings the wrap-up runs under, and nothing that the pull request
+  /// has already answered: its branch is the head branch, its base is that
+  /// branch's own head at take-up, and there is no round for a grilling to open.
+  it("offers the two pairings and no branch, base or grilling picker", async () => {
+    theHolding();
+    const { container } = mount(`/conversations/${HOLDING.id}`);
+
+    await openComposer(container);
+
+    await waitFor(() => screen.getByLabelText("Implementation"));
+    expect(screen.getByLabelText("Review")).toBeTruthy();
+    expect(screen.queryByLabelText("Grilling")).toBeNull();
+
+    await openRepo(container);
+
+    // And the repos alongside are still the human's, as they are on every
+    // draft — waited for, the control inside that label arriving with the list
+    // of repos.
+    await waitFor(() => screen.getByLabelText("Works alongside"));
+
+    expect(screen.queryByLabelText("Branch")).toBeNull();
+    expect(screen.queryByLabelText("Base branch")).toBeNull();
+  });
+
+  /// The repo is the pull request's own — `#41` is a number in one repository
+  /// and something else entirely in the next — so the picker reads settled, and
+  /// the refusal behind it is named for what refused it.
+  ///
+  /// That the server gives that refusal is
+  /// `crates/server/tests/conversations.rs`'s; what is asked here is that the
+  /// control says so and that the name has a sentence to be read as.
+  it("refuses a repo move by name", async () => {
+    theHolding();
+    const { container } = mount(`/conversations/${HOLDING.id}`);
+
+    await openRepo(container);
+
+    expect((screen.getByLabelText("Repo") as HTMLSelectElement).disabled).toBe(
+      true,
+    );
+
+    const said: Record<RepoSwitched, string> = REPO_SWITCH_REFUSAL;
+    expect(said.HoldingPullRequest).toContain("pull request");
+  });
+
+  /// No grilling start on it either. The work on a pull request is built, and
+  /// what it is waiting for is the wrap-up — so the press that opens a round
+  /// would be the wrong act offered plainly.
+  it("offers no start grilling and no continue press", async () => {
+    theHolding();
+    const { container } = mount(`/conversations/${HOLDING.id}`);
+
+    await drawn(container, `.${takeUp.held}`);
+
+    expect(container.querySelector(`.${composer.startGrilling}`)).toBeNull();
+    expect(container.querySelector(`.${adoption.adoption}`)).toBeNull();
   });
 });
 

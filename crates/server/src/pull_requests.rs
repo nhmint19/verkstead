@@ -121,5 +121,6 @@ fn drawn(one: Listed, repo_id: i64, held: &HashMap<(i64, i64), i64>) -> OpenPull
         head: one.head,
         base: one.base,
         author: one.author,
+        body: one.body,
     }
 }

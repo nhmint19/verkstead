@@ -720,6 +720,10 @@ pub(crate) struct Listed {
     /// nobody, which is what a deleted account leaves behind.
     pub(crate) author: String,
 
+    /// Its description as it was written, raw markdown. Empty where nobody
+    /// wrote one.
+    pub(crate) body: String,
+
     /// Whether the head branch is in another repository — a fork. Such a pull
     /// request cannot be pushed to over `origin`, so a wrap-up over it would
     /// have nowhere to put a fix.
@@ -743,7 +747,7 @@ pub(crate) struct Listed {
 /// URL match would get wrong — and every caller of this already has to have an
 /// answer for a `gh` that will not answer.
 pub(crate) fn open_pull_requests(gh: &Gh, repo: &Path) -> Result<Vec<Listed>, Trouble> {
-    /// What `--json number,title,url,headRefName,baseRefName,author,isCrossRepository`
+    /// What `--json number,title,body,url,headRefName,baseRefName,author,isCrossRepository`
     /// comes back as, one per pull request.
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -757,6 +761,13 @@ pub(crate) fn open_pull_requests(gh: &Gh, repo: &Path) -> Result<Vec<Listed>, Tr
         author: Author,
         #[serde(default)]
         is_cross_repository: bool,
+
+        /// The description, which is what a load prefills the box under the
+        /// title with. An `Option` rather than a defaulted `String`: a pull
+        /// request nobody described comes back as a null, and a default only
+        /// covers a field that is missing altogether.
+        #[serde(default)]
+        body: Option<String>,
     }
 
     /// Whoever opened it. An object rather than a name, and one that may be
@@ -777,7 +788,7 @@ pub(crate) fn open_pull_requests(gh: &Gh, repo: &Path) -> Result<Vec<Listed>, Tr
             "--limit",
             LISTED,
             "--json",
-            "number,title,url,headRefName,baseRefName,author,isCrossRepository",
+            "number,title,body,url,headRefName,baseRefName,author,isCrossRepository",
         ],
     )?;
 
@@ -793,6 +804,7 @@ pub(crate) fn open_pull_requests(gh: &Gh, repo: &Path) -> Result<Vec<Listed>, Tr
             head: one.head_ref_name,
             base: one.base_ref_name,
             author: one.author.login,
+            body: one.body.unwrap_or_default(),
             fork: one.is_cross_repository,
         })
         .collect())

@@ -33,6 +33,7 @@ import pill from "../src/Attaching.module.css";
 import composer from "../src/workbench/Composer.module.css";
 import sidebar from "../src/workbench/Conversations.module.css";
 import setup from "../src/workbench/Setup.module.css";
+import takeUp from "../src/workbench/TakeUp.module.css";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
 import { ATTACH_REFUSAL } from "../src/workbench/Composer";
 import { BRANCH_REFUSAL } from "../src/workbench/Setup";
@@ -1677,8 +1678,14 @@ describe("wrapping up a pull request from the compose page", () => {
 
   /// The workbench with pull requests open in it, `answered` being what
   /// `/api/ui/open-pull-requests` says.
-  function withOpen(answered = json(OPEN_PULLS)) {
-    return theWorkbench(whenever("/api/ui/open-pull-requests", answered));
+  function withOpen(
+    answered = json(OPEN_PULLS),
+    ...answers: Parameters<typeof serving>
+  ) {
+    return theWorkbench(
+      whenever("/api/ui/open-pull-requests", answered),
+      ...answers,
+    );
   }
 
   /// What the level reads as, and what the way back out of it says.
@@ -1784,6 +1791,268 @@ describe("wrapping up a pull request from the compose page", () => {
     expect(container.querySelector(`.${composer.pullRow}`)).toBeNull();
     expect(container.querySelector(`.${composer.reading}`)).toBeNull();
   });
+
+  /// A free row loads it into the box — which is where this parts company with
+  /// a roadmap row. A roadmap locks a card over the box; a pull request brings
+  /// words of its own, so the box stays a box and is prefilled with them.
+  it("prefills the box with the title and the description", async () => {
+    withOpen();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const free = await freeRow(container);
+    fireEvent.click(free.row);
+
+    const band = await drawn(container, `.${takeUp.held}`);
+    expect(band.textContent).toContain(free.repo);
+    expect(band.textContent).toContain(`#${free.pull.number}`);
+    expect(band.textContent).toContain(free.pull.head);
+    expect(band.textContent).toContain(free.pull.base);
+
+    // The box is still a box, and what is in it is the pull request's own words.
+    const filled = await composing(container);
+    await waitFor(() =>
+      expect(filled.value).toBe(
+        `# ${free.pull.title}\n\n${free.pull.body.trim()}\n`,
+      ),
+    );
+
+    // And the menu is gone with the load: there is one thing in the box at a
+    // time, and the way to another is to clear the one that is in it.
+    expect(container.querySelector(`.${composer.actions}`)).toBeNull();
+  });
+
+  /// Held on the device like everything else on this page: a reload lands on the
+  /// pull request that was loaded, with the box as it was left.
+  it("keeps the loaded pull request on this device", async () => {
+    withOpen();
+    const first = mount("/compose");
+
+    await composing(first.container);
+    const free = await freeRow(first.container);
+    fireEvent.click(free.row);
+    await drawn(first.container, `.${takeUp.held}`);
+    first.unmount();
+
+    withOpen();
+    const again = mount("/compose");
+    const band = await drawn(again.container, `.${takeUp.held}`);
+    expect(band.textContent).toContain(`#${free.pull.number}`);
+
+    const box = await composing(again.container);
+    expect(box.value).toContain(free.pull.title);
+  });
+
+  /// And put down again, which gives the box back the text the pull request was
+  /// loaded over: a pull request fills the box rather than locking a card over
+  /// it, so what was being written is stowed with it and comes back when it
+  /// goes.
+  ///
+  /// Seeded on the device rather than typed, exactly as the roadmap's own clear
+  /// is: the state a clear restores is a page holding both at once, and it is a
+  /// state this file can write down.
+  it("puts the text it was loaded over away, and gives it back on clear", async () => {
+    const one = OPEN_PULLS[0]!;
+    const free = one.pull_requests[0]!;
+
+    keep({
+      ...blank(),
+      brief: `# ${free.title}\n\n${free.body}\n`,
+      pull: {
+        repo_id: one.repo_id,
+        repo: one.repo,
+        number: free.number,
+        title: free.title,
+        url: free.url,
+        head: free.head,
+        base: free.base,
+        stowed: "Make the widget",
+      },
+    });
+    withOpen();
+    const { container } = mount("/compose");
+
+    // The pull request is over the box, and the box is holding its words rather
+    // than what was being written.
+    const box = await composing(container);
+    await drawn(container, `.${takeUp.held}`);
+    expect(box.value).toContain(free.title);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: `Clear #${free.number}` }),
+    );
+
+    await waitFor(() =>
+      expect(container.querySelector(`.${takeUp.held}`)).toBeNull(),
+    );
+    await waitFor(() =>
+      expect(
+        (
+          container.querySelector(
+            `.${composer.box} textarea`,
+          ) as HTMLTextAreaElement
+        ).value,
+      ).toBe("Make the widget"),
+    );
+  });
+
+  /// The repo is the pull request's and settled, its branch is the head branch
+  /// and its base is that branch's own head at take-up — so neither field is
+  /// drawn. Nor is the grilling picker: the work is built, and the take-up moves
+  /// it straight into the wrap-up.
+  it("fixes the repo and draws no branch, base or grilling picker", async () => {
+    withOpen();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const free = await freeRow(container);
+    fireEvent.click(free.row);
+    await drawn(container, `.${takeUp.held}`);
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${setup.repoOption} .${setup.optionValue}`)
+          ?.textContent,
+      ).toBe(free.repo),
+    );
+
+    await openRepo(container);
+    expect((screen.getByLabelText("Repo") as HTMLSelectElement).disabled).toBe(
+      true,
+    );
+    expect(container.querySelector("#branch")).toBeNull();
+    expect(screen.queryByLabelText("Base branch")).toBeNull();
+    expect(screen.queryByLabelText("Grilling")).toBeNull();
+
+    // The three that are still the human's to settle.
+    expect(screen.getByLabelText("Works alongside")).toBeTruthy();
+    expect(screen.getByLabelText("Implementation")).toBeTruthy();
+    expect(screen.getByLabelText("Review")).toBeTruthy();
+  });
+
+  /// The press: the Conversation started against the repo and the pull request,
+  /// the edited Brief saved on it, and the touched pickers replayed. Neither the
+  /// branch nor the base is sent — the pull request answers both.
+  it("creates a draft holding it, with the edited brief on it", async () => {
+    const fetching = withOpen(
+      json(OPEN_PULLS),
+      ...REMEMBERED,
+      whenever(
+        "/api/ui/pull-request-adoptions",
+        json({ Started: { id: OPEN.id } }),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/review-pairing`,
+        json("Chosen"),
+        "POST",
+      ),
+      json(null),
+    );
+    const { container, history } = mount("/compose");
+
+    await composing(container);
+    const free = await freeRow(container);
+    fireEvent.click(free.row);
+    await drawn(container, `.${takeUp.held}`);
+
+    const box = await composing(container);
+    fireEvent.input(box, { target: { value: "# Rate limiting\n\nAnd my own note.\n" } });
+
+    pick("Review", "No review");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save as draft" }));
+
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/pull-request-adoptions")).toEqual({
+        repo_id: free.repo_id,
+        number: free.pull.number,
+        title: free.pull.title,
+        url: free.pull.url,
+        head: free.pull.head,
+        base: free.pull.base,
+      }),
+    );
+    await waitFor(() =>
+      expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/brief`)).toEqual({
+        markdown: "# Rate limiting\n\nAnd my own note.\n",
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/review-pairing`),
+      ).toEqual({ pairing: null }),
+    );
+
+    // The two the pull request answers for itself, and the grilling it never
+    // has.
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/branch`)).toBe(0);
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/base`)).toBe(0);
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(0);
+
+    await waitFor(() =>
+      expect(history.get().startsWith(`/conversations/${OPEN.id}`)).toBe(true),
+    );
+    await waitFor(() => expect(localStorage.getItem(COMPOSING)).toBeNull());
+  });
+
+  /// *Start work* creates the same Conversation and stops where the quieter
+  /// press stops: the take-up it would press afterwards is not built yet.
+  it("starts no work beyond the draft it makes", async () => {
+    const fetching = withOpen(
+      json(OPEN_PULLS),
+      ...REMEMBERED,
+      whenever(
+        "/api/ui/pull-request-adoptions",
+        json({ Started: { id: OPEN.id } }),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const free = await freeRow(container);
+    fireEvent.click(free.row);
+    await drawn(container, `.${takeUp.held}`);
+
+    // Both roles the wrap-up runs under, which is the whole of what the press
+    // waits on: a pull request has no grilling to answer for.
+    for (const role of ["Implementation", "Review"]) {
+      await waitFor(() => expect(showing(role)).not.toBe("Not chosen"));
+    }
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    await waitFor(() =>
+      expect(writes(fetching, "/api/ui/pull-request-adoptions")).toBe(1),
+    );
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(0);
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/adopt`)).toBe(0);
+  });
+
+  /// The first free row of the fixture, with everything a test needs to say
+  /// which one it pressed.
+  async function freeRow(container: ParentNode): Promise<{
+    row: HTMLButtonElement;
+    repo_id: number;
+    repo: string;
+    pull: OpenPullRequestRepo["pull_requests"][number];
+  }> {
+    const rows = await pullRows(container);
+    const at = flat.findIndex(({ pull }) => pull.conversation_id === null);
+    expect(at, "the fixture holds one nothing has taken up").toBeGreaterThan(-1);
+
+    const held = OPEN_PULLS.find((group) =>
+      group.pull_requests.includes(flat[at]!.pull),
+    )!;
+
+    return {
+      row: rows[at]!,
+      repo_id: held.repo_id,
+      repo: flat[at]!.repo,
+      pull: flat[at]!.pull,
+    };
+  }
 
   /// Read when the page opens and again on each reopen, and held nowhere:
   /// GitHub owns this list, and a copy in the browser would be one this page had
@@ -2067,6 +2336,7 @@ describe("what a device holds between visits", () => {
       implementation: "2:fable",
       review: null,
       adopting: null,
+      pull: null,
     };
 
     keep(held);

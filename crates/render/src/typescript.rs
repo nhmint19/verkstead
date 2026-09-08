@@ -23,9 +23,9 @@ use crate::{
     CompanionModeChosen, CompanionRemoved, ConflictResolutionEdit, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
     ConversationUnarchived, ConversationView, Created, Creation, DirectoryListing, GrillingStarted,
-    Locked, NewAdoption, NewCompanion, NewConversation, NewOrder, OnboardingView,
-    OpenPullRequestRepo, PrefillView, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
-    ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
+    Locked, NewAdoption, NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption,
+    OnboardingView, OpenPullRequestRepo, PrefillView, ProfileChoice, ProfileChosen, ProfileDeleted,
+    ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
     RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched,
     RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress,
     SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
@@ -123,6 +123,10 @@ fn the_viewers_types_are_written_from_these() {
     // And starting one to adopt a roadmap with, which is the other way in — the
     // Conversation it starts comes back inside the view above.
     NewAdoption::export_all(&config).unwrap();
+
+    // And starting one to wrap a pull request up with, which is the same way in
+    // over the other kind of thing to take up.
+    NewPullRequestAdoption::export_all(&config).unwrap();
     Started::export_all(&config).unwrap();
     BriefEdit::export_all(&config).unwrap();
     BriefSaved::export_all(&config).unwrap();

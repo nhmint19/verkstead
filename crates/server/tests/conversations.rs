@@ -26,8 +26,8 @@ use verkstead_render::{
     CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationUnarchived,
     ConversationView, GrillingStarted, Lifecycle, Merging, PickedView, PinnedEvent, ProfileChosen,
-    ProfileSaved, Registered, Resolved, RoadmapPane, ShowingArchived, Standing, Started,
-    SteerCompanionRefusal, SteerOpened, TimelineEvent,
+    ProfileSaved, Registered, RepoEntry, RepoSwitched, Resolved, RoadmapPane, ShowingArchived,
+    Standing, Started, SteerCompanionRefusal, SteerOpened, TimelineEvent,
 };
 use verkstead_server::{open_database, router_keeping, store};
 
@@ -6091,6 +6091,122 @@ async fn adopting_against_a_repo_that_is_not_registered_says_so() {
 
     assert_eq!(adopt(&app, 404, "mvp").await, Started::NoSuchRepo);
     assert!(sidebar(&app).await.is_empty());
+}
+
+/// Pressing a free row of the *Wrap up a pull request* level: a Draft against
+/// that Repo holding the pull request the row named, whose page draws it.
+///
+/// Nothing about the repository is touched by the press. The head branch is not
+/// checked out, no base is fixed and the Brief is empty — what the human edits
+/// arrives with the create's replay, and everything git is the take-up's.
+#[tokio::test]
+async fn wrapping_a_pull_request_up_starts_a_draft_naming_it() {
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+
+    let id = wrapping_up(&app, repo_id, 41).await;
+
+    let sidebar = sidebar(&app).await;
+    assert_eq!(sidebar.len(), 1);
+    assert_eq!(sidebar[0].id, id);
+    assert_eq!(sidebar[0].state, Lifecycle::Draft);
+
+    let view = opened(&app, id).await;
+    let held = view
+        .adopting_pull_request
+        .clone()
+        .expect("this Conversation is holding one");
+
+    assert_eq!(held.number, 41);
+    assert_eq!(held.title, "Rate limiting for the public API");
+    assert_eq!(held.url, "https://github.com/tobico/verkstead/pull/41");
+    assert_eq!(held.head, "rate-limiting");
+    assert_eq!(held.base, "main");
+
+    // A pull request is the other thing a Draft adopts rather than a second
+    // thing beside a roadmap, and its Brief is the human's to write.
+    assert_eq!(view.adopting, None);
+    assert_eq!(brief(&view).markdown, "");
+    assert_eq!(view.base_commit, None);
+    assert_eq!(view.worktree, None);
+}
+
+/// And the Repo picker on that Draft refuses a move by name: `#41` is a fact
+/// about one repository, and the same number over there is a different pull
+/// request or none at all.
+#[tokio::test]
+async fn a_draft_holding_a_pull_request_refuses_a_repo_move() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+
+    let askance = repository(elsewhere.path().join("askance"));
+    let registered: Registered = post(
+        &app,
+        "/api/ui/repos",
+        &serde_json::json!({ "path": askance }),
+    )
+    .await;
+    assert!(matches!(registered, Registered::Added(_)));
+
+    let id = wrapping_up(&app, repo_id, 41).await;
+
+    let elsewhere_id = get::<Vec<RepoEntry>>(&app, "/api/ui/repos")
+        .await
+        .into_iter()
+        .find(|entry| entry.name == "askance")
+        .expect("both are registered")
+        .id;
+
+    let moved: RepoSwitched = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/repo"),
+        &serde_json::json!({ "repo_id": elsewhere_id }),
+    )
+    .await;
+
+    assert_eq!(moved, RepoSwitched::HoldingPullRequest);
+    assert_eq!(opened(&app, id).await.repo.id, repo_id);
+}
+
+/// An ordinary Conversation is holding no pull request, which is what keeps its
+/// page on the shape with a branch, a base and a grilling to settle.
+#[tokio::test]
+async fn a_conversation_started_the_ordinary_way_holds_no_pull_request() {
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+
+    let id = started(&app, repo_id).await;
+
+    assert_eq!(opened(&app, id).await.adopting_pull_request, None);
+}
+
+#[tokio::test]
+async fn wrapping_up_against_a_repo_that_is_not_registered_says_so() {
+    let (_elsewhere, _dir, app, _repo, _repo_id) = workbench().await;
+
+    assert_eq!(wrap_up(&app, 404, 41).await, Started::NoSuchRepo);
+    assert!(sidebar(&app).await.is_empty());
+}
+
+/// One row of that level, sent as the page sends it.
+async fn wrap_up(app: &Router, repo_id: i64, number: i64) -> Started {
+    post(
+        app,
+        "/api/ui/pull-request-adoptions",
+        &serde_json::json!({
+            "repo_id": repo_id,
+            "number": number,
+            "title": "Rate limiting for the public API",
+            "url": format!("https://github.com/tobico/verkstead/pull/{number}"),
+            "head": "rate-limiting",
+            "base": "main",
+        }),
+    )
+    .await
+}
+
+async fn wrapping_up(app: &Router, repo_id: i64, number: i64) -> i64 {
+    match wrap_up(app, repo_id, number).await {
+        Started::Started { id } => id,
+        other => panic!("expected the Conversation to start, got {other:?}"),
+    }
 }
 
 /// The stage the page names, for the tests that are about which one it is.

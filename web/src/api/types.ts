@@ -114,6 +114,41 @@ export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdo
 repo: string, why: CompanionRefusal, } };
 
 /**
+ * The pull request a drafting Conversation is holding, as its own page names
+ * it: which one, what it is called, and the two branches it sits between.
+ *
+ * Kept rather than read off GitHub every time the page is drawn, which is where
+ * this parts company with [`AdoptionView`] beside it. A roadmap is a document
+ * in the Conversation's own repository and costs a file read; a pull request is
+ * a call out to GitHub, and a page that made one every time it was opened would
+ * be a page waiting on somebody else's server to say what it is about. What is
+ * authoritative is asked again at the take-up, which is the one moment it
+ * matters.
+ */
+export type AdoptedPullRequestView = { 
+/**
+ * The number GitHub gave it, which is what everybody calls it by — in the
+ * Conversation's own Repo and nowhere else.
+ */
+number: number, 
+/**
+ * Its title, as it read when the row was listed.
+ */
+title: string, 
+/**
+ * The whole URL, so the card can lead out to GitHub.
+ */
+url: string, 
+/**
+ * The branch the work is on, which is the branch the take-up checks out.
+ */
+head: string, 
+/**
+ * And the branch it goes into.
+ */
+base: string, };
+
+/**
  * The stage an adoption would start, named.
  */
 export type AdoptedStage = { 
@@ -1395,6 +1430,17 @@ ready_to_continue: boolean,
  */
 adopting: AdoptionView | null, 
 /**
+ * And the pull request it is holding, where it is holding one.
+ *
+ * `null` alongside [`Self::adopting`] on every ordinary Conversation, and
+ * never both at once: a Draft adopts one thing or none. `Some` is one
+ * started off the *Wrap up a pull request* level, and it is what puts the
+ * page on that shape — the pull request named over a Brief the human still
+ * writes, the two Pairings that will run the wrap-up, and no branch, base
+ * or grilling to settle.
+ */
+adopting_pull_request: AdoptedPullRequestView | null, 
+/**
  * The worktree the grilling was given to work in, once there is one.
  *
  * `null` both before grilling starts and after closing — the two ways a
@@ -1963,6 +2009,27 @@ export type NewConversation = { repo_id: number, };
 export type NewOrder = { order: Array<number>, };
 
 /**
+ * And starting one to wrap a pull request up with: which Repo, and the row off
+ * the *Wrap up a pull request* level that was pressed.
+ *
+ * The whole row rather than a number, unlike [`NewAdoption`] beside it. A
+ * roadmap is a document in the Conversation's own repository and is read back
+ * off it wherever it is wanted; a pull request is somebody else's server, and
+ * a server that had only the number would have to make a `gh` call of its own
+ * to draw the card the human has already been looking at. So the five facts
+ * travel, and the take-up is where GitHub is asked again.
+ */
+export type NewPullRequestAdoption = { repo_id: number, number: number, title: string, url: string, 
+/**
+ * The branch the work is on, which is the branch the take-up checks out.
+ */
+head: string, 
+/**
+ * And the branch it goes into.
+ */
+base: string, };
+
+/**
  * A notice as the page receives it: what Verkstead did, and when.
  *
  * HTML alone, like the handoff and unlike the Brief: nobody edits it. Rendered
@@ -2062,6 +2129,18 @@ base: string,
  * which is what a deleted account leaves behind.
  */
 author: string, 
+/**
+ * What it says about itself: the description as it was written, raw
+ * markdown. Empty where nobody wrote one.
+ *
+ * Never drawn on the row — a row is a line, and this is a document — but
+ * carried on it all the same, because loading a pull request prefills the
+ * box with the title as a heading and this under it. Raw rather than
+ * rendered, unlike every other piece of markdown crossing this wire: what
+ * it becomes is a Brief the human edits, and a field cannot be filled from
+ * HTML.
+ */
+body: string, 
 /**
  * The Conversation already holding this pull request, where one does —
  * any state, Done and Closed included, because a pull request stays on a
@@ -2840,7 +2919,7 @@ export type RepoRemoved = "Removed" | "NoSuchRepo" | "InUse";
 /**
  * What became of moving a Conversation onto another Repo.
  */
-export type RepoSwitched = "Switched" | "NoSuchConversation" | "NotDrafting" | "Adopting" | "NoSuchRepo";
+export type RepoSwitched = "Switched" | "NoSuchConversation" | "NotDrafting" | "Adopting" | "HoldingPullRequest" | "NoSuchRepo";
 
 /**
  * One registered Repo opened: everything the card cannot hold, read at the

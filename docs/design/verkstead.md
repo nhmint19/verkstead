@@ -641,7 +641,10 @@ that has become its own repo, leaving the branch name and the Pairings alone;
 it is refused, and the picker reads disabled, from the moment a worktree exists —
 and on a draft adopting a roadmap, whose repo the roadmap settled rather than the
 human: only the roadmap's name is kept, so work moved off would be adopting a
-name rather than a roadmap.
+name rather than a roadmap. A draft holding a pull request is refused by a name
+of its own, for the same reason said about a number: `#41` is a fact about one
+repository, and the same number in the next one along is a different pull request
+or none at all.
 It is the pane for a Conversation while it drafts, whatever the Brief's own
 freeze — an adopting draft gets it with the box locked to the stage's rendering
 and the *Continue* press where the start would be. Past drafting a frozen

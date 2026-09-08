@@ -1826,6 +1826,47 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         ),
     );
 
+    // And what pressing a free row of the *Wrap up a pull request* level makes:
+    // a Draft against that Repo holding the pull request, which is the page that
+    // names one over a Brief the human still writes. Put in through the store
+    // for the reason the adoption above is, and with a Brief saved on it —
+    // loading a pull request prefills the box with the title and the description,
+    // and the create's replay is what puts that on the record.
+    let wrapping_up = store::start_pull_request_adoption(
+        &pool,
+        registered.id,
+        "quiet-heron",
+        &store::AdoptedPullRequest {
+            number: 41,
+            title: "Rate limiting for the public API".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            head: "rate-limiting".to_owned(),
+            base: "main".to_owned(),
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    store::save_brief(
+        &pool,
+        wrapping_up,
+        "# Rate limiting for the public API\n\n\
+         Counts every request against a window shared between the instances.\n",
+    )
+    .await
+    .unwrap();
+
+    write(
+        "conversation-pull-request.json",
+        &pin_repo(
+            &pin_health(&pin_timeline(
+                &get(&app, &format!("/api/ui/conversations/{wrapping_up}")).await,
+            )),
+            "/srv/repos/verkstead",
+        ),
+    );
+
     // And the same Repo opened, which is what its card in the settings leads to:
     // the three facts the row already carries, every branch git has, how much
     // work is on it, and the roadmaps above still waiting for somebody.

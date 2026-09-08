@@ -1,27 +1,24 @@
 {
-  "adopting": {
-    "roadmap": "mvp",
-    "stage": {
-      "branch": "mvp/04-wrap-up",
-      "brief_path": "docs/roadmaps/mvp/04-wrap-up.md",
-      "label": "04",
-      "title": "Wrap-up"
-    },
-    "title": "MVP roadmap"
+  "adopting": null,
+  "adopting_pull_request": {
+    "base": "main",
+    "head": "rate-limiting",
+    "number": 41,
+    "title": "Rate limiting for the public API",
+    "url": "https://github.com/tobico/verkstead/pull/41"
   },
-  "adopting_pull_request": null,
   "archived": false,
   "attachments": [],
   "base_commit": null,
   "blocked_on": null,
-  "branch": "spring-otter",
+  "branch": "quiet-heron",
   "branch_named": false,
   "companions": [],
   "compiles_uncached": false,
   "direction": null,
   "driven": false,
   "grilling_pairing": "Nothing",
-  "id": 1,
+  "id": 2,
   "implementation_pairing": null,
   "naming": false,
   "pinned": [],
@@ -45,10 +42,10 @@
     {
       "Brief": {
         "at": "2026-08-03T09:07:11.000Z",
-        "frozen": true,
-        "html": "",
-        "id": 1,
-        "markdown": ""
+        "frozen": false,
+        "html": "<h1>Rate limiting for the public API</h1>\n<p>Counts every request against a window shared between the instances.</p>\n",
+        "id": 2,
+        "markdown": "# Rate limiting for the public API\n\nCounts every request against a window shared between the instances.\n"
       }
     }
   ],

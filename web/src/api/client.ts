@@ -316,6 +316,36 @@ export function startAdoption(
   });
 }
 
+/// And one to wrap one of those pull requests up with.
+///
+/// The whole row goes rather than its number, unlike the roadmap above: a
+/// roadmap is a document in the Conversation's own repository and is read back
+/// off it, where a pull request is GitHub's — and a server handed only a number
+/// would have to make a `gh` call of its own to name what the human is already
+/// looking at.
+///
+/// Nothing is checked out by this. It records and opens, and the take-up on the
+/// page it lands on is what touches git.
+export function startPullRequestAdoption(
+  repoId: number,
+  pull: {
+    number: number;
+    title: string;
+    url: string;
+    head: string;
+    base: string;
+  },
+): Promise<Started> {
+  return post<Started>("/api/ui/pull-request-adoptions", {
+    repo_id: repoId,
+    number: pull.number,
+    title: pull.title,
+    url: pull.url,
+    head: pull.head,
+    base: pull.base,
+  });
+}
+
 /// The Conversations in the sidebar, in the order the human put them in.
 export function listConversations(): Promise<ConversationEntry[]> {
   return get<ConversationEntry[]>("/api/ui/conversations");

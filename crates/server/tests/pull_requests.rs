@@ -114,6 +114,10 @@ fn listed_in(
     serde_json::json!({
         "number": number,
         "title": title,
+        // The description, which is what a load prefills the box under the
+        // title with. Written off the title so a row's own body is plainly its
+        // own — two rows sharing one would say nothing about which was loaded.
+        "body": format!("What {title} is for, at some length."),
         "url": format!("https://github.com/tobico/{repo}/pull/{number}"),
         "headRefName": head,
         "baseRefName": "main",
@@ -184,6 +188,10 @@ async fn every_open_pull_request_but_a_forks_comes_back_with_its_branches_and_it
     assert_eq!(one.base, "main");
     assert_eq!(one.author, "ada");
     assert_eq!(
+        one.body, "What Rate limiting is for, at some length.",
+        "and the description, which is what a load prefills the box with",
+    );
+    assert_eq!(
         one.conversation_id, None,
         "nothing is holding it, so a row loads it rather than leading anywhere",
     );
@@ -196,6 +204,10 @@ async fn every_open_pull_request_but_a_forks_comes_back_with_its_branches_and_it
     assert!(
         asked.contains("headRefName") && asked.contains("isCrossRepository"),
         "with the fields a row and the fork rule need: {asked}",
+    );
+    assert!(
+        asked.contains("body"),
+        "and the description a load prefills the box with: {asked}",
     );
 }
 

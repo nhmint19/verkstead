@@ -84,6 +84,7 @@ import { refusedOnCreate } from "./composing";
 import { PaneHead } from "./PaneHead";
 import { DRAFT, chosen } from "./naming";
 import { Setup, SetupNotes } from "./Setup";
+import { HeldPullRequest } from "./TakeUp";
 import { keeping } from "./settling";
 import { BRIEF_REFUSAL, grillRefusal } from "./Timeline";
 
@@ -169,6 +170,25 @@ export function Composer(props: {
           classList={{ [styles.over!]: files.over() }}
           {...files.dropping}
         >
+          {/* And the pull request this draft is holding, where it is holding
+              one: a band across the top of the box naming what the wrap-up
+              would be over. Over the box rather than in place of it — the
+              Brief under it is the human's to write, prefilled with the pull
+              request's own title and description when the row was loaded. See
+              `TakeUp.tsx`. */}
+          <Show when={props.conversation.adopting_pull_request}>
+            {(held) => (
+              <HeldPullRequest
+                repo={props.conversation.repo.name}
+                number={held().number}
+                title={held().title}
+                url={held().url}
+                head={held().head}
+                base={held().base}
+              />
+            )}
+          </Show>
+
           <Written conversation={props.conversation} brief={props.brief} />
 
           {/* And the files handed over with it, as a row of pills between the
@@ -208,18 +228,28 @@ export function Composer(props: {
           {(said) => <ErrorLine class={styles.failure}>{said}</ErrorLine>}
         </For>
 
-        {/* And the press the whole pane is arranged for. Only one of the two is
-            ever drawn — each is for a different kind of draft — so they read as
-            the one thing there is to do from here. */}
-        <Show
-          when={props.conversation.adopting}
-          fallback={
-            <StartGrilling conversation={props.conversation} files={files} />
-          }
-        >
-          {(adopting) => (
-            <Adoption conversation={props.conversation} adopting={adopting()} />
-          )}
+        {/* And the press the whole pane is arranged for. Only one is ever drawn
+            — each is for a different kind of draft — so they read as the one
+            thing there is to do from here.
+
+            A draft holding a pull request draws neither yet. Its own press is
+            the take-up, which is not built, and a grilling start over it would
+            be the wrong act offered plainly: the work on a pull request is
+            built already, and what it is waiting for is the wrap-up. */}
+        <Show when={props.conversation.adopting_pull_request === null}>
+          <Show
+            when={props.conversation.adopting}
+            fallback={
+              <StartGrilling conversation={props.conversation} files={files} />
+            }
+          >
+            {(adopting) => (
+              <Adoption
+                conversation={props.conversation}
+                adopting={adopting()}
+              />
+            )}
+          </Show>
         </Show>
       </div>
     </>

@@ -29,20 +29,21 @@ use axum::routing::{delete, get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    Adopted, Attached, AttachmentRemoved, Author, BaseBranchChoice, BranchRename, BriefEdit,
-    BuildCacheView, CheckRollup, CleanupStepView, CleanupView, CommentedOn, CompanionAdded,
-    CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode, CompanionModeChoice,
-    CompanionModeChosen, CompanionRemoved, CompanionView, CompileCaching, ConflictResolutionEdit,
-    ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
-    ConversationStopped, ConversationUnarchived, ConversationView, Creation, Cursor,
-    GrillingStarted, IgnoreRule, IgnoredCommentsEdit, Lifecycle, Locked, Merging, MissedOut,
-    NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry,
-    PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved,
-    Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress, SetReading, SetView,
-    SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit,
-    SharedConversation, ShowArchived, ShowingArchived, Standing, SteerOpened, SteerSubmission,
-    Submitted, Subscribed, Subscription, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved,
-    UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    Adopted, AdoptedPullRequestView, Attached, AttachmentRemoved, Author, BaseBranchChoice,
+    BranchRename, BriefEdit, BuildCacheView, CheckRollup, CleanupStepView, CleanupView,
+    CommentedOn, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
+    CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView, CompileCaching,
+    ConflictResolutionEdit, ConversationArchived, ConversationClosed, ConversationEntry,
+    ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Creation,
+    Cursor, GrillingStarted, IgnoreRule, IgnoredCommentsEdit, Lifecycle, Locked, Merging,
+    MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption,
+    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView,
+    RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused,
+    ServeEdit, ServePress, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
+    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
+    ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription,
+    TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice,
+    Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -123,6 +124,14 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // the one above: adopting is the other way into the pipeline, and what
         // it starts is a Conversation with no Brief to write.
         .route("/api/ui/adoptions", post(start_adoption))
+        // And starting one to wrap a pull request up with, which is what
+        // pressing a free row of that level does. Its own endpoint beside the
+        // one above for the same reason, over the other kind of thing there is
+        // to take up.
+        .route(
+            "/api/ui/pull-request-adoptions",
+            post(start_pull_request_adoption),
+        )
         .route("/api/ui/conversations/{id}", get(conversation))
         // And the same Conversation as one file to send somebody: the share
         // build of the viewer with this record inside it, answered as a
@@ -1077,6 +1086,34 @@ async fn start_adoption(
     }
 }
 
+/// `POST /api/ui/pull-request-adoptions` — start a Conversation to wrap a pull
+/// request up with.
+///
+/// What pressing a free row of the *Wrap up a pull request* level does. It
+/// records and opens: nothing about the repository is touched and nothing is
+/// checked out until the human presses the take-up on the page this puts them
+/// on.
+async fn start_pull_request_adoption(
+    State(state): State<AppState>,
+    Json(new): Json<NewPullRequestAdoption>,
+) -> HttpResponse {
+    let pull_request = store::AdoptedPullRequest {
+        number: new.number,
+        title: new.title,
+        url: new.url,
+        head: new.head,
+        base: new.base,
+    };
+
+    match crate::conversations::start_wrapping_up(&state, new.repo_id, &pull_request).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "starting a Conversation to wrap a pull request up failed");
+            unavailable("the Conversation could not be started")
+        }
+    }
+}
+
 /// `GET /api/ui/conversations/{id}` — one Conversation with its Timeline.
 ///
 /// The Timeline travels with it rather than being fetched beside it: it is what
@@ -1445,6 +1482,28 @@ pub(crate) async fn conversation_view(
         _ => None,
     };
 
+    // And the pull request it is holding, where it is holding one and has not
+    // taken it up yet. Read straight off the record rather than off GitHub: the
+    // roadmap above is a document in this Repo and costs a file read, where this
+    // would be a call out to somebody else's server every time the page was
+    // opened. What GitHub says *now* is what the take-up asks for, which is the
+    // one moment it decides anything.
+    //
+    // A worktree says the take-up has happened, exactly as it says an adoption
+    // has: what follows it is a wrap-up, and the pull request is on the record
+    // properly by then.
+    let adopting_pull_request = conversation
+        .adopting_pull_request
+        .clone()
+        .filter(|_| worktree.is_none())
+        .map(|held| AdoptedPullRequestView {
+            number: held.number,
+            title: held.title,
+            url: held.url,
+            head: held.head,
+            base: held.base,
+        });
+
     // Whether driving has stopped, however it stopped: the stop says the
     // Conversation is stopped now, and the Notice it points at says what stopped
     // and why. One question about one thing — an account out of window stops a
@@ -1660,6 +1719,7 @@ pub(crate) async fn conversation_view(
         stop_asked,
         ready_to_continue,
         adopting,
+        adopting_pull_request,
         grilling_pairing,
         implementation_pairing,
         review_pairing,
