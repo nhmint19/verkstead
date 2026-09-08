@@ -898,9 +898,12 @@ pub(crate) fn alongside(prompt: &str, branch: &str, companions: &[store::Compani
 /// an upload button.
 ///
 /// **Grouped under what each file was attached to**, which is its origin — the
-/// Brief, or the Answer it was put on. Walked in the record's own order rather
-/// than sorted into groups, because that order is the order they were attached
-/// in and an origin's files therefore arrive together.
+/// Brief, or the Answer it was put on. Each origin is written once, headed
+/// where its first file was attached and holding every file of its own in the
+/// order they were attached: the human answering a Set may put a file on one
+/// Question, another on the next and a second on the first, and a listing that
+/// started a fresh group each time the origin changed row to row would head the
+/// same Answer twice.
 ///
 /// `sets` is what each Set an Answer's files were put on is called — see
 /// [`store::attached_sets`] — because a group headed by a label alone would say
@@ -922,24 +925,38 @@ pub(crate) fn attached(
         return prompt.to_owned();
     }
 
-    let mut listed = String::new();
-    let mut under = None;
+    // One group per origin, in the order each was first attached to — so the
+    // Brief's group is still first, an Answer's files are still in the order
+    // they were handed over, and neither an origin nor a file moves anywhere a
+    // reader would not look for it.
+    let mut groups: Vec<(&store::Origin, Vec<&store::Attachment>)> = Vec::new();
 
     for file in files {
-        if under != Some(&file.origin) {
-            if under.is_some() {
-                listed.push('\n');
-            }
+        match groups
+            .iter_mut()
+            .find(|(origin, _)| *origin == &file.origin)
+        {
+            Some((_, held)) => held.push(file),
+            None => groups.push((&file.origin, vec![file])),
+        }
+    }
 
-            listed.push_str(&format!("{}\n\n", attached_to(&file.origin, sets)));
-            under = Some(&file.origin);
+    let mut listed = String::new();
+
+    for (origin, held) in &groups {
+        if !listed.is_empty() {
+            listed.push('\n');
         }
 
-        listed.push_str(&format!(
-            "- `{}`, {}.\n",
-            crate::sandbox::under(inside, &file.name).display(),
-            sized(file.bytes),
-        ));
+        listed.push_str(&format!("{}\n\n", attached_to(origin, sets)));
+
+        for file in held {
+            listed.push_str(&format!(
+                "- `{}`, {}.\n",
+                crate::sandbox::under(inside, &file.name).display(),
+                sized(file.bytes),
+            ));
+        }
     }
 
     format!(
@@ -3640,6 +3657,47 @@ mod tests {
         assert!(
             prompt.contains("- `/verkstead/attachments/trace.txt`, 512 bytes."),
             "and the file is listed all the same: {prompt:?}"
+        );
+    }
+
+    /// An Answer is headed once however the human got round to it.
+    ///
+    /// A Set is answered a question at a time and in no particular order: one
+    /// file on Q3, one on Q9a, and then a second thought about Q3. What that
+    /// leaves in the record is one origin's rows with another's between them,
+    /// and the listing puts them back together rather than heading the same
+    /// Answer twice.
+    #[test]
+    fn an_answer_returned_to_is_headed_once() {
+        let prompt = attached(
+            "# The work\n",
+            &[
+                on_an_answer("trace.txt", 512, 11, "Q3"),
+                on_an_answer("wording.md", 64, 11, "Q9a"),
+                on_an_answer("graph.png", 2_048, 11, "Q3"),
+            ],
+            &[(11, "How the limiter counts".to_owned())],
+            &attachments_inside(),
+        );
+
+        assert_eq!(
+            prompt
+                .matches("Attached to the Answer to Q3 of \"How the limiter counts\":")
+                .count(),
+            1,
+            "the Answer the human came back to is headed once: {prompt:?}"
+        );
+        assert!(
+            prompt.contains(
+                "Attached to the Answer to Q3 of \"How the limiter counts\":\n\n\
+                 - `/verkstead/attachments/trace.txt`, 512 bytes.\n\
+                 - `/verkstead/attachments/graph.png`, 2.0 kB.\n\
+                 \n\
+                 Attached to the Answer to Q9a of \"How the limiter counts\":\n\n\
+                 - `/verkstead/attachments/wording.md`, 64 bytes.\n"
+            ),
+            "its files are together and in the order they were attached, and the \
+             group it interrupted is still where it was first put on: {prompt:?}"
         );
     }
 
