@@ -16,9 +16,9 @@ use verkstead_store::{
     forget_every_addressed_comment, forget_fix_attempts, implement_again, last_batch_proposal,
     last_proposal, load_conversation, load_response, lock_set, open_database, pick_direction,
     pull_requests, record_addressed_comments, record_another_pull_request, record_fix_attempt,
-    record_pull_request, register_repo, save_brief, settle_wrap_up, start_conversation,
-    start_grilling, steer_conversation, submit_response, timeline, unsettle_wrap_up,
-    wrap_up_settled,
+    record_pull_request, register_repo, review_over, save_brief, settle_wrap_up,
+    start_conversation, start_grilling, steer_conversation, submit_response, timeline,
+    unsettle_wrap_up, wrap_up_settled,
 };
 
 /// A Conversation whose work is on a pull request, which is the only state any
@@ -197,6 +197,62 @@ async fn checks_that_go_red_again_stop_being_settled() {
         .await
         .unwrap();
     assert_eq!(wrap_up_settled(&pool, id).await.unwrap(), Vec::new());
+}
+
+/// A review that is over is a push, so the green every pull request had goes
+/// with it: what GitHub called green was the commit before whatever the review
+/// landed, and a wrap-up that kept it would finish on a suite that never saw the
+/// work the human accepted.
+///
+/// Every pull request rather than the Conversation's own, a review reading the
+/// work whole and pushing into whichever worktree it fixed something in. What is
+/// settled about them otherwise is left where it is: the comments the review
+/// folded in are still addressed and the base has not moved.
+#[tokio::test]
+async fn a_review_that_is_over_puts_every_pull_requests_checks_back_to_waiting() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    let repo = own(&pool, id).await;
+    let companion = beside(&pool, id).await;
+
+    for settled in [
+        WaitingOn::Checks(repo),
+        WaitingOn::Checks(companion),
+        WaitingOn::Comments(repo),
+        WaitingOn::Mergeable(repo),
+    ] {
+        settle_wrap_up(&pool, id, settled).await.unwrap();
+    }
+
+    review_over(&pool, id).await.unwrap();
+
+    let mut settled = wrap_up_settled(&pool, id).await.unwrap();
+    settled.sort_by_key(|one| format!("{one:?}"));
+
+    assert_eq!(
+        settled,
+        vec![
+            WaitingOn::Comments(repo),
+            WaitingOn::Mergeable(repo),
+            WaitingOn::Review,
+        ],
+        "the review settled and both suites went back to being waited on",
+    );
+
+    // And the checks settle again as soon as a poll has read the run the push
+    // started, which is the ordinary way round: this took nothing away that a
+    // green cannot earn back.
+    settle_wrap_up(&pool, id, WaitingOn::Checks(repo))
+        .await
+        .unwrap();
+
+    assert!(
+        wrap_up_settled(&pool, id)
+            .await
+            .unwrap()
+            .contains(&WaitingOn::Checks(repo)),
+    );
 }
 
 /// The count is per check rather than per Conversation: a suite where one job

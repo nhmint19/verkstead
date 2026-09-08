@@ -752,17 +752,29 @@ pub(crate) async fn closed(state: &AppState, conversation_id: i64, set_id: i64) 
     }
 }
 
-/// Record that the review is over, so wrap-up has one less thing to wait on.
+/// Record that the review is over, so wrap-up has one less thing to wait on —
+/// and every pull request's checks one more.
 ///
 /// Once its session has ended cleanly and never before: what wrap-up is waiting
 /// on is the whole of the review — the branch read, the findings put, the ones
 /// the human accepted landed — and the session ending well is the one thing that
 /// says all of it happened. Answering the Set says only that the decisions are
 /// made.
+///
+/// The checks go back to waiting in the same breath, because a review that ran
+/// pushed whatever it landed: the suites GitHub had green are green about the
+/// commit before that push, and one kept would carry the Conversation to Done
+/// over work nothing has ever checked. See [`store::review_over`], which is
+/// where the two are one act, and [`crate::checks`], whose next poll settles
+/// them again against the run the push started.
+///
+/// Which is also what a review that pushed nothing goes through — one that found
+/// nothing worth raising, and the one [`skipped`] settles for a human who turned
+/// reviewing off. It costs them a poll of the checks and nothing else: nothing
+/// could have finished in the meantime, the review being what the wrap-up was
+/// waiting on.
 async fn settle(state: &AppState, conversation_id: i64) {
-    if let Err(error) =
-        store::settle_wrap_up(&state.pool, conversation_id, store::WaitingOn::Review).await
-    {
+    if let Err(error) = store::review_over(&state.pool, conversation_id).await {
         tracing::error!(error = ?error, conversation_id, "recording that the review was over failed");
     }
 }

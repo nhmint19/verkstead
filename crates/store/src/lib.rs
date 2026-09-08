@@ -128,8 +128,8 @@ pub use wrap_up::{
     Finished, Narrowing, WAITED_ON, WaitingOn, addressed_comments, conflict_fix_attempts,
     finish_wrap_up, fix_attempts, forget_addressed_comments, forget_every_addressed_comment,
     forget_fix_attempts, forget_narrowing, most_fix_attempts, narrowed_to_checks, narrowing,
-    record_addressed_comments, record_conflict_fix_attempt, record_fix_attempt, settle_wrap_up,
-    unsettle_wrap_up, wrap_up_settled,
+    record_addressed_comments, record_conflict_fix_attempt, record_fix_attempt, review_over,
+    settle_wrap_up, unsettle_wrap_up, wrap_up_settled,
 };
 
 /// A Set as the store holds it: what was asked plus the identity the server
