@@ -370,6 +370,28 @@ describe("while the step is open", () => {
     await waitFor(() => expect(row(container, "Claude")).toBeTruthy());
     expect(tick(container, "Claude").checked).toBe(true);
   });
+
+  /// And that re-read is not allowed to shut a section somebody has just
+  /// opened. Whether the form is out is this step's own signal rather than
+  /// anything read off the machine — the same way a tick somebody has taken off
+  /// is — and a page that put the form away every ten seconds would be taking
+  /// the step back off whoever was filling it in.
+  it("leaves the form open through a re-read", async () => {
+    serving(json(NOTHING_FOUND), json(PART_WAY));
+    const { container } = mountPage();
+
+    await waitFor(() => expect(naming(container)).toBeTruthy());
+    fireEvent.click(naming(container)!);
+    expect(screen.getByLabelText(/^Name/)).toBeTruthy();
+
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    // The re-read landed — the account it found is a row now — and the form is
+    // still where the press left it.
+    await waitFor(() => expect(row(container, "Claude")).toBeTruthy());
+    expect(screen.getByLabelText(/^Name/)).toBeTruthy();
+    expect(naming(container)).toBeUndefined();
+  });
 });
 
 /// The other way past this step, which needs no clock at all: a Profile
