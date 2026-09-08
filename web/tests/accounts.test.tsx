@@ -97,6 +97,15 @@ function tick(container: ParentNode, agent: string): HTMLInputElement {
   return row(container, agent).querySelector("input[type=checkbox]")!;
 }
 
+/// The link the form for an account nothing found stands behind, and the press
+/// that opens it: it is the section's own heading drawn as a link, so it is
+/// found by the words the heading has.
+function naming(container: ParentNode): HTMLButtonElement | undefined {
+  return [...container.querySelectorAll("button")].find(
+    (button) => button.textContent === "Or name an account yourself",
+  );
+}
+
 /// The press onwards, found by its own words the way the step before it is.
 function onwards(container: ParentNode): HTMLButtonElement {
   return [...container.querySelectorAll("button")].find(
@@ -273,7 +282,7 @@ describe("the press onwards", () => {
 });
 
 describe("a home with no account in it", () => {
-  it("says what to run to make one, and offers the form under it", () => {
+  it("says what to run to make one, and offers the link under it", () => {
     const { container } = mount(NOTHING_FOUND);
 
     expect(container.querySelector("[data-account]")).toBeNull();
@@ -292,10 +301,42 @@ describe("a home with no account in it", () => {
       "claude",
     );
 
-    // And the same form the settings page saves a Profile with, for an account
-    // that is kept somewhere else entirely.
+    // And the way to the same form the settings page saves a Profile with, for
+    // an account that is kept somewhere else entirely — a link here as
+    // everywhere else, because the empty state already says what to run and
+    // this page reads the machine again every ten seconds.
+    expect(naming(container)).toBeTruthy();
+    expect(screen.queryByLabelText(/^Name/)).toBeNull();
+  });
+});
+
+/// The form for an account kept somewhere other than this server's home, which
+/// is the uncommon way past the step and so is not standing open under the rows.
+describe("the link the form stands behind", () => {
+  it("keeps the form off the step until it is pressed", () => {
+    const { container } = mount(PART_WAY);
+
+    expect(screen.queryByLabelText(/^Name/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+
+    fireEvent.click(naming(container)!);
+
     expect(screen.getByLabelText(/^Name/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
+  });
+
+  /// The link is the heading, so what is left where it stood is the heading
+  /// itself — and the section does not shut again, there being nothing on this
+  /// step that wants the room back.
+  it("leaves the heading in its place, and no way back", () => {
+    const { container } = mount(PART_WAY);
+
+    fireEvent.click(naming(container)!);
+
+    expect(naming(container)).toBeUndefined();
+    expect(
+      [...container.querySelectorAll("h3")].map((head) => head.textContent),
+    ).toContain("Or name an account yourself");
   });
 });
 
@@ -347,6 +388,8 @@ describe("the form under the rows", () => {
 
     await waitFor(() => expect(onwards(container)).toBeTruthy());
     expect(onwards(container).disabled).toBe(true);
+
+    fireEvent.click(naming(container)!);
 
     fireEvent.click(screen.getByLabelText(prettify("claude-sonnet-5")));
     fireEvent.input(screen.getByLabelText(/Claude directory/), {

@@ -25,11 +25,22 @@
 //!
 //! **And nothing found is a state rather than a gap.** It says what to run to
 //! make an account, keeps probing on the frame's own ten-second cadence — see
-//! [`./SetupPage.tsx`](./SetupPage.tsx) — and offers the form under it for an
-//! account that lives somewhere else entirely.
+//! [`./SetupPage.tsx`](./SetupPage.tsx) — and the link under it still reaches
+//! the form for an account that lives somewhere else entirely.
+//!
+//! **That form is behind a link.** Naming an account by hand is the way in for
+//! a machine whose accounts are kept somewhere other than this server's home,
+//! which is the uncommon one: the ordinary machine ticks a row and presses
+//! Continue, and a form of paths and models standing open under those rows
+//! reads as work the step is asking for. So the section starts as its own
+//! heading drawn as a link, and a press puts the whole of it — heading,
+//! explainer and form — where the link stood. It never shuts again: nothing on
+//! this step wants the room back. And it starts shut in the nothing-found state
+//! as well, that state already saying what to run and this page reading the
+//! machine again every ten seconds, with the link right under it.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import { For, Show, createSignal, type JSX } from "solid-js";
+import { For, Show, createEffect, createSignal, type JSX } from "solid-js";
 
 import { HarnessMark } from "../HarnessMark";
 import { AGENT_NAME, type AgentType } from "../agents";
@@ -89,6 +100,22 @@ export function Accounts(props: {
     {},
   );
   const [refused, setRefused] = createSignal<ProfileSaved | null>(null);
+
+  // Whether the form for an account nothing found is open. Its own signal, and
+  // for the reason `chosen` above is one: the page is re-read every ten seconds
+  // while this step is unmet, and a section somebody has just opened is not
+  // something a re-read may shut under them.
+  const [naming, setNaming] = createSignal(false);
+
+  // The heading that stands where the link stood, so that the keyboard has
+  // somewhere to land. Opening the section is the one press that takes its own
+  // control away, and a focus dropped on the page would put the next Tab back
+  // at the top of it.
+  let named: HTMLHeadingElement | undefined;
+
+  createEffect(() => {
+    if (naming()) named?.focus();
+  });
 
   /// Which harness one found account belongs to.
   const agent = (found: AccountView): AgentType => found.account.agent_type;
@@ -223,20 +250,42 @@ export function Accounts(props: {
       {/* And the way in for an account that is not in this server's home at
           all — one kept under another login, or on another disk. The same form
           the settings page saves a Profile with, because it is the same
-          Profile. */}
-      <section class={styles.byHand}>
-        <h3>Or name an account yourself</h3>
-        <p class={styles.standing}>
-          An account kept somewhere other than this server's own home is named
-          here, the way the settings page names one.
-        </p>
+          Profile.
 
-        <ProfileForm
-          initial={() => BLANK_PROFILE}
-          submit="Save"
-          save={createProfile}
-          saved={read}
-        />
+          Behind a link until it is asked for, and the heading is the link: the
+          press replaces it with the section it names, and there is no way back
+          — see `naming` above. */}
+      <section class={styles.byHand}>
+        <Show
+          when={naming()}
+          fallback={
+            <button
+              type="button"
+              class={styles.naming}
+              aria-expanded="false"
+              onClick={() => setNaming(true)}
+            >
+              Or name an account yourself
+            </button>
+          }
+        >
+          {/* Reachable by the focus without standing in the tab order: it is
+              what the press that opened the section left behind. */}
+          <h3 ref={named} tabindex="-1">
+            Or name an account yourself
+          </h3>
+          <p class={styles.standing}>
+            An account kept somewhere other than this server's own home is named
+            here, the way the settings page names one.
+          </p>
+
+          <ProfileForm
+            initial={() => BLANK_PROFILE}
+            submit="Save"
+            save={createProfile}
+            saved={read}
+          />
+        </Show>
       </section>
     </div>
   );
