@@ -176,6 +176,9 @@ mod stages;
 /// The check that says when a Conversation has Stalled: in a driven state,
 /// with nothing driving it and nothing asking the human about it.
 mod stalls;
+/// The stand-in programs the tests run in place of the machine's own.
+#[cfg(test)]
+mod stand_ins;
 /// The human steering a Conversation: the click that stops the drive and opens
 /// the modal, and the submit that moves the work where they said.
 mod steering;

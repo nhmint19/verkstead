@@ -733,6 +733,7 @@ fn shown(platform: Platform) -> verkstead_render::Platform {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stand_ins::program;
 
     /// A machine on `platform` whose `PATH` is `dir`, which says nothing about
     /// itself and whose home is `dir` as well.
@@ -877,18 +878,6 @@ echo {token}
         email: true,
         token: true,
     };
-
-    /// A file at `path`, executable where this platform has such a thing.
-    fn program(path: &Path, contents: &str) {
-        std::fs::write(path, contents).unwrap();
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-
-            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
-    }
 
     /// What one row of a reading says.
     fn state(machine: &Machine, dependency: Dependency) -> DependencyState {

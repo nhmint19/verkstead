@@ -111,7 +111,15 @@
   margin-top: 0.85rem;
 }
 
-.buttons button {
+/* The press that does the thing, filled. Everything else in this row is a
+   secondary press and is painted once in `styles/base.css` — see `.secondary`
+   there, and the cancel below, which is the one this row holds.
+
+   The cancel is stood out of the way with `:where`, which weighs nothing: a bare
+   `:not` would carry the cancel's own class into this selector's weight, and
+   every rule in the app written to sit *over* a button of this row would find
+   itself under it instead. */
+.buttons button:not(:where(.cancel)) {
   padding: 0.5rem 1rem;
   font: inherit;
   font-weight: 600;
@@ -145,7 +153,7 @@
     border-color: var(--ink-soft);
   }
 
-  .buttons button:not(:disabled):hover {
+  .buttons button:not(:where(.cancel)):not(:disabled):hover {
     background: var(--accent-deep);
     border-color: var(--accent-deep);
   }
@@ -353,18 +361,10 @@
   font-size: 1rem;
 }
 
-/* The press that undoes rather than does, drawn as the outline of the one beside
-   it — the steer modal's cancel, and the profile form's. */
-.buttons .cancel {
-  color: var(--accent);
-  background: none;
-}
-
-@media (hover: hover) {
-  .buttons .cancel:hover {
-    border-color: var(--accent);
-  }
-}
+/* The press that undoes rather than does, on both modals. What it looks like is
+   `.secondary` in `styles/base.css`, which every quiet press in the app is
+   painted by; the class is kept here so that the filled rule above knows which
+   of its buttons is not one. */
 
 /* And the create asked from the same foot, on the same modal: two fields rather
    than one, so the second label needs the air the first gets from the heading

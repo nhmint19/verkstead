@@ -1077,7 +1077,11 @@ export function Steer(props: {
           {/* Drawn as well as the ways out the modal already has: escape and a
               press on the backdrop are for a keyboard and a cursor, and this is
               the one a thumb has. */}
-          <button type="button" class={styles.cancel} onClick={props.close}>
+          <button
+            type="button"
+            class={`${styles.cancel} secondary`}
+            onClick={props.close}
+          >
             Cancel
           </button>
         </div>
