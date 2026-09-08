@@ -69,6 +69,169 @@ and the loop for working on Verkstead itself.
 binaries, the AppImage, the dmg and the msi. Nothing has been released under
 this name yet.
 
+## Running it here (WSL, no nix)
+
+My own notes for this machine, where [development.md](docs/development.md)'s
+`nix develop` has nothing to enter — there is no nix on this box. The system
+toolchain covers it: `cargo`, `node`, `pnpm`, `gcc`, `git` and `gh` are all on
+`PATH` already, and nothing in the server half wants a system library — rustls
+rather than OpenSSL, and SQLite bundled.
+
+### Once
+
+Two packages are missing, and neither of them is needed to bring the workbench
+up:
+
+```console
+$ sudo apt install libgtk-3-dev libayatana-appindicator3-dev   # for `desktop`
+$ sudo apt install bubblewrap                                  # to start sessions
+```
+
+GTK is what `crates/cli`'s default-on `desktop` feature links, so without it,
+build with `--no-default-features` — the same headless build the musl CLI and
+the nix package take, and the tray icon is the only thing it costs. Without
+`bwrap` the server and the workbench come up as normal and a session refuses to
+start: it is the whole of the Linux Sandbox's mechanism.
+
+`sccache` is worth a third line, and is the one that is purely speed. The dev
+shell carries one; without it the server says so at startup and turns compile
+caching off, so every session compiles its dependencies again from source.
+Crate *downloads* are still shared either way.
+
+```console
+$ cargo install sccache        # or: sudo apt install sccache
+```
+
+### The one bind WSL makes necessary
+
+**Without it a session has no DNS, and every model call fails.** A Sandbox is a
+mount namespace: `/etc` is bound into it read-only and the network is shared,
+which on an ordinary Linux box is the whole of what resolving a name takes. On
+WSL it is not, because `/etc/resolv.conf` here is a *symlink* to
+`/mnt/wsl/resolv.conf` — and `/mnt/wsl` is not bound, so the link dangles and
+the file is simply not there inside.
+
+What that looks like is not a DNS error. `claude` inside the session reports it
+as `API error · Retrying in 1s`, then `Request timed out. · attempt 3/10`, and
+climbs to 10 attempts before giving up; the `Remote managed settings failed to
+load` banner in the same status line has the same cause.
+
+Add `/mnt/wsl` to the **Sandbox Configuration** — the settings page's **Paths**
+section, or `sandbox_binds` in the Data Directory's `config.yaml`:
+
+```yaml
+sandbox_binds:
+  - /mnt/wsl
+```
+
+It is read afresh every time a Sandbox is composed, so the running server picks
+it up with no restart — but a session already running was composed without it
+and has to be stopped and resumed. To check it from a shell, the probe is the
+sandbox itself:
+
+```console
+$ bwrap --unshare-all --share-net --ro-bind /usr /usr --ro-bind /bin /bin \
+    --ro-bind /lib /lib --ro-bind /lib64 /lib64 --ro-bind /etc /etc \
+    --ro-bind /mnt/wsl /mnt/wsl --proc /proc --dev /dev \
+    /bin/bash -c 'getent hosts api.anthropic.com'
+```
+
+Drop the `/mnt/wsl` line from that and it fails, which is the difference.
+
+### Every time
+
+```console
+$ (cd web && pnpm install && pnpm build)
+$ cargo run -p verkstead-cli --no-default-features -- serve --data-dir ../verkstead-data
+```
+
+**The order of those two matters, and only the first time.** `crates/server`
+embeds `web/dist` with `#[allow_missing = true]` — the attribute that lets a
+checkout which has never built the viewer still compile — so a `cargo build`
+run while `web/dist` is absent bakes in an *empty* viewer, permanently. The
+server then comes up, answers the agents' API, accepts the Workbench Key, and
+answers the workbench itself with `503 the viewer was not built into this
+binary: run pnpm build in web/`. Building the viewer afterwards does not lift
+it: the Rust side has to be compiled again, and cargo does not watch that
+folder, so it needs pushing —
+
+```console
+$ touch crates/server/src/viewer.rs && cargo build -p verkstead-cli --no-default-features
+```
+
+Once `web/dist` existed at compile time, the usual rule applies and the viewer
+build is only for a `web/` that has changed: `rust-embed`'s `debug-embed` is
+deliberately off, so a debug `serve` reads the folder off disk per request and
+a rebuilt viewer is visible to a server already running, without a recompile.
+
+The first `cargo build` is a cold build of the whole workspace — about three
+minutes here — and the ones after it are seconds.
+
+**The way in is the `workbench=` link in the startup log** — the address with
+the **Workbench Key** on it. Every page answers 401 without the key, and
+pasting that link once leaves the cookie in the browser. The key is
+`workbench.key` in the Data Directory, made at the first start and read back at
+every one after it.
+
+### Stopping it
+
+`kill` is the whole of it, and it is the designed answer rather than a blunt
+one. There is no shutdown path in the server at all —
+`crates/server/src/sandbox/outliving.rs` says so outright, and the reason is
+`--die-with-parent`: every session's `bwrap` is started with it, so the kernel
+ends them the moment the server goes. The tray app's **Exit** is the same stop.
+
+```console
+$ pkill -f 'verkstead serve'
+$ pgrep -af 'verkstead serve|bwrap'   # silent means everything went
+$ ss -ltnp | grep 8422                # and nothing is on the port
+```
+
+Ctrl-C in the terminal it was started in does the same. A session that was
+mid-run is ended where it stands rather than asked to finish: its Conversation
+stays at whatever the database last recorded and reads as stalled when the
+server comes back, and **Resume** is what restarts it. A `verkstead ask`
+holding a long-poll dies with the server and exits nonzero.
+
+Nothing is deleted by stopping — the next start reads the same database, the
+same Worktrees and the same Workbench Key. A second Verkstead started while the
+first is still listening does not race it: it says so and exits nonzero.
+
+### Why the data directory is outside the checkout
+
+`--data-dir .` is what development.md says, and it puts `config.yaml`,
+`secrets.yaml`, `workbench.key`, `worktrees/`, `handoffs/` and `skills/` in the
+repository root. Only `*.db` is in `.gitignore` — so a `secrets.yaml` holding a
+GitHub token shows up as untracked in every `git status` here, one `git add .`
+away from being committed. A sibling directory is just as deletable alongside
+the checkout and has none of that; omitting the flag altogether uses
+`~/.local/share/verkstead`, which is where an installed Verkstead keeps it.
+
+Two files in there are worth writing before the first Conversation — both can
+be saved from the settings page instead:
+
+```yaml
+# secrets.yaml
+github_token: ghp_...
+```
+
+```yaml
+# config.yaml
+git_author:
+  name: ...
+  email: ...
+```
+
+Every session started after that gets the token as `GH_TOKEN` and git
+configured through the environment. With neither, sessions still start: `gh`
+inside says it is not logged in, and git asks to be told who you are.
+
+### From there
+
+Steps 3 to 6 of [development.md](docs/development.md#quickstart) are the loop
+itself — add a repo, **New conversation**, then `ask` from a second terminal
+and answer in the browser.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
