@@ -155,7 +155,7 @@ export function Standing(props: {
         <div class={page.confirmActions}>
           <button
             type="button"
-            class={page.secondary}
+            class={`${page.secondary} secondary`}
             onClick={() => setConfirming(false)}
           >
             Keep it pending

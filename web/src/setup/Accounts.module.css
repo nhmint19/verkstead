@@ -145,7 +145,9 @@
 }
 
 /* The form under the rows, set apart by a rule and a heading: it is the way in
-   for an account nothing found, rather than another row of the list. */
+   for an account nothing found, rather than another row of the list. Behind a
+   link until it is asked for — see `naming` in `Accounts.tsx` — so the rule is
+   what says the section is there while it is only one line long. */
 .byHand {
   padding-top: 0.9rem;
   border-top: 1px solid var(--edge);
@@ -156,9 +158,39 @@
   font-size: 1rem;
 }
 
+/* The heading while the section is shut, which is a link: it reveals what is
+   under it rather than going anywhere, so it is a button, and it is drawn as
+   the app draws every other link — see `a` in `styles/base.css`, which is the
+   look this borrows rather than a look of its own.
+
+   The focus ring is left where it is, this being a control the keyboard reaches
+   and the one thing on the step it reaches nothing else through. */
+.byHand .naming {
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  text-align: start;
+  text-decoration: underline;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+/* And the heading that replaces it takes nothing off: it wears the ring the
+   browser puts round it, being where the focus lands when the press that opened
+   the section takes its own control away. A hand that pressed with the pointer
+   never matches `:focus-visible` and sees none of it; the hand that pressed with
+   Enter is the one being told where it now is, which is the whole reason the
+   focus is moved there at all — see `named` in `Accounts.tsx`. */
+
 @media (hover: hover) {
   .continue:not(:disabled):hover {
     background: var(--accent-deep);
     border-color: var(--accent-deep);
+  }
+
+  /* Deepened, the way every other link in the app is. */
+  .byHand .naming:hover {
+    color: var(--accent-deep);
   }
 }

@@ -271,8 +271,13 @@
   gap: 0.5rem;
 }
 
-.steerButtons .steer,
-.steerButtons .cancel {
+/* The press that steers, filled — and the cancel beside it stood out of the way,
+   that one being a secondary press painted once in `styles/base.css`; see
+   `.secondary` there. `:where` because standing it aside should weigh nothing:
+   a bare `:not` would carry the cancel's own class into this selector's weight,
+   and a rule written to sit over one of these presses would find itself under
+   it. */
+.steerButtons button:not(:where(.cancel)) {
   padding: 0.5rem 1rem;
   font: inherit;
   font-weight: 600;
@@ -283,17 +288,9 @@
   cursor: pointer;
 }
 
-.steerButtons .steer:disabled,
-.steerButtons .cancel:disabled {
+.steerButtons button:not(:where(.cancel)):disabled {
   cursor: not-allowed;
   opacity: 0.65;
-}
-
-/* The one that undoes rather than does, drawn as the outline of the one beside
-   it — as the profile form's cancel is. */
-.steerButtons .cancel {
-  color: var(--accent);
-  background: none;
 }
 
 .steerConversation .failure {
@@ -308,9 +305,9 @@
   border-color: var(--accent);
 }
 
-/* And under the pointer: the field darkens its border, the steer deepens the
-   accent it is filled with, and the cancel's outline takes the accent its words
-   are already in. */
+/* And under the pointer: the field darkens its border and the steer deepens the
+   accent it is filled with. The cancel beside it darkens its own border, out of
+   `.secondary` in `styles/base.css`. */
 @media (hover: hover) {
   .steerBrief textarea:hover {
     border-color: var(--ink-soft);
@@ -319,10 +316,5 @@
   .steerButtons .steer:not(:disabled):hover {
     background: var(--accent-deep);
     border-color: var(--accent-deep);
-  }
-
-  .steerButtons .cancel:not(:disabled):hover {
-    background: none;
-    border-color: var(--accent);
   }
 }

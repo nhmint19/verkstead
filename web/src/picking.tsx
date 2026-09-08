@@ -79,6 +79,7 @@ import {
   createEffect,
   createSignal,
   createUniqueId,
+  onCleanup,
   type JSX,
 } from "solid-js";
 
@@ -98,6 +99,15 @@ import styles from "./picking.module.css";
 /// the row it stands in is an invitation rather than a record — see `nothing`
 /// on [`Choosing`], which is that prop arriving.
 const NOTHING = "Not chosen";
+
+/// The room the rows keep off the window's own edge where they have to be pulled
+/// back onto it, in pixels.
+///
+/// Small, because it is not a margin anybody is meant to read: it is there so
+/// that a list pushed against the edge still has its shadow to sit on rather
+/// than being sheared off by it. See [`dropping`]'s measure, which is the one
+/// thing that uses it.
+const GUTTER = 8;
 
 /// What either control is given: the caller's rows, and the two functions that
 /// read them.
@@ -381,7 +391,7 @@ export function Listbox<T>(
   /// already are. And a bare Enter or Space on a shut control opens it rather
   /// than submitting the form it stands in, which is what a native dropdown
   /// does — where the browse field, being a text box, lets both through.
-  const { open, above, walking, list, rowId, drop, shut, key } = dropping({
+  const { open, above, placing, walking, list, rowId, drop, shut, key } = dropping({
     rows: () => props.options.length + actions().length,
     from: () => Math.max(0, at()),
     anchor: () => control,
@@ -486,11 +496,15 @@ export function Listbox<T>(
           aria-hidden="true"
           onClick={() => shut()}
         />
+        {/* Where the rows are put is measured rather than written — see
+            `placing` in [`dropping`], which is what a fixed box has instead of
+            an anchor to hang off. */}
         <div
           ref={dropped}
           class={[styles.drop, above() ? styles.above : undefined]
             .filter(Boolean)
             .join(" ")}
+          style={placing()}
           id={list}
           role="listbox"
         >
@@ -554,39 +568,6 @@ export function Listbox<T>(
   );
 }
 
-/// The box the rows have to fit inside: the nearest thing above the control that
-/// would clip them, and the window where nothing does.
-///
-/// Which is not the window as often as it looks. A pane scrolls its own content
-/// from the second breakpoint up and the steer modal's card is capped at `80vh`,
-/// so the edge the rows would disappear past is that box's rather than the
-/// screen's — and it is met with the window all the same, a pane being able to
-/// stand taller than the window it is scrolled inside.
-///
-/// `hidden` counts with `auto` and `scroll`: what matters here is that the box
-/// clips, and one that clips without scrolling is the worse of the two to drop
-/// rows into.
-///
-/// Nobody outside this file asks it. [`dropping`] is what the other dropdown the
-/// app draws for itself reaches for, and the measure that wants this is inside
-/// it.
-function clipping(from: Element): { top: number; bottom: number } {
-  for (let at = from.parentElement; at; at = at.parentElement) {
-    const { overflowY } = getComputedStyle(at);
-
-    if (["auto", "scroll", "hidden"].includes(overflowY)) {
-      const box = at.getBoundingClientRect();
-
-      return {
-        top: Math.max(box.top, 0),
-        bottom: Math.min(box.bottom, window.innerHeight),
-      };
-    }
-  }
-
-  return { top: 0, bottom: window.innerHeight };
-}
-
 /// One row's reading: the harness's mark, and the words beside it.
 ///
 /// Drawn by the list and again by the closed control, out of one component,
@@ -641,6 +622,15 @@ export function dropping(props: {
   /// browser will focus.
   anchor: () => HTMLElement;
 
+  /// And the box they are lined up with, where that is not the anchor itself.
+  ///
+  /// The browse field is the one that needs it: what the focus goes back to
+  /// there is the input, and what the rows are as wide as is the row the input
+  /// and its press stand in — a list that stopped short of the press would be a
+  /// list narrower than the control it came out of. The listbox's control fills
+  /// its own box, so it says nothing here and is measured as itself.
+  box?: () => HTMLElement;
+
   /// And the rows themselves, for the measure — `undefined` until they are on
   /// the page, being drawn only while they are down.
   dropped: () => HTMLElement | undefined;
@@ -660,6 +650,7 @@ export function dropping(props: {
 }): {
   open: () => boolean;
   above: () => boolean;
+  placing: () => JSX.CSSProperties;
   walking: () => number;
   list: string;
   rowId: (index: number) => string;
@@ -679,14 +670,22 @@ export function dropping(props: {
   /// Which way they come down: under the anchor where there is room for them
   /// there, and over it where there is not.
   ///
-  /// The other thing a native dropdown kept for itself. Its popup is the
-  /// browser's own and is put wherever it fits on the screen; these rows are an
-  /// element of the page, inside whatever clips the page — a pane is
-  /// `overflow-y: auto` from the second breakpoint up, and the steer modal's
-  /// card is capped at `80vh` — so a control standing low in one of those would
-  /// drop its rows past its edge and out of sight, behind a backdrop that draws
-  /// nothing to say where they went.
+  /// The other thing a native dropdown kept for itself, and the screen is what
+  /// it is answered against here as it is there — the rows are `position:
+  /// fixed`, so nothing between them and the window clips them and there is
+  /// only the one edge to fall past. See `.drop` in `picking.module.css`, and
+  /// [`measure`] below, which is what a fixed box has instead of an anchor to
+  /// hang off.
   const [above, setAbove] = createSignal(false);
+
+  /// And where they are put: a left edge and a width off the anchor, and one of
+  /// `top` and `bottom` depending on which way they hang.
+  ///
+  /// Written as a style rather than in the stylesheet because it is measured: a
+  /// fixed box is positioned against the window, and where the anchor is in the
+  /// window is a fact about the page as it stands. The gap between the two stays
+  /// in the sheet, as a margin — see `.drop`.
+  const [placing, setPlacing] = createSignal<JSX.CSSProperties>({});
 
   const from = (): number => props.from?.() ?? 0;
 
@@ -782,17 +781,74 @@ export function dropping(props: {
     }
   };
 
-  // Which way the rows hang, measured each time they come down and each time
-  // they are rebuilt underneath: what they need against what is left under the
-  // anchor, inside whatever would clip them. A filter that cuts a long list to
-  // two rows is a drop that fits under a control it did not fit under before.
+  /// Where the rows go and which way they hang, off the anchor as it stands in
+  /// the window.
+  ///
+  /// Both at once, because they are the one measure: the side is chosen by what
+  /// there is room for, and the coordinates are that side's. The rows take the
+  /// control's own left edge and width, so a fixed box lines up with the field
+  /// it came out of exactly as an absolute one inside it used to — which is what
+  /// [`box`] is for on the browse field, whose control is a row rather than the
+  /// input the focus is handed back to.
+  ///
+  /// jsdom lays nothing out, so every box read here is zeros there and the
+  /// arithmetic is harmless — which is what keeps the tests over these two
+  /// controls about what they offer rather than about where they were put.
+  const measure = (): void => {
+    const rows = props.dropped();
+    if (!rows) return;
+
+    const anchor = (props.box?.() ?? props.anchor()).getBoundingClientRect();
+    const drop = rows.getBoundingClientRect();
+
+    // Over the anchor only where the rows do not fit under it, and then only
+    // where there is more room over it: the ordinary way round is the one to be
+    // in wherever being in it costs nothing, and where neither side fits the
+    // rows go to whichever side shows more of them. Which side that is changes
+    // nothing about *which* rows — the list is capped and scrolls from its top
+    // either way.
+    const over =
+      anchor.bottom + drop.height > window.innerHeight &&
+      anchor.top > window.innerHeight - anchor.bottom;
+
+    // How wide the rows will stand: the anchor's width, which is what they are
+    // handed, or their own where a caller has asked for more of them than that.
+    // The compose page's pairing lists are 30rem against a trigger a third of
+    // that — `min-width` in `Setup.module.css`, a reading being "Claude Code
+    // Fable 5 — Work" and a quarter of a box being nothing like that — and a
+    // width handed to a box with a `min-width` over it is a width that loses.
+    const width = Math.max(anchor.width, drop.width);
+
+    // And where the left edge goes: the anchor's, pulled back onto the window
+    // where a list wider than its anchor would otherwise run off the right of
+    // it. Nothing scrolls to reach what falls past a fixed box's edge — the
+    // window is the last word rather than a box that could be scrolled — so a
+    // list left running off it would be rows nobody could get to at all.
+    const left = Math.max(
+      GUTTER,
+      Math.min(anchor.left, window.innerWidth - width - GUTTER),
+    );
+
+    setAbove(over);
+    setPlacing({
+      left: `${left}px`,
+      width: `${anchor.width}px`,
+      ...(over
+        ? { bottom: `${window.innerHeight - anchor.top}px` }
+        : { top: `${anchor.bottom}px` }),
+    });
+  };
+
+  // The measure, made each time the rows come down and each time they are
+  // rebuilt underneath: a filter that cuts a long list to two rows is a drop
+  // that fits under a control it did not fit under before.
   //
   // Here rather than in [`drop`] because what is measured is the rows' own
   // height, which nothing knows until they are on the page — and an effect runs
-  // after they are and before the browser paints, so the choice is made before
-  // anybody has seen them anywhere. Back under the anchor as they go, so the
-  // next measure starts from the ordinary way round rather than from the last
-  // answer.
+  // after they are and before the browser paints, so the answer is settled
+  // before anybody has seen them anywhere. Back under the anchor as they go, so
+  // the next measure starts from the ordinary way round rather than from the
+  // last answer.
   createEffect(() => {
     if (!open()) {
       setAbove(false);
@@ -802,23 +858,26 @@ export function dropping(props: {
     // Read, so that the measure is made again whenever the rows move.
     props.rows();
 
-    const rows = props.dropped();
-    if (!rows) return;
+    measure();
+  });
 
-    const anchor = props.anchor().getBoundingClientRect();
-    const wanted = rows.getBoundingClientRect().height;
-    const clip = clipping(props.anchor());
+  // And made again while they are down, because a fixed box is positioned
+  // against the window and the anchor moves in it: a pane scrolls its own
+  // content from the second breakpoint up, the modal's card scrolls inside
+  // itself, and the page behind either of them scrolls too. Captured, so that a
+  // scroll inside one of those boxes is heard here — it never reaches the window
+  // by bubbling — and taken off again with the rows, there being nothing to
+  // follow once they are gone.
+  createEffect(() => {
+    if (!open()) return;
 
-    // Over it only where they do not fit under it, and then only where there is
-    // more room over it: the ordinary way round is the one to be in wherever
-    // being in it costs nothing, and where neither side fits the rows go to
-    // whichever side shows more of them. Which side that is changes nothing
-    // about *which* rows — the list is capped and scrolls from its top either
-    // way.
-    setAbove(
-      anchor.bottom + wanted > clip.bottom &&
-        anchor.top - clip.top > clip.bottom - anchor.bottom,
-    );
+    window.addEventListener("scroll", measure, true);
+    window.addEventListener("resize", measure);
+
+    onCleanup(() => {
+      window.removeEventListener("scroll", measure, true);
+      window.removeEventListener("resize", measure);
+    });
   });
 
   // The row the keyboard has walked to, kept in view: the drop is capped in
@@ -833,5 +892,5 @@ export function dropping(props: {
     });
   });
 
-  return { open, above, walking, list, rowId, drop, shut, restart, key };
+  return { open, above, placing, walking, list, rowId, drop, shut, restart, key };
 }
