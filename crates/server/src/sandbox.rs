@@ -837,6 +837,58 @@ fn joined(entries: &[&OsStr]) -> OsString {
     path
 }
 
+/// The directories of `path` a session has to be *granted* rather than merely
+/// told about: the entries under `home`, which is the home of whoever is
+/// running the server.
+///
+/// A directory on a session's `PATH` is worth nothing unless a session can read
+/// it, and the two Unixes both start from nothing. On Linux `~` inside is an
+/// empty directory of Verkstead's own with the account mounted into it, and
+/// what is not bound is not there at all; a Mac's policy denies by default, and
+/// what is not allowed is refused. So a harness installed the vendor's way into
+/// `~/.local/bin` is a name a session finds nothing at until this says
+/// otherwise — see [`Sandbox::surface`], which is the one caller and where each
+/// of these becomes a read-only grant like any other.
+///
+/// **Read-only, and per-user directories the `PATH` itself named.** That is the
+/// whole of the hole: nothing outside the home becomes reachable, an entry
+/// [`composed`] dropped was never on this list to begin with, and a session
+/// that could write into the human's own install would be a session that could
+/// rewrite the harness the next one runs.
+///
+/// **Strictly under the home**, which is the rule rather than a nicety and is
+/// the one the Windows boundary already reads a `PATH` by — see
+/// [`granting::entries`]. An entry that *is* the home would otherwise grant the
+/// human's whole account read-only, and the account is the one thing a boundary
+/// is about.
+///
+/// **A directory that is not there is skipped rather than refused.** A stale
+/// entry in somebody's shell profile is not a reason a session cannot start,
+/// and on Linux a bind of a path with nothing behind it is a sandbox that will
+/// not start at all.
+///
+/// **Nothing at all on Windows**, where the same rule is the boundary's own
+/// rather than the description's: an entry is written on each `PATH` directory
+/// under the human's profile as the container is made, out of the same
+/// description and against the same home — see [`granting::entries`]. One rule,
+/// said where each platform's boundary can hear it.
+pub(crate) fn per_user(platform: Platform, path: &OsStr, home: &Path) -> Vec<PathBuf> {
+    match platform {
+        Platform::Windows => Vec::new(),
+        Platform::Linux | Platform::MacOs => apart(path)
+            .filter(|entry| beneath(entry, home.as_os_str()))
+            .map(PathBuf::from)
+            .filter(|directory| directory.is_dir())
+            .collect(),
+    }
+}
+
+/// Whether `path` is somewhere *under* `directory` rather than the directory
+/// itself — [`within`] less the one case that would hand over a whole home.
+fn beneath(path: &OsStr, directory: &OsStr) -> bool {
+    within(path, directory) && !same(path, directory)
+}
+
 /// Where `program` is on `path`, read the way `platform` reads a name, or
 /// `None` where that platform would find it nowhere.
 ///
@@ -2606,10 +2658,11 @@ pub struct Sandbox {
     /// And the home of whoever is running the server, which is the human's own
     /// profile on the platform that has one.
     ///
-    /// What the `PATH` rule is measured against — see
-    /// [`granting::entries`]: a per-user tool install is readable by a
-    /// container only where it has been granted, and which of a session's
-    /// `PATH` entries are per-user is which of them are under this.
+    /// What the `PATH` rule is measured against on all three — see [`per_user`]
+    /// for the two whose description carries the grant and
+    /// [`granting::entries`] for the one whose boundary writes it: a per-user
+    /// tool install is reachable only where it has been granted, and which of a
+    /// session's `PATH` entries are per-user is which of them are under this.
     servers_home: PathBuf,
 }
 
@@ -2904,6 +2957,13 @@ impl Sandbox {
     /// after the account, and why the handoff directory is after the temporary
     /// filesystem that would otherwise be over it.
     fn surface<S: AsRef<OsStr>>(&self, argv: &[S]) -> Surface {
+        // What a session searches for a program in, said once: Verkstead's own
+        // directory and then the machine's own half of it — see [`path`]. Read
+        // twice below, and both readings are of this one value: what a session
+        // is granted has to be the directories a session is told about, and two
+        // composings would be two answers to the one question.
+        let session_path = path(self.platform, self.verkstead.bin());
+
         // The floor every sandbox of Verkstead's stands on — see
         // [`on_the_machine`], which is where the compile server outside every
         // session gets the same one.
@@ -2925,6 +2985,25 @@ impl Sandbox {
             for made in windows_profile(self.home.path()) {
                 surface.made(made);
             }
+        }
+
+        // And the per-user directories a session is told to look for a program
+        // in, read-only — see [`per_user`], which is where the rule and its
+        // bounds are. What is on this `PATH` is the human's own order, so what
+        // a session finds is the harness they actually installed rather than
+        // whichever one the machine's packages hold.
+        //
+        // **The `PATH` a session gets rather than one composed again beside
+        // it**, which is what makes this the entries a session really searches:
+        // the value said below is the value read here.
+        //
+        // **After the empty HOME**, because on Linux that HOME *is* the
+        // server's own home and these are inside it: a bind said before it is
+        // one the directory made over it takes away again. And ahead of the
+        // account and of what covers the account's own skills, so that what is
+        // said later still stands over them.
+        for directory in per_user(self.platform, &session_path, &self.servers_home) {
+            surface.own(directory, Reach::ReadOnly);
         }
 
         surface
@@ -3044,7 +3123,7 @@ impl Sandbox {
 
         surface
             .set("HOME", self.home.path())
-            .set(PATH, path(self.platform, self.verkstead.bin()))
+            .set(PATH, &session_path)
             // Which shell is inside, for the same reason `PATH` is said here:
             // the environment is cleared, so a tool that shells out reaches for
             // whatever this holds — and with nothing in it, it would fall back
@@ -3684,6 +3763,84 @@ mod tests {
                 .count(),
             1,
             "and so are the two spellings of the human's own: {entries:?}"
+        );
+    }
+
+    /// The directories a session is *granted* out of the `PATH` it is told
+    /// about: the human's own, in the order they were written, and nothing of
+    /// the machine's — which needs no grant, being the system every session
+    /// already reaches.
+    #[test]
+    fn what_a_session_is_granted_is_the_path_entries_under_the_servers_home() {
+        let home = tempfile::tempdir().unwrap();
+        let (local, npm) = (home.path().join(".local/bin"), home.path().join("npm/bin"));
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::create_dir_all(&npm).unwrap();
+
+        let path = joined(&[
+            OsStr::new("/verkstead/bin"),
+            local.as_os_str(),
+            OsStr::new("/usr/local/bin"),
+            npm.as_os_str(),
+            OsStr::new("/usr/bin"),
+        ]);
+
+        for platform in [Platform::Linux, Platform::MacOs] {
+            assert_eq!(
+                per_user(platform, &path, home.path()),
+                vec![local.clone(), npm.clone()],
+                "the human's own installs are what a session cannot reach \
+                 without being granted them, and the order is the one they \
+                 were written in",
+            );
+        }
+    }
+
+    /// And an entry naming a directory that is not there is skipped rather than
+    /// refused: a line left in somebody's shell profile is not a reason a
+    /// session cannot start, and on Linux a bind of one would be exactly that.
+    #[test]
+    fn a_path_entry_that_is_not_there_is_no_grant_and_no_refusal() {
+        let home = tempfile::tempdir().unwrap();
+        let there = home.path().join("bin");
+        std::fs::create_dir_all(&there).unwrap();
+
+        let path = joined(&[home.path().join("gone/bin").as_os_str(), there.as_os_str()]);
+
+        assert_eq!(
+            per_user(Platform::Linux, &path, home.path()),
+            vec![there],
+            "what is not on the machine is nothing to grant: {path:?}",
+        );
+    }
+
+    /// And an entry that *is* the home is not what any of this is for: granting
+    /// it would hand a session the whole of the human's account, which is the
+    /// one thing a boundary is about.
+    #[test]
+    fn the_servers_home_itself_is_never_what_a_path_entry_grants() {
+        let home = tempfile::tempdir().unwrap();
+
+        assert!(
+            per_user(Platform::Linux, home.path().as_os_str(), home.path()).is_empty(),
+            "a `PATH` entry that is the home is a whole account read-only",
+        );
+    }
+
+    /// And on Windows the description says none of it, the same rule being the
+    /// boundary's own there — an entry written on each per-user directory as
+    /// the container is made, out of this same `PATH` and against this same
+    /// home. See [`granting::entries`].
+    #[test]
+    fn a_windows_session_is_granted_its_path_entries_by_its_boundary_instead() {
+        let home = tempfile::tempdir().unwrap();
+        let local = home.path().join("AppData/Roaming/npm");
+        std::fs::create_dir_all(&local).unwrap();
+
+        assert!(
+            per_user(Platform::Windows, local.as_os_str(), home.path()).is_empty(),
+            "what a Windows session reaches is an access-control entry rather \
+             than a bind, and the description carries none of it",
         );
     }
 

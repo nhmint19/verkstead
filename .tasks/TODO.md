@@ -28,7 +28,7 @@ follow-ups. ADR-0016 is amended in place.
 ## Tasks
 
 - [x] 01: Compose a session's PATH from the server's own — [details](01-servers-path.md)
-- [ ] 02: Reach per-user directories inside a session — [details](02-per-user-binds.md)
+- [x] 02: Reach per-user directories inside a session — [details](02-per-user-binds.md)
 - [ ] 03: Follow a program's link into its install — [details](03-follow-links.md)
 - [ ] 04: The wizard says where it found each program — [details](04-wizard-says-where.md)
 - [ ] 05: Instructions that match — [details](05-instructions.md)
