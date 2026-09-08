@@ -844,6 +844,52 @@ async fn a_file_on_no_set_says_so() {
     );
 }
 
+/// A file is an Answer: a Question with one on it and nothing typed or picked
+/// comes back answered, and the server takes it.
+///
+/// The Response says nothing about the file — the sheet holds nothing about one
+/// — so what the server counts is the rows on the Set. Which is the whole of
+/// what is being asked here: the same entry, with a file and without one.
+#[tokio::test]
+async fn a_question_with_a_file_on_it_is_answered() {
+    let (_elsewhere, _dir, app, pool, id) = drafting().await;
+
+    let unattached = asked(&pool, id).await;
+
+    assert!(
+        matches!(
+            submit(&app, unattached).await,
+            serde_json::Value::Object(refused) if refused.contains_key("Rejected"),
+        ),
+        "an entry carrying nothing at all is a question left open without saying so",
+    );
+
+    let set = asked(&pool, id).await;
+    on_the_answer(put_on(&app, set, "Q1", "counter.png", b"PNG bytes").await);
+
+    assert_eq!(
+        submit(&app, set).await,
+        serde_json::json!("Accepted"),
+        "the file put on Q1 is the Answer to it",
+    );
+}
+
+/// A Response answering `Q2a` in words and leaving `Q1` carrying nothing at
+/// all, which is an Answer to it only where a file was put on it.
+async fn submit(app: &Router, set: i64) -> serde_json::Value {
+    post(
+        app,
+        &format!("/api/ui/sets/{set}/response"),
+        &serde_json::json!({
+            "answers": [
+                { "label": "Q1" },
+                { "label": "Q2a", "free_text": "a minute" },
+            ],
+        }),
+    )
+    .await
+}
+
 /// A record written before an Answer could carry files opens, and what is in it
 /// reads as the Brief's — which is what the two columns arriving empty means.
 ///

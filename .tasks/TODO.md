@@ -31,7 +31,7 @@ attached mid-ask.
 ## Tasks
 
 - [x] 01: Record a file on an Answer — [details](01-record-a-file-on-an-answer.md)
-- [ ] 02: The paperclip on the sheet — [details](02-the-paperclip-on-the-sheet.md)
+- [x] 02: The paperclip on the sheet — [details](02-the-paperclip-on-the-sheet.md)
 - [ ] 03: The record after Submit — [details](03-the-record-after-submit.md)
 - [ ] 04: What the waiting agent gets — [details](04-what-the-waiting-agent-gets.md)
 - [ ] 05: What later sessions get — [details](05-what-later-sessions-get.md)

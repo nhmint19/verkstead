@@ -45,3 +45,73 @@
     border-color: var(--accent-deep);
   }
 }
+
+/* The field a question is answered in words in, and the paperclip standing
+   inside it — the wrapper being what gives the button something to be
+   positioned against. At the measure, because that is what the field it holds
+   is read at: a wrapper wider than the field would put the paperclip out in
+   the margin beside it. */
+.writing {
+  position: relative;
+  max-width: var(--measure);
+}
+
+/* Where the paperclip stands: inside the field's own padding, at its far
+   bottom corner. What it looks like — an icon and nothing else, no border, in
+   the quiet ink — is the shared button's, and the row of pills it puts files
+   into is the attaching piece's; see `IconButton.module.css` and
+   `Attaching.module.css`.
+
+   And centred in the field while nothing has been typed into it, which is
+   arithmetic rather than a rule: a field of one line is 2.625rem tall — the
+   1.5rem line the page is set in, the half-rem of padding above and below, and
+   the pixel of border either side — and the button is 2.425rem of icon,
+   padding and border, so the tenth of a rem it is inset by is the tenth left
+   over at the top. It stays at the bottom as the field grows, which is where
+   the last line the human is writing is. */
+.writing .attach {
+  position: absolute;
+  right: 0.1rem;
+  bottom: 0.1rem;
+}
+
+/* And room for it at the end of the last line, taken out of the field's own
+   padding — out of the copy of the text that gives the field its height as
+   well, which has to wrap where the field wraps or the two disagree about how
+   tall it is. Written twice over so it outranks `.grow`'s own padding in
+   `App.module.css`, the two being one class each in different modules. */
+.field.field > textarea,
+.field.field::after {
+  padding-right: 2.5rem;
+}
+
+/* A question while a drag carrying files is over it: the whole of the question
+   is the target, the way the whole of the composer's box is, so the whole of it
+   says so. The accent at the weight a selected Option is outlined in, and a
+   wash of it behind — drawn just outside the question's own text so that it
+   reads as the region taking the drop rather than as something inside it. */
+.taking {
+  outline: 2px dashed var(--accent);
+  outline-offset: 0.35rem;
+  border-radius: 0.4rem;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+/* Where the row of pills stands: under the field it was put beside, at the
+   inset the page's own blocks are read at. The list's own indent comes off
+   here, the way it does wherever this row is drawn — see
+   `Attaching.module.css`, which draws the pills the same everywhere and leaves
+   both to whoever puts them somewhere. */
+.attachments {
+  margin: 0.5rem 0 0;
+  padding: 0;
+}
+
+/* What could not be attached or taken off, said inside the question it happened
+   in: under the row of pills where there is one, and under the field where the
+   file never got as far as a pill. The composer says its own the same way and
+   at the same size — see `.failure` in `Composer.module.css`. */
+.attachFailure {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}

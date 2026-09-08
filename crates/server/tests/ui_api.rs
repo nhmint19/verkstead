@@ -244,6 +244,7 @@ fn answered(label: &str, selected: Option<u32>) -> Answer {
         selected,
         free_text: None,
         unanswered: false,
+        attachments: Vec::new(),
     }
 }
 
@@ -253,6 +254,7 @@ fn left_open(label: &str) -> Answer {
         selected: None,
         free_text: None,
         unanswered: true,
+        attachments: Vec::new(),
     }
 }
 

@@ -400,7 +400,21 @@ pub async fn submit_response(
     // draws an unreadable Set as a record rather than as a sheet.
     let set = stored.set.readable(set_id)?;
 
-    if let Err(invalid) = response.validate(set) {
+    // Checked against what the human handed over as well as what they wrote: a
+    // file put on a Question is an Answer to it, and the sheet sends one with a
+    // file and nothing else as answered. The rows are where that is written
+    // down — nothing about a file rides on the Response itself, which is stored
+    // exactly as it was sent.
+    let attached: Vec<String> = attachments::set_attachments(pool, set_id)
+        .await?
+        .into_iter()
+        .filter_map(|attachment| match attachment.origin {
+            Origin::Answer { label, .. } => Some(label),
+            Origin::Brief => None,
+        })
+        .collect();
+
+    if let Err(invalid) = response.validate_attached(set, &attached) {
         return Ok(Submission::Invalid(invalid));
     }
 

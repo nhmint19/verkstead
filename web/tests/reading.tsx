@@ -22,6 +22,7 @@ import type {
   UnreadableSet,
 } from "../src/api/types";
 import { Asked } from "../src/workbench/Asked";
+import type { Answer } from "./serving";
 import { json, reads, serving, whenever } from "./serving";
 
 /// The Timeline row the pane is opened from. The pane reads one thing off it —
@@ -101,10 +102,12 @@ export async function unreadably(set: UnreadableSet): Promise<HTMLElement> {
 /// The fetch mock comes back with it, because what a sheet was filled in with is
 /// read off the request it sent — and so does the way out of the pane, so a test
 /// can say nobody was taken anywhere.
-export async function answering(
-  set: SetView,
-  ...answers: Array<() => Promise<globalThis.Response>>
-) {
+///
+/// The answers are [`serving`]'s own, either shape: one in the sequence, for the
+/// submit or the lock a test is about, or one held to the path it belongs to —
+/// which is what an upload from the sheet's own paperclip wants, there being no
+/// order between it and the reads around it.
+export async function answering(set: SetView, ...answers: Array<Answer>) {
   cleanup();
 
   /// How the Set reads back right now, which `settles` moves on: a test that

@@ -291,6 +291,7 @@ fn answer(label: &str, selected: Option<u32>, free_text: Option<&str>) -> Answer
         selected,
         free_text: free_text.map(str::to_owned),
         unanswered: false,
+        attachments: Vec::new(),
     }
 }
 
@@ -300,6 +301,7 @@ fn unanswered(label: &str) -> Answer {
         selected: None,
         free_text: None,
         unanswered: true,
+        attachments: Vec::new(),
     }
 }
 
@@ -1587,6 +1589,7 @@ fn accepting_the_proposal() -> Response {
             selected: None,
             free_text: None,
             unanswered: true,
+            attachments: Vec::new(),
         }],
         comment: None,
         direction: Some(verkstead_schema::Direction::Inline),

@@ -257,6 +257,7 @@ export function Sheet(props: {
             postscript={props.set.postscript_html}
             proposal={props.set.proposal}
             followUp={props.set.follow_up}
+            attachments={props.set.attachments}
           />
         }
       >

@@ -310,7 +310,20 @@ free_text?: string | null,
  * Left open on purpose. Exclusive with an Answer: the agent must treat
  * the question as still open.
  */
-unanswered?: boolean, };
+unanswered?: boolean, 
+/**
+ * The files the human put on this Answer, each by the path the session
+ * reads it at, in the order they were attached.
+ *
+ * **Filled on the way out rather than sent in.** What the sheet submits
+ * carries none of these: a file goes on the Set as it is chosen, and the
+ * rows the record kept are what say which Answer each one is on — so a
+ * Response is stored exactly as the human sent it, and the list is filled
+ * from those rows wherever one is read out. Which is why an entry with no
+ * files leaves the field out altogether, and why a Response stored before
+ * the field existed reads as it always did.
+ */
+attachments?: Array<string>, };
 
 /**
  * What became of putting a file on an Answer.

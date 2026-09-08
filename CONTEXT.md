@@ -666,6 +666,14 @@ and what a later session finds it named by; the Brief's are keyed by neither.
 The two share the one directory, so a file named like one already there is
 renamed whichever origin either of them has.
 
+**One is put on an Answer from the answer sheet**, where every Question and
+Sub-question's free-text field carries a paperclip of its own and the whole of
+the question takes a drop; a Heading has neither, asking nothing, and the
+set-level comment box has neither either. A chosen file goes up the moment it
+is chosen rather than waiting for Submit — so its pill comes back from the
+record and survives a reload, a × takes it off again, and a Set the agent locks
+unanswered keeps what was attached as record.
+
 **Each freezes when what it is a file of does.** The Brief's are attached and
 removed while the round drafts and fixed once the work starts, and the frozen
 Brief pane draws them as a read-only row under the text. An Answer's are
@@ -2050,9 +2058,12 @@ _Avoid_: options table, comparison table (the Guide's generic layout
 advice), grid
 
 **Answer**:
-The human's resolution of one Question or Sub-question: a selected Option
-and/or free text. A Question left without an Answer at submission is
-Unanswered.
+The human's resolution of one Question or Sub-question: a selected Option,
+free text, and/or a file put on it — **a file alone is an Answer**, handing
+something over being answering, so the sheet sends a question carrying one and
+nothing else as answered rather than Unanswered, and the record's own rows are
+what the server counts where it checks a Response. A Question left without any
+of the three at submission is Unanswered.
 _Avoid_: reply, response (that's the whole Set)
 
 **Unanswered**:
