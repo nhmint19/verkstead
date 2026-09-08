@@ -37,5 +37,5 @@ already says it does.
 - [x] 02: The open pull requests — [details](02-open-pull-requests.md)
 - [x] 03: Loading a pull request into the composer — [details](03-loading-a-pull-request.md)
 - [x] 04: Taking it up — [details](04-taking-it-up.md)
-- [ ] 05: The wrap-up over a taken-up pull request — [details](05-the-wrap-up-over-it.md)
+- [x] 05: The wrap-up over a taken-up pull request — [details](05-the-wrap-up-over-it.md)
 - [ ] 06: A steer into Wrapping reads the branch afresh — [details](06-steer-reads-afresh.md)

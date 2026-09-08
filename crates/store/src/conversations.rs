@@ -3815,6 +3815,19 @@ pub async fn start_implementing(pool: &SqlitePool, id: i64) -> Result<Implementi
 /// built. The checks and the comments need no such thing: both are asked of
 /// GitHub on every poll, so they settle from the answers the second wrap gets.
 ///
+/// **And the direction is written where there is none**, which is what a
+/// Conversation that never picked one needs of this move. A wrap-up reached by
+/// taking somebody else's pull request up has no direction on its record — the
+/// work was built elsewhere, and there was no round to pick in — so this is the
+/// moment it acquires one: a review answered into splitting work out has made
+/// the work a backlog, and a backlog is the task-list direction. `DO NOTHING`
+/// rather than an upsert, for [`steer_conversation`]'s reason: a direction
+/// already picked is the human's own answer to how their work is built.
+///
+/// Without it the Conversation would go back to Implementing with nothing saying
+/// how, which is the record a pressed Resume refuses on by name — so a run that
+/// stopped mid-backlog could never be started again.
+///
 /// One transaction, as every move is: a Conversation that says Implementing
 /// always has the move on its Timeline to say when it got there.
 pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
@@ -3835,6 +3848,16 @@ pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
     }
 
     super::wrap_up::unsettle(&mut tx, id, super::WaitingOn::Review).await?;
+
+    sqlx::query(
+        "INSERT INTO directions (conversation_id, direction) VALUES (?, ?)
+         ON CONFLICT (conversation_id) DO NOTHING",
+    )
+    .bind(id)
+    .bind(direction_stored(Direction::TaskList))
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("recording how Conversation {id}'s split-out work is built"))?;
 
     sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
         .bind(Lifecycle::Implementing.stored())

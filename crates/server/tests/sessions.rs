@@ -2176,6 +2176,35 @@ enum Origin {
     Cloned,
 }
 
+/// Give a bench's repository a remote: a bare clone of it at `upstream` inside
+/// the spill directory, with `origin` pointing at it and fetched once.
+///
+/// The spill is the one path outside the worktrees every sandbox here is given,
+/// so a remote inside it is one a session can reach. Its own function because
+/// two ways into the pipeline want it — a wrap-up holding a rollup against what
+/// it pushed, and a take-up, whose whole subject is a branch that lives on the
+/// remote.
+fn cloned(bench: &Bench) {
+    let upstream = bench.spill.path().join("upstream");
+
+    git(
+        bench.spill.path(),
+        &[
+            "clone",
+            "--no-local",
+            "--bare",
+            "--quiet",
+            &bench.repo.to_string_lossy(),
+            &upstream.to_string_lossy(),
+        ],
+    );
+    git(
+        &bench.repo,
+        &["remote", "add", "origin", &upstream.to_string_lossy()],
+    );
+    git(&bench.repo, &["fetch", "--quiet", "origin"]);
+}
+
 /// And the whole of it, the pickers included — which is the setup card pressed
 /// the way the human presses it, every picker filled and then one of them moved.
 #[allow(clippy::too_many_arguments)]
@@ -2197,24 +2226,7 @@ async fn grilling_however_started(
     // repository has the remote — a worktree shares the repository's `.git`, and
     // what it shares is where a remote lives.
     if origin == Origin::Cloned {
-        let upstream = bench.spill.path().join("upstream");
-
-        git(
-            bench.spill.path(),
-            &[
-                "clone",
-                "--no-local",
-                "--bare",
-                "--quiet",
-                &bench.repo.to_string_lossy(),
-                &upstream.to_string_lossy(),
-            ],
-        );
-        git(
-            &bench.repo,
-            &["remote", "add", "origin", &upstream.to_string_lossy()],
-        );
-        git(&bench.repo, &["fetch", "--quiet", "origin"]);
+        cloned(&bench);
     }
 
     let started: Started = post(
@@ -2335,7 +2347,22 @@ impl Bench {
     /// that Profile lists — see [`profile`], which lists two so that a pick can
     /// move off this one without moving off the Profile.
     async fn under_every_pairing(&self, id: i64) {
-        for role in ["grilling", "implementation", "review"] {
+        self.paired(id, &["grilling", "implementation", "review"])
+            .await;
+    }
+
+    /// And the two a Draft holding a pull request settles, which is the whole
+    /// of what its card offers: the work on a pull request is built, so there
+    /// is no round for a grilling to open and no picker drawn for one.
+    async fn the_two_a_wrap_up_runs_under(&self, id: i64) {
+        self.paired(id, &["implementation", "review"]).await;
+    }
+
+    /// What both of those are: a Profile per role, paired with the first of the
+    /// models it lists.
+    async fn paired(&self, id: i64, roles: &[&str]) {
+        for role in roles {
+            let role = *role;
             let profile = profile(&self.app, self.elsewhere.path(), role).await;
             let pairing = serde_json::json!({
                 "profile_id": profile,
@@ -15808,6 +15835,21 @@ async fn said_by(fixture: &Grilling) -> String {
 }
 
 /// What Verkstead has said on a Timeline on its own account.
+/// The same, without the line a take-up writes about itself.
+///
+/// A press that takes a pull request up says on the Timeline what it took and
+/// what the wrap-up is reading it against, and it says it as a Notice like every
+/// other line Verkstead writes in its own voice. It is not a report of anything
+/// going wrong, so the tests that ask what a taken-up Conversation had to say
+/// about its own run read past it — exactly as [`said`] reads past the one a
+/// wrap-up narrowing to its checks writes.
+fn notices_since_the_take_up(view: &ConversationView) -> Vec<String> {
+    notices(view)
+        .into_iter()
+        .filter(|notice| !notice.contains("was taken up for wrapping"))
+        .collect()
+}
+
 fn notices(view: &ConversationView) -> Vec<String> {
     said(view)
         .into_iter()
@@ -16804,6 +16846,140 @@ async fn adopting_asking(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gril
     bench.holding(id)
 }
 
+/// The Brief a taken-up Conversation carries: the pull request's title and
+/// description as the compose box prefilled them, with the line the human added
+/// before they pressed.
+///
+/// Nothing about it comes from a grilling — a take-up has none — so this is the
+/// whole of what every session over such a Conversation is told the work is,
+/// and the added line is what makes *edited* a fact a test can read back.
+const A_TAKEN_UP_BRIEF: &str = "# Rate limiting for the public API\n\nA token bucket per key.\n\n\
+                                Wrap this up: I want the window tests looked at.\n";
+
+/// Stand a workbench up with a pull request already open on the upstream, and
+/// press the take-up on a Draft holding it.
+///
+/// The third way into the pipeline, and the one that starts inside it: the work
+/// is built and pushed by somebody else, so there is nothing to grill and
+/// nothing to build. What the press lands is a Conversation in Wrapping with the
+/// wrap-up's watchers over a branch nobody here wrote.
+///
+/// The repository has a remote for the reason a pull request has one — a head
+/// branch lives on origin, and a checkout that never fetched knows nothing about
+/// it. So the branch is made, pushed and then dropped locally: what the press
+/// finds is exactly what a fresh clone would, which is the ordinary case.
+async fn taking_up(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+    taking_up_however_reviewed(spill, stub, gh, Pickers::UnderEveryPairing, "").await
+}
+
+/// The same with the Review picker moved onto the row that runs nothing, which
+/// is the take-up that wraps up without a review.
+async fn taking_up_unreviewed(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+    taking_up_however_reviewed(spill, stub, gh, Pickers::Unreviewed, "").await
+}
+
+/// And the same with the settings page's *Share to pull request when done*
+/// switch already on.
+///
+/// Written before the press rather than after it, which is what makes it a fact
+/// about the whole wrap-up: the switch is read at the moment the work settles,
+/// and a test that wrote it afterwards would be racing its own fixture.
+async fn taking_up_sharing(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+    taking_up_however_reviewed(
+        spill,
+        stub,
+        gh,
+        Pickers::UnderEveryPairing,
+        "share_on_done: true\n",
+    )
+    .await
+}
+
+/// And the whole of it, the pickers and `config.yaml` included.
+async fn taking_up_however_reviewed(
+    spill: tempfile::TempDir,
+    stub: &str,
+    gh: &str,
+    pickers: Pickers,
+    config: &str,
+) -> Grilling {
+    let bench = bench(spill, stub, gh).await;
+
+    std::fs::write(
+        bench.state.path().join("config.yaml"),
+        format!("{THE_AUTHOR}{config}"),
+    )
+    .unwrap();
+
+    cloned(&bench);
+    somebody_elses_branch(&bench.repo, "rate-limiting");
+
+    let started: Started = post(
+        &bench.app,
+        "/api/ui/pull-request-adoptions",
+        &serde_json::json!({
+            "repo_id": bench.repo_id,
+            "number": 41,
+            "title": "Rate limiting for the public API",
+            "url": "https://github.com/tobico/verkstead/pull/41",
+            "head": "rate-limiting",
+            "base": "main",
+        }),
+    )
+    .await;
+    let Started::Started { id } = started else {
+        panic!("expected the Conversation to start, got {started:?}");
+    };
+
+    bench.the_two_a_wrap_up_runs_under(id).await;
+
+    if pickers == Pickers::Unreviewed {
+        bench.unreviewed(id).await;
+    }
+
+    // What the human left in the compose box, which is the Brief and the whole
+    // of what any session over this Conversation is told the work is.
+    let saved: BriefSaved = post(
+        &bench.app,
+        &format!("/api/ui/conversations/{id}/brief"),
+        &serde_json::json!({ "markdown": A_TAKEN_UP_BRIEF }),
+    )
+    .await;
+    assert_eq!(saved, BriefSaved::Saved);
+
+    let taken: verkstead_render::TakenUp = post(
+        &bench.app,
+        &format!("/api/ui/conversations/{id}/take-up"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(taken, verkstead_render::TakenUp::TakenUp);
+
+    bench.holding(id)
+}
+
+/// Put a pull request's head branch on the upstream and take it off here, which
+/// is what a branch somebody else opened a pull request from looks like from
+/// this checkout: origin has it and nothing local does.
+///
+/// Hands back the commit it stands at, which is what a take-up records as the
+/// base — the head at take-up, so that the pull request's own commits stay off
+/// the Timeline.
+fn somebody_elses_branch(repo: &Path, branch: &str) -> String {
+    git(repo, &["checkout", "--quiet", "-b", branch]);
+    std::fs::write(repo.join("limits.md"), "# The limiter\n\nA token bucket.\n").unwrap();
+    git(repo, &["add", "limits.md"]);
+    git(repo, &["commit", "--quiet", "-m", "feat: a token bucket"]);
+    git(repo, &["push", "--quiet", "origin", branch]);
+
+    let head = git(repo, &["rev-parse", "HEAD"]).trim().to_owned();
+
+    git(repo, &["checkout", "--quiet", "main"]);
+    git(repo, &["branch", "--quiet", "-D", branch]);
+
+    head
+}
+
 /// The whole of adopting: one press on a roadmap the repository already held,
 /// and the stage is running as a Conversation on its own branch — with the
 /// planning session the unattended path would have started, in the worktree the
@@ -17198,6 +17374,356 @@ async fn an_adopted_stage_that_settles_starts_the_stage_after_it() {
         "one planning session for the adopted stage and one for the stage after \
          it: {planned:?}",
     );
+}
+
+/// The wrap-up over a pull request Verkstead never opened is the wrap-up: its
+/// review session is dispatched under the Review Pairing, in the worktree, on
+/// the Brief the human edited into the compose box, with everything already
+/// standing on the pull request folded into what it reads.
+///
+/// Which is the whole claim of taking one up. Nothing about the loop knows who
+/// opened the pull request, so what this holds to is that nothing it reads is
+/// missing: the Brief is the human's own edit rather than a title copied off
+/// GitHub, and the comments that were on the pull request before Verkstead ever
+/// heard of it are the same comments a wrap-up's first review folds in.
+///
+/// And no handoff, because there was no grilling to write one — the work on a
+/// pull request is built. The absence reads as the ordinary case rather than as
+/// a gap: the prompt simply has no such section in it.
+#[tokio::test]
+async fn a_taken_up_pull_request_is_reviewed_on_the_edited_brief_and_what_was_said() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = taking_up(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
+        &gh_about(STILL_RUNNING, THREE_COMMENTS, ""),
+    )
+    .await;
+
+    let sent = until_written(&reviews).await;
+
+    assert!(
+        sent.contains("reviewing/SKILL.md"),
+        "the wrap-up's one review, inside the reviewing skill as ever: {sent}",
+    );
+    assert!(
+        sent.contains("model=claude-review-5"),
+        "under the Review Pairing, which is the fresh set of eyes: {sent}",
+    );
+    assert!(
+        sent.contains("Wrap this up: I want the window tests looked at."),
+        "started on the Brief the human edited on the compose page: {sent}",
+    );
+    assert!(
+        !sent.contains("What the grilling settled"),
+        "and on nothing else: a take-up has no grilling and so no handoff: {sent}",
+    );
+    assert!(
+        sent.contains("Rename the window field."),
+        "with what was already said on the pull request folded in: {sent}",
+    );
+
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::Wrapping,
+        "which is the state the press landed it in",
+    );
+}
+
+/// And a take-up whose human picked *No review* dispatches a batch session over
+/// the same, which is what one does with comments nothing is going to fold in.
+///
+/// The review settles the moment the wrap-up looks, so everything standing on
+/// the pull request is a batch's from the start — and the pull request here was
+/// somebody else's, so *standing on it* is a conversation that predates
+/// Verkstead entirely.
+#[tokio::test]
+async fn a_taken_up_pull_request_with_no_review_answers_what_was_said_on_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let batches = spill.path().join("batch-prompts");
+
+    let fixture = taking_up_unreviewed(
+        spill,
+        &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_AND_FIND_NOTHING),
+        &gh_about(STILL_RUNNING, THREE_COMMENTS, ""),
+    )
+    .await;
+
+    let said = until_written(&batches).await;
+
+    assert!(
+        said.contains("Rename the window field."),
+        "the batch session was sent what was written on the pull request: {said}",
+    );
+    assert!(
+        said.contains("Wrap this up: I want the window tests looked at."),
+        "under the same edited Brief every session over this Conversation gets: {said}",
+    );
+    assert!(
+        !reviews.exists(),
+        "and no review read it first: {:?}",
+        std::fs::read_to_string(&reviews).ok(),
+    );
+
+    assert!(
+        review_settled(&fixture).await,
+        "the review is settled all the same, which is what let the batch go",
+    );
+}
+
+/// A server that comes back up over a Conversation it left wrapping up a
+/// taken-up pull request watches it again.
+///
+/// The same claim the ordinary restart makes, asked of the one wrap-up that
+/// never had a run in front of it: the record is all there is to resume from,
+/// and a take-up wrote no handoff, no direction and no commit of its own. The
+/// first server cannot ask about the checks at all, so it settles nothing
+/// however long it runs; the second asks the same question of a `gh` that
+/// answers. What settles them is the restart having resumed the watching.
+#[tokio::test]
+async fn a_restarted_server_watches_a_taken_up_pull_request_again() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = taking_up(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
+        CHECKS_UNASKABLE,
+    )
+    .await;
+
+    assert!(
+        !checks_settled(&fixture).await,
+        "the first server never got an answer, which is what makes this prove anything",
+    );
+
+    let _restarted = fixture
+        .restarted(
+            &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
+            &gh_checking("SUCCESS"),
+        )
+        .await;
+
+    let deadline = Instant::now() + *PATIENCE;
+    while !checks_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the restarted server never looked at the checks it was left with",
+        );
+        pause(Duration::from_millis(50)).await;
+    }
+
+    assert!(
+        notices_since_the_take_up(&fixture.view().await).is_empty(),
+        "and nothing stopped: {:?}",
+        notices_since_the_take_up(&fixture.view().await),
+    );
+}
+
+/// A wrap-up over a taken-up pull request reaches Done on its own, and hands the
+/// record to whoever is reviewing the work where the switch says to.
+///
+/// The rule that ends a wrap-up is the same four facts whoever opened the pull
+/// request: the review answered, the checks green, nothing said left
+/// unaddressed, and GitHub saying it merges.
+///
+/// The share is asked for rather than watched land. Publishing one is a gist
+/// made under a saved token and a share build of the viewer embedded in the
+/// binary, and `cargo test` has neither — so what this holds to is the half that
+/// is this feature's: the settle reaches the share, and the pull request it
+/// reaches for is the one the take-up recorded. A Conversation on no pull
+/// request says nothing at all here, so the Notice is the pull request having
+/// been found.
+#[tokio::test]
+async fn a_taken_up_pull_request_settles_to_done_and_reaches_for_the_share() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = taking_up_sharing(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    let view = fixture
+        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .await;
+
+    assert_eq!(
+        fixes(&view),
+        0,
+        "nothing was dispatched, nothing being wrong"
+    );
+    assert!(
+        review_settled(&fixture).await && checks_settled(&fixture).await,
+        "the branch was read and the suite is green, which is what Done is made of",
+    );
+
+    // Said on the Timeline, which is where a wrap-up says what it could not do:
+    // the settle went looking for this Conversation's pull requests, found the
+    // one the take-up recorded, and got as far as the publish.
+    fixture
+        .until(|view| {
+            notices(view)
+                .iter()
+                .any(|notice| notice.contains("shared to the pull request"))
+                .then_some(())
+        })
+        .await;
+}
+
+/// And a review over a taken-up pull request that splits a finding out sends the
+/// Conversation back to be built, exactly as any other wrap-up's does — with the
+/// finish wrapping it up again on the pull request it already had.
+///
+/// Which is where the one thing a take-up never wrote starts to matter. A
+/// Conversation that has been grilled picked a direction on its way in, and this
+/// one never had the round to pick in: the work on a pull request was built
+/// somewhere else. So the direction is written where the backlog appears, which
+/// is here — a review answered into splitting work out has made the work a
+/// backlog, and *task list* is what it is from that moment. Without it the
+/// record would say nothing about how the work is built, and the button that
+/// exists to unstick a run that stopped would refuse by that name.
+///
+/// The checks cannot be asked about, which is what keeps both wraps going: one
+/// that had finished would be a Conversation there was nothing left to review
+/// from.
+#[tokio::test]
+async fn a_review_that_split_work_out_of_a_take_up_builds_it_and_wraps_up_again() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let once = spill.path().join("split-written");
+
+    let stub = a_backlog_then_wraps_up(&reviews, &dispatched, &review_then_split(&once, ""));
+    let gh = gh_about(CHECKS_UNANSWERABLE, "", "");
+
+    let fixture = taking_up(spill, &stub, &gh).await;
+
+    until_asking(&fixture, &reviews).await;
+
+    let set = fixture.ask(REVIEW_WITH_A_SPLIT).await;
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 2 },
+                    { "label": "Q2", "selected": 2 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let view = fixture
+        .until(|view| (view.state == Lifecycle::Implementing).then(|| view.clone()))
+        .await;
+
+    assert_eq!(
+        view.direction,
+        Some(Direction::TaskList),
+        "the record says how the work is built now that there is a backlog to \
+         build, which a take-up had nothing to say about",
+    );
+
+    // Which is then worked and finished, and the finish wraps it up a second
+    // time on the pull request the take-up put it on.
+    fixture
+        .until(|view| (moves_into(view, Lifecycle::Wrapping) == 2).then_some(()))
+        .await;
+
+    let view = fixture.view().await;
+    let landed: Vec<&str> = commits(&view)
+        .iter()
+        .map(|commit| commit.subject.as_str())
+        .collect();
+
+    assert!(
+        landed
+            .iter()
+            .any(|subject| subject.starts_with("chore: plan the clock tasks")),
+        "what was split out was written down rather than built: {landed:?}",
+    );
+    assert!(
+        landed
+            .iter()
+            .any(|subject| subject.starts_with("chore: finish")),
+        "and then worked to empty and finished, like any other backlog: {landed:?}",
+    );
+    assert!(
+        !landed
+            .iter()
+            .any(|subject| subject.starts_with("feat: a token bucket")),
+        "and the pull request's own commits stay off this Timeline: {landed:?}",
+    );
+}
+
+/// And a taken-up Conversation is steered into a follow-up and back, which is
+/// the round the human opens about work that is already pushed.
+///
+/// Both halves turn on the pull request under the Conversation — the steer
+/// refuses without one by name — and a take-up's is recorded by the press
+/// itself. So the modal opens, the session runs on what they wrote, and the
+/// **Nothing else** they answer with lands the Conversation back in the wrap-up
+/// it came from, which settles to Done again.
+///
+/// A question and an answer and no work, so nothing is pushed and the checks
+/// standing over it are still this branch's own.
+#[tokio::test]
+async fn a_taken_up_conversation_is_steered_into_a_follow_up_and_back() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+
+    let fixture = taking_up(
+        spill,
+        &a_backlog_then_a_follow_up(&reviews, A_QUESTION_THEN_IDLE),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    assert_eq!(
+        fixture.steer().await,
+        SteerOpened::Opened { working: false },
+        "the modal opens on the pull request the take-up recorded",
+    );
+    assert_eq!(
+        fixture
+            .steer_following_up("Does it count the 429s it sends?\n")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(fixture.answer_ending(set).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let view = fixture
+        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .await;
+
+    assert!(
+        notices_since_the_take_up(&view).is_empty(),
+        "nothing stopped on the way out and back: {:?}",
+        notices_since_the_take_up(&view),
+    );
+    assert!(!view.working, "and nothing is left holding the Worktree");
 }
 
 /// A browser watching one live session's Screen: the socket it is attached

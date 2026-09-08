@@ -698,7 +698,13 @@ the Timeline draws only what Verkstead adds from there; the pull request's own
 commits are its own record. Recording the pull request is the move from Draft
 into Wrapping, and the wrap-up is untouched: the Review Pairing picker was
 already the whole of review-or-not, and a review-only mode that stopped short
-of the checks and comments was not worth a state of its own.
+of the checks and comments was not worth a state of its own. What such a
+Conversation is short of is a Direction — there was no round to pick one in —
+and it is written where it first means anything rather than invented at the
+press: a review answered into splitting work out has made the work a backlog,
+so the move back down the ladder records **task list** where the record has
+none. Without it the Conversation would be building with nothing saying how,
+which is the record a pressed Resume refuses on by name.
 
 **And with nothing to list, that page is the whole of the app** (*settled
 2026-09-08, onboarding stage 04*). The **zero state** is a fact about the
