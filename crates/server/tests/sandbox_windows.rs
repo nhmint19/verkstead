@@ -930,6 +930,36 @@ async fn every_access_kind_is_classified_as_the_description_said() {
     );
 }
 
+/// And a Conversation nothing has been attached to is given its own attachments
+/// directory all the same, made empty as the session starts.
+///
+/// The third arm of the same claim the other two suites make: a session blocked
+/// on an ask goes on running while the human answers it, so a file put on an
+/// Answer an hour in has to land somewhere that session already reaches. Here
+/// that is the directory itself — nothing is mounted on this platform, and the
+/// grant on a directory is one that everything under it inherits, so a file
+/// written into it after the boundary was written is a file the session reads.
+///
+/// The fixture's own file is taken away first, this being the one test here
+/// that is about there being none.
+#[tokio::test]
+async fn the_attachments_directory_is_given_though_nothing_has_been_attached() {
+    let fixture = grilling().await;
+
+    std::fs::remove_dir_all(fixture.attachments_dir())
+        .expect("the fixture made that directory to put its file in");
+
+    let classified = fixture.probe(&[directory("attachments", fixture.attachments_dir())]);
+
+    assert_eq!(
+        said(&classified, "attachments"),
+        "read",
+        "the directory is made empty and granted at every launch — reachable \
+         and not writable, as it is with a file in it. The probe said: \
+         {classified:?}",
+    );
+}
+
 /// And what the description does not name is refused rather than absent, with
 /// a name nobody ever made told apart from both.
 ///

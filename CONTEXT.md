@@ -656,6 +656,12 @@ file's path and size, in the tone of the companions listing: what is there and
 where, and nothing about what to do with it, because the Brief says what a
 file is for. The copy is the record, and an agent that wants to work on one
 copies it into the Worktree.
+**The directory is there at every launch, made empty where nothing has been
+attached**, because a session blocked on an ask goes on running while the human
+answers it: a file put on an Answer an hour in lands in a directory that
+session already reads, and the Response names it there. Nothing is said about
+an empty one — the listing is of the files there are, so a Conversation with
+none is told nothing at all.
 
 **What a file is attached to is its origin, and there are two of them.** The
 Brief, and an Answer to a Question Set — a second value on the same record
@@ -2080,6 +2086,11 @@ _Avoid_: skipped, blank
 The submitted collection of Answers (and Unanswered markers) for a Question
 Set, plus an optional set-level comment. What the waiting agent receives.
 May contain zero Answers.
+**An Answer with files on it carries them as an `attachments` list**, each by
+the path that session reads the file at — filled in from the record on the way
+out rather than sent in, so what is stored is what the human submitted and one
+Response shape comes back from a held wait and a fetch alike. An Answer with
+no files carries no list.
 _Avoid_: submission, result
 
 **Diff**:

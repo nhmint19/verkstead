@@ -136,30 +136,48 @@ impl Attachments {
     /// One Conversation's directory, whether or not anything has been attached
     /// yet.
     ///
-    /// The path rather than the making of it: a sandbox binds this directory
-    /// and a listing reads it, and neither of those should be creating
-    /// anything. [`Self::keep`] makes it on the way past, which is the one
-    /// moment there is something to put in it.
+    /// The path rather than the making of it, which the two callers that need
+    /// one do for themselves: [`Self::keep`] makes it on the way past, and
+    /// [`Self::bound`] makes it so that every session has it whether or not
+    /// anything has been put in it yet.
     pub(crate) fn directory(&self, conversation_id: i64) -> PathBuf {
         self.root.join(conversation_id.to_string())
     }
 
-    /// What a Conversation's sandbox binds, or `None` where there is nothing to
-    /// bind — no bind, and nothing at that path inside.
+    /// What a Conversation's sandbox binds, made if it is not there yet.
     ///
-    /// Asked of the directory rather than of the record, because what a bind
-    /// needs is a directory: a source that is not there would be a session
-    /// refusing to start with the reason buried in bwrap's complaint. And asked
-    /// for something *in* it rather than for the directory alone, because one
-    /// holding nothing is the Conversation whose files were all removed again —
-    /// the directory is left where it is — and a path an agent is told about and
-    /// finds empty is worse than a path that is not there.
+    /// **At every launch, whatever is in it**, which is the handoff directory's
+    /// arrangement said again — see [`crate::handoffs::Handoffs::directory`]. A
+    /// session that blocks on an ask goes on running while the human answers
+    /// it, so a file put on an Answer an hour in lands in a directory that
+    /// session already has; bound only where something had been attached
+    /// before it started, the Response it is handed would name a path it cannot
+    /// open.
+    ///
+    /// Made here rather than asked of the record, because what a bind needs is
+    /// a directory: a source that is not there would be a session refusing to
+    /// start with the reason buried in bwrap's complaint. `None` is that
+    /// directory failing to be made, which is what is left worth refusing a
+    /// session over.
+    ///
+    /// An empty one is a path a session may read and finds nothing in, and
+    /// nothing sends it there: what a session is told about is the files there
+    /// are — see [`crate::skills::attached`] — so a Conversation with nothing
+    /// attached is told nothing at all, whatever is mounted.
     pub(crate) fn bound(&self, platform: Platform, conversation_id: i64) -> Option<Bound> {
         let host = self.directory(conversation_id);
 
-        // A directory that is not there and one holding nothing are the same
-        // answer here, which is what makes this one reading rather than two.
-        std::fs::read_dir(&host).ok()?.next()?.ok()?;
+        if let Err(error) = std::fs::create_dir_all(&host) {
+            tracing::error!(
+                error = ?error,
+                conversation_id,
+                path = %host.display(),
+                "a Conversation's attachments directory could not be made, so this session \
+                 was not started"
+            );
+
+            return None;
+        }
 
         Some(Bound {
             inside: inside(platform, &host),
@@ -260,8 +278,10 @@ impl Attachments {
     /// is left behind is taken at the next start — see [`sweeping`], the
     /// backstop written for exactly this.
     ///
-    /// A directory that was never made is nothing to remove, and that is most
-    /// Conversations: one nothing was ever attached to has no directory at all.
+    /// A directory that was never made is nothing to remove: a Conversation
+    /// with nothing attached has one from its first session onwards — see
+    /// [`Self::bound`] — and one deleted before it ever started a session has
+    /// none.
     pub(crate) fn remove(&self, conversation_id: i64) {
         let path = self.directory(conversation_id);
 
@@ -719,34 +739,40 @@ mod tests {
         );
     }
 
-    /// A Conversation with nothing attached gets no bind: there would be nothing
-    /// at the path, and a listing of nothing is worse than no path at all.
+    /// A Conversation with nothing attached is bound all the same, over a
+    /// directory made empty: what a session may read is not what it is told
+    /// about, and a file put on an Answer while it waits lands in the directory
+    /// it already has.
     #[test]
-    fn there_is_nothing_to_bind_until_something_is_attached() {
+    fn the_directory_is_bound_whether_or_not_anything_is_in_it() {
         let state = tempfile::tempdir().unwrap();
         let attachments = Attachments::under(state.path());
 
-        assert_eq!(
-            attachments.bound(Platform::Linux, 7),
-            None,
-            "nothing has ever been attached, so there is no directory either",
+        let bound = attachments
+            .bound(Platform::Linux, 7)
+            .expect("a Conversation with nothing attached is bound over an empty directory");
+
+        assert_eq!(bound.host(), state.path().join("attachments/7"));
+        assert_eq!(bound.inside(), Path::new(INSIDE));
+        assert!(
+            bound.host().is_dir(),
+            "and the directory was made rather than merely named",
         );
 
         attachments.keep(7, "notes.md", b"first").unwrap();
 
-        let bound = attachments
-            .bound(Platform::Linux, 7)
-            .expect("a Conversation with a file attached is bound");
-
-        assert_eq!(bound.host(), state.path().join("attachments/7"));
-        assert_eq!(bound.inside(), Path::new(INSIDE));
+        assert_eq!(
+            attachments.bound(Platform::Linux, 7),
+            Some(bound.clone()),
+            "the one that has a file in it is the same directory bound the same way",
+        );
 
         attachments.drop_file(7, "notes.md").unwrap();
 
         assert_eq!(
             attachments.bound(Platform::Linux, 7),
-            None,
-            "and the directory the removal left behind is not something to bind",
+            Some(bound),
+            "and so is the one the removal emptied again",
         );
     }
 

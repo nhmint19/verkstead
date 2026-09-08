@@ -33,8 +33,10 @@
 use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{AnswerAttached, AnswerAttachmentRemoved, AttachmentView};
+use verkstead_schema::Response;
 
 use crate::attachments::{self, Attachments};
+use crate::platform::Platform;
 use crate::{AppState, store};
 
 /// Put a file on one of a Set's Answers.
@@ -143,6 +145,59 @@ pub(crate) async fn attached(pool: &SqlitePool, set_id: i64) -> Result<Vec<Attac
         .into_iter()
         .map(attachments::view)
         .collect())
+}
+
+/// Put the files on the Response as the agent reads it: each Answer's own, by
+/// the path the session opens each at.
+///
+/// **On the way out rather than in.** What the human submitted carries none of
+/// these — see [`verkstead_schema::Answer::attachments`] — so the rows are the
+/// truth about which Answer each file is on, and the Response is stored exactly
+/// as it was sent. Which is also why a Response written before the field
+/// existed needs nothing done to it: it reads as it always did, and what is
+/// filled in here is filled in from the record beside it.
+///
+/// The path is the one the prompt's listing would name the same file at, off
+/// the one reading — see [`crate::attachments::inside`] — so a session cannot
+/// be told about a file twice and given two different paths for it. In the
+/// order they were attached, which is the order the rows come back in.
+///
+/// An entry the record says nothing about is left alone, and that is nearly all
+/// of them: an Answer with no files carries no list at all. One the human
+/// marked `unanswered` and handed a file over with carries its file the same
+/// way — the marker is theirs to mean and the file is still there to read.
+pub(crate) async fn onto(
+    state: &AppState,
+    conversation_id: i64,
+    set_id: i64,
+    response: &mut Response,
+) -> Result<()> {
+    let files = store::set_attachments(&state.pool, set_id).await?;
+
+    if files.is_empty() {
+        return Ok(());
+    }
+
+    let inside = Attachments::under(&state.data_dir).inside(Platform::HERE, conversation_id);
+
+    for answer in &mut response.answers {
+        let label = answer.label.trim();
+
+        answer.attachments = files
+            .iter()
+            .filter(|file| match &file.origin {
+                store::Origin::Answer { label: on, .. } => on == label,
+                store::Origin::Brief => false,
+            })
+            .map(|file| {
+                crate::sandbox::under(&inside, &file.name)
+                    .display()
+                    .to_string()
+            })
+            .collect();
+    }
+
+    Ok(())
 }
 
 /// Where a Set stands, as far as its files are concerned.

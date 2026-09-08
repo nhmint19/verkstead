@@ -2349,8 +2349,10 @@ pub struct Sandbox {
     handoff_dir: PathBuf,
 
     /// And the Conversation's attached files, **read-only** at
-    /// [`attachments::INSIDE`] — or `None` where nothing has been attached to
-    /// it, which is a bind that is not made and nothing at that path.
+    /// [`attachments::INSIDE`] — every session, whether or not anything has
+    /// been attached yet, because one blocked on an ask has to be able to read
+    /// a file put on an Answer while it waits. `None` is the directory failing
+    /// to be made, which is a session that is not started.
     ///
     /// Beside the handoff directory because it is the other half of one thing:
     /// both are the Conversation's own directory outside the worktree, and what
@@ -2556,9 +2558,8 @@ impl Sandbox {
             handoff_dir,
             // Resolved here rather than handed in, for the reason the handoff
             // directory above is: which directory is this Conversation's is its
-            // id, and no caller is in a position to decide otherwise. A
-            // Conversation with nothing attached resolves to `None`, which is a
-            // bind that is not made — see [`Attachments::bound`].
+            // id, and no caller is in a position to decide otherwise. Made as it
+            // is resolved, so every session has it — see [`Attachments::bound`].
             attachments: attachments.bound(Platform::HERE, conversation.id),
             // Read above rather than here: the volume check a Windows profile
             // needs is made before a session is rendered — see [`across_volumes`].
@@ -2797,9 +2798,9 @@ impl Sandbox {
         // directory's reason, and after the skills because both are in the one
         // directory of Verkstead's own: neither covers the other, and the two
         // read as one thing where a reader looks for them. A Conversation with
-        // nothing attached says nothing here at all, so there is no such path
-        // inside — see [`crate::attachments`], which is where the whole of that
-        // is.
+        // nothing attached is bound over an empty directory rather than left
+        // without one — see [`crate::attachments::Attachments::bound`], which is
+        // where the whole of that is — and is told nothing about it either way.
         if let Some(attached) = &self.attachments {
             surface.elsewhere(attached.host(), attached.inside(), Reach::ReadOnly);
         }

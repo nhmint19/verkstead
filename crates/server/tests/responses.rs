@@ -12,7 +12,7 @@ use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_schema::{ApiError, Response, ResponseAccepted, SetCreated};
 use verkstead_server::store;
-use verkstead_server::{open_database, router};
+use verkstead_server::{open_database, router, router_keeping};
 
 /// The Conversation every Set in this file is asked from, made by [`fresh_pool`]
 /// over a database with nothing in it.
@@ -536,4 +536,201 @@ async fn a_response_outlives_a_restart() {
     let delivered = wait_for_response(&router(pool), id, 30).await;
 
     assert_eq!(delivered.status(), StatusCode::OK);
+}
+
+/// The other half of what reaches the agent: the files the human put on each
+/// Answer, by the path this session opens them at.
+///
+/// A router with a Data Directory under it, because a file that is attached is
+/// written into one — [`fresh_app`]'s keeps nothing, which is every other test
+/// in this file. The upload is `attaching.rs`'s subject; what these are about is
+/// what the Response makes of one.
+async fn fresh_app_keeping() -> (tempfile::TempDir, SqlitePool, Router) {
+    let (dir, pool) = fresh_pool().await;
+    let app = router_keeping(pool.clone(), dir.path().to_owned());
+    (dir, pool, app)
+}
+
+/// Put a file on one of a Set's Answers, the way the sheet does: the bytes as
+/// the body, and the label and the name in the path.
+async fn put_on(app: &Router, set_id: i64, label: &str, name: &str, body: &[u8]) {
+    let attached = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/api/ui/sets/{set_id}/answers/{label}/attachments/{name}"
+                ))
+                .header(header::CONTENT_TYPE, "application/octet-stream")
+                .body(Body::from(body.to_vec()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = attached.status();
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "putting {name:?} on {label} failed: {}",
+        body_text(attached).await,
+    );
+}
+
+/// Where a session reads a file attached to the Conversation these Sets are
+/// asked from: the bind path where a sandbox can make one, and the directory's
+/// own real path where none can.
+///
+/// Written out here rather than asked of the server, for the reason the sandbox
+/// suite writes its paths out: what a session opens is a path it was handed, and
+/// a test composing it the same way the server does would agree with itself
+/// about it.
+fn read_at(dir: &tempfile::TempDir, name: &str) -> String {
+    if cfg!(target_os = "linux") {
+        format!("/verkstead/attachments/{name}")
+    } else {
+        format!(
+            "{}/{name}",
+            dir.path()
+                .join("attachments")
+                .join(ASKING_FROM.to_string())
+                .display(),
+        )
+    }
+}
+
+/// The Answers of a delivered Response, by the label each names.
+async fn answers(delivered: axum::response::Response) -> Vec<verkstead_schema::Answer> {
+    assert_eq!(delivered.status(), StatusCode::OK);
+    let response: Response = serde_saphyr::from_str(&body_text(delivered).await).unwrap();
+    response.answers
+}
+
+fn on(answers: &[verkstead_schema::Answer], label: &str) -> Vec<String> {
+    answers
+        .iter()
+        .find(|answer| answer.label == label)
+        .unwrap_or_else(|| panic!("the Response resolves {label}"))
+        .attachments
+        .clone()
+}
+
+/// A wait held open while the human answers, which is the ask a session blocks
+/// on: what comes back names every file they put on an Answer, in the order they
+/// put them there.
+#[tokio::test]
+async fn a_held_wait_is_handed_the_files_put_on_each_answer() {
+    let (dir, _pool, app) = fresh_app_keeping().await;
+    let id = post_set(&app, SET).await;
+
+    let waiting = tokio::spawn({
+        let app = app.clone();
+        async move { wait_for_response(&app, id, 30).await }
+    });
+
+    // Long enough for the wait to be parked on the notification, which is what
+    // makes this the session that was already blocked when the file arrived.
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    put_on(&app, id, "Q1", "window.png", b"PNG").await;
+    put_on(&app, id, "Q1", "rates.csv", b"1,2,3").await;
+    put_on(&app, id, "Q2b", "reply.md", b"# what I meant").await;
+
+    assert_eq!(
+        post_response(&app, id, COMPLETE).await.status(),
+        StatusCode::CREATED
+    );
+
+    let answered = answers(
+        tokio::time::timeout(Duration::from_secs(5), waiting)
+            .await
+            .expect("the held wait should be woken by the submission")
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(
+        on(&answered, "Q1"),
+        vec![read_at(&dir, "window.png"), read_at(&dir, "rates.csv")],
+        "both of Q1's files, in the order they were attached",
+    );
+    assert_eq!(on(&answered, "Q2b"), vec![read_at(&dir, "reply.md")]);
+    assert!(
+        on(&answered, "Q2a").is_empty(),
+        "and nothing on the question nothing was put on",
+    );
+}
+
+/// And the fetch that comes back for a stored ask's Answers is handed the same
+/// thing: one Response shape however a session came by it.
+#[tokio::test]
+async fn a_fetched_response_lists_them_the_same_way() {
+    let (dir, _pool, app) = fresh_app_keeping().await;
+    let id = post_set(&app, SET).await;
+
+    put_on(&app, id, "Q1", "window.png", b"PNG").await;
+    assert_eq!(
+        post_response(&app, id, COMPLETE).await.status(),
+        StatusCode::CREATED
+    );
+
+    let answered = answers(wait_for_response(&app, id, 0).await).await;
+
+    assert_eq!(on(&answered, "Q1"), vec![read_at(&dir, "window.png")]);
+    assert!(on(&answered, "Q2a").is_empty());
+}
+
+/// A Set nothing was put on says nothing about files at all: the field is left
+/// out rather than written empty, so a Response reads as it always did.
+#[tokio::test]
+async fn a_response_to_a_set_with_no_files_carries_no_list() {
+    let (_dir, _pool, app) = fresh_app_keeping().await;
+    let id = post_set(&app, SET).await;
+    assert_eq!(
+        post_response(&app, id, COMPLETE).await.status(),
+        StatusCode::CREATED
+    );
+
+    let delivered = wait_for_response(&app, id, 0).await;
+    assert_eq!(delivered.status(), StatusCode::OK);
+
+    let printed = body_text(delivered).await;
+    assert!(
+        !printed.contains("attachments"),
+        "there is nothing to say, so nothing is said, got:\n{printed}"
+    );
+}
+
+/// A Response stored before there was a field for files reads as it always did.
+///
+/// Written straight into the table, because there is no other way to have one:
+/// what the store holds is the JSON the submission was, and a body without the
+/// key is what every Response stored before this landed looks like.
+#[tokio::test]
+async fn a_response_stored_before_the_field_existed_still_reads() {
+    let (_dir, pool, app) = fresh_app_keeping().await;
+    let id = post_set(&app, SET).await;
+
+    sqlx::query(
+        "INSERT INTO responses (set_id, submitted_at, body)
+         VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?)",
+    )
+    .bind(id)
+    .bind(
+        r#"{"answers":[{"label":"Q1","selected":1},{"label":"Q2a","selected":1},
+            {"label":"Q2b","free_text":"Say nothing."}],"comment":null}"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let answered = answers(wait_for_response(&app, id, 0).await).await;
+
+    assert_eq!(answered.len(), 3);
+    assert_eq!(answered[0].selected, Some(1));
+    assert!(
+        answered.iter().all(|answer| answer.attachments.is_empty()),
+        "nothing was ever put on one, so there is nothing to fill in",
+    );
 }

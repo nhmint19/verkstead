@@ -157,10 +157,32 @@ pub(crate) async fn wait_for_response(
     loop {
         match store::settlement(&state.pool, id).await {
             Ok(Some(Settlement::Answered(stored))) => {
+                let mut response = stored.response;
+
+                // The files the human put on each Answer, named by the path this
+                // session opens them at — filled in here rather than stored, so
+                // one Response shape comes out of the wait and the fetch alike.
+                // See [`crate::answer_files::onto`].
+                //
+                // Before the delivery below rather than after it: a reading that
+                // failed is answered as one and the client comes back, and a
+                // Set marked delivered on the way out of a failed read would be
+                // one whose Answers a later prompt then passed over.
+                if let Err(error) =
+                    crate::answer_files::onto(&state, conversation_id, id, &mut response).await
+                {
+                    tracing::error!(
+                        error = ?error,
+                        set_id = id,
+                        "reading the files put on a Question Set's Answers failed",
+                    );
+                    return unavailable("the Response could not be read");
+                }
+
                 // Handing it over is the delivery, whether this was a wait held
                 // open or a fetch that came back for it.
                 delivered(&state, id).await;
-                return yaml(StatusCode::OK, &stored.response);
+                return yaml(StatusCode::OK, &response);
             }
             Ok(Some(Settlement::LockedUnanswered(_))) => return gone(id),
             Ok(None) => {}

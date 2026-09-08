@@ -182,6 +182,36 @@ fn a_fetched_response_is_byte_for_byte_what_the_blocking_ask_prints() {
     );
 }
 
+/// And the files the human put on an Answer come out with it, by the path this
+/// session reads each at.
+///
+/// The CLI does nothing to them: what it prints is the Response the server
+/// composed, and the field rides through the parse and back out with the rest.
+#[test]
+fn the_files_put_on_an_answer_are_printed_with_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let server = Server::start(tmp.path().join("verkstead.db"));
+
+    let id = stored(&server, SET);
+    server.attach_to_answer(id, "Q1", "counter.png", 9);
+    server.answer(id, COMPLETE);
+
+    let printed = stdout(&finished(answers(&server, tmp.path(), id)));
+    let response = Response::from_yaml(&printed)
+        .unwrap_or_else(|error| panic!("stdout should be a Response: {error}\n{printed}"));
+
+    let attached = &response.answers[0].attachments;
+    assert_eq!(attached.len(), 1, "got {printed}");
+    assert!(
+        attached[0].ends_with("counter.png"),
+        "the path a session opens it at, got {printed}",
+    );
+    assert!(
+        printed.contains("attachments:"),
+        "and it is printed as the field it is, got {printed}",
+    );
+}
+
 #[test]
 fn an_unanswered_set_is_refused_rather_than_waited_on() {
     let tmp = tempfile::tempdir().unwrap();
