@@ -24,14 +24,15 @@ use crate::{
     ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
     ConversationStopped, ConversationUnarchived, ConversationView, Created, Creation,
     DirectoryListing, GrillingStarted, Locked, NewAdoption, NewCompanion, NewConversation,
-    NewOrder, OnboardingView, PrefillView, ProfileChoice, ProfileChosen, ProfileDeleted,
-    ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
-    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched,
-    RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress,
-    SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
-    SharedConversation, ShowArchived, ShowingArchived, Shown, Started, SteerOpened,
-    SteerSubmission, Submitted, Subscribed, Subscription, TerminalOpened, TerminalsView,
-    TranscriptView, Unsubscribe, UpdateNotice, Watching,
+    NewOrder, NewPullRequestAdoption, OnboardingView, OpenPullRequestRepo, PrefillView,
+    ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved,
+    PullRequestDetails, PushKey, Registered, Registration, RemoteBanner, RemoteView, RepoChoice,
+    RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed,
+    RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress, SetReading, SettingsEdit,
+    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedConversation, ShowArchived,
+    ShowingArchived, Shown, Started, SteerOpened, SteerSubmission, Submitted, Subscribed,
+    Subscription, TakenUp, TerminalOpened, TerminalsView, TranscriptView, Unsubscribe,
+    UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -85,6 +86,11 @@ fn the_viewers_types_are_written_from_these() {
     // And what is offered beside the sidebar: the Repos holding roadmaps
     // nothing is driving, which writes the roadmap inside it.
     AbandonedRepo::export_all(&config).unwrap();
+
+    // And the other thing offered there: the open pull requests Verkstead did
+    // not open, grouped by the Repo each was read in, which writes the pull
+    // request inside it.
+    OpenPullRequestRepo::export_all(&config).unwrap();
     ConversationView::export_all(&config).unwrap();
     NewConversation::export_all(&config).unwrap();
 
@@ -118,6 +124,10 @@ fn the_viewers_types_are_written_from_these() {
     // And starting one to adopt a roadmap with, which is the other way in — the
     // Conversation it starts comes back inside the view above.
     NewAdoption::export_all(&config).unwrap();
+
+    // And starting one to wrap a pull request up with, which is the same way in
+    // over the other kind of thing to take up.
+    NewPullRequestAdoption::export_all(&config).unwrap();
     Started::export_all(&config).unwrap();
     BriefEdit::export_all(&config).unwrap();
     BriefSaved::export_all(&config).unwrap();
@@ -175,6 +185,12 @@ fn the_viewers_types_are_written_from_these() {
     // sibling: one Conversation, one branch, and every way of being refused
     // named separately. It takes no request shape either.
     Adopted::export_all(&config).unwrap();
+
+    // And the press beside it that takes up a pull request, which is the same
+    // press over the other kind of thing a Draft holds — and refused for
+    // reasons of its own, a branch that is already there being the point rather
+    // than the trouble.
+    TakenUp::export_all(&config).unwrap();
 
     // Nothing here for how the work gets built: the recommendation and its
     // reasoning ride on the `SetView` above, the pick goes back as a field of

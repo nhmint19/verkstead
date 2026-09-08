@@ -36,22 +36,23 @@ mod view;
 pub use answering::{Locked, Submitted};
 pub use browsing::{DirectoryEntry, DirectoryListing, EntryKind};
 pub use conversations::{
-    AbandonedRepo, AbandonedRoadmap, Adopted, AdoptedStage, AdoptionView, AgentOutputEvent,
-    AgentSession, AnswerAttached, AnswerAttachmentRemoved, Attached, AttachmentOrigin,
-    AttachmentRemoved, AttachmentView, BacklogPane, BaseBranchChoice, BaseRecorded, BranchRename,
-    BranchRenamed, BriefEdit, BriefEvent, BriefSaved, Capture, CheckRollup, Checked, Comment,
-    CommitEvent, CommitPane, CommitRecord, CompanionAdded, CompanionAddition,
-    CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode, CompanionModeChoice,
-    CompanionModeChosen, CompanionRefusal, CompanionRemoved, CompanionUpgrade, CompanionView,
-    ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
-    ConversationStopped, ConversationUnarchived, ConversationView, GrillingStarted, HandoffEvent,
-    Lifecycle, ManualTaskEvent, Merging, MovedEvent, NewAdoption, NewCompanion, NewConversation,
-    NewOrder, NoticeEvent, PinnedEvent, ProposalView, PullRequestCheck, PullRequestComment,
+    AbandonedRepo, AbandonedRoadmap, Adopted, AdoptedPullRequestView, AdoptedStage, AdoptionView,
+    AgentOutputEvent, AgentSession, AnswerAttached, AnswerAttachmentRemoved, Attached,
+    AttachmentOrigin, AttachmentRemoved, AttachmentView, BacklogPane, BaseBranchChoice,
+    BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefEvent, BriefSaved, Capture,
+    CheckRollup, Checked, Comment, CommitEvent, CommitPane, CommitRecord, CompanionAdded,
+    CompanionAddition, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
+    CompanionModeChoice, CompanionModeChosen, CompanionRefusal, CompanionRemoved, CompanionUpgrade,
+    CompanionView, ConversationArchived, ConversationClosed, ConversationEntry,
+    ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView,
+    GrillingStarted, HandoffEvent, Lifecycle, ManualTaskEvent, Merging, MovedEvent, NewAdoption,
+    NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption, NoticeEvent, OpenPullRequest,
+    OpenPullRequestRepo, PinnedEvent, ProposalView, PullRequestCheck, PullRequestComment,
     PullRequestCommit, PullRequestDetails, PullRequestEvent, PullRequestSummary, QuestionSetEvent,
     RepoChoice, RepoSwitched, ResolveConflictsEvent, Resolved, Resumed, RoadmapPane, Screen,
     SetRow, ShareView, ShowArchived, ShowingArchived, Shown, Size, StageDocument, StageEntry,
     StageListEvent, StageListReached, StageSource, Started, SteerCompanionRefusal, SteerEvent,
-    SteerOpened, SteerSubmission, SteerTarget, TaskDocument, TaskEntry, TaskListEvent,
+    SteerOpened, SteerSubmission, SteerTarget, TakenUp, TaskDocument, TaskEntry, TaskListEvent,
     TaskListReached, TaskSource, TerminalOpened, TerminalsView, TimelineEvent, UnreadableSetEvent,
     Watching, Worktree, agent_output_event, agent_output_pinned, backlog_pane, brief_event,
     commit_event, commit_pane, handoff_event, manual_task_event, moved_event, notice_event,
@@ -62,7 +63,7 @@ pub use conversations::{
 };
 pub use onboarding::{
     AccountView, Dependency, DependencyState, DependencyView, Distro, OnboardingView, Platform,
-    PrefillView, Prefilled, Source, StepsView,
+    PrefillView, Prefilled, Seen, Source, StepsView,
 };
 pub use profiles::{
     AgentType, Broken, PairingView, PickedView, ProfileAccount, ProfileChoice, ProfileChosen,

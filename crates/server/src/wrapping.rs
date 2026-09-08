@@ -24,6 +24,18 @@
 //! which is why nothing here sets a state: the store does both in one
 //! transaction, so a Wrapping with no PR under it cannot exist.
 //!
+//! **On the branch as the remote has it, which is not always the name it has
+//! here.** The push belongs to that same review process, so the name it goes
+//! under does too: a repository whose branch-naming rule disagrees with the
+//! name Verkstead cut is pushed under the rule — `modern-keystone/02-crm` here
+//! and `tobi/02-crm` on GitHub — and a pull request's head is the pushed name.
+//! Asked under the local one, `gh` answers that there is no pull request at
+//! all, which is the one answer below that gets a session spent on it, and the
+//! session finds the work already pushed and already on a PR and rightly does
+//! nothing. So the branch is asked where it went before GitHub is asked
+//! anything — see [`head_ref`], and [`crate::worktrees::pushed_to`] for the
+//! reading itself.
+//!
 //! And then the companions, one repository at a time. A Conversation working
 //! alongside read-write repositories ends on one pull request per repository it
 //! committed in — the finish sequence the session followed extends to each of
@@ -59,7 +71,7 @@
 //! about it before it spends anything — see [`asked`], and [`crate::runner`] for
 //! what an inline run makes of the answer.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use verkstead_schema::Nudge;
 
@@ -456,12 +468,19 @@ pub(crate) async fn covering(state: AppState, conversation_id: i64) {
             continue;
         }
 
+        // Under whatever name that repository's remote is carrying the branch,
+        // which is the Conversation's own question asked again per companion —
+        // see [`head_ref`]. A companion's finish sequence is that repository's,
+        // so its naming rule is that repository's too, and two repositories may
+        // well disagree about what one Conversation's branch is called.
+        let head = head_ref(conversation_id, &repo, &branch).await;
+
         let asked = {
             let gh = state.github.clone();
             let repo = repo.clone();
-            let branch = branch.clone();
+            let head = head.clone();
 
-            tokio::task::spawn_blocking(move || github::pull_request(&gh, &repo, &branch)).await
+            tokio::task::spawn_blocking(move || github::pull_request(&gh, &repo, &head)).await
         };
 
         let found = match asked {
@@ -479,6 +498,7 @@ pub(crate) async fn covering(state: AppState, conversation_id: i64) {
                     conversation_id,
                     repo = companion.repo.name,
                     branch,
+                    head,
                     why = trouble.why(),
                     "the work committed in a companion Verkstead can find no pull request in",
                 );
@@ -686,22 +706,76 @@ pub(crate) async fn asked(
     conversation_id: i64,
 ) -> Option<(i64, String, Result<store::PullRequest, github::Trouble>)> {
     let (repo_id, repo, branch) = branch(state, conversation_id).await?;
+    let head = head_ref(conversation_id, &repo, &branch).await;
 
     let asked = {
         let gh = state.github.clone();
-        let branch = branch.clone();
+        let head = head.clone();
 
         // Off the runtime's threads: this is a process, and one that goes to the
         // network.
-        tokio::task::spawn_blocking(move || github::pull_request(&gh, &repo, &branch)).await
+        tokio::task::spawn_blocking(move || github::pull_request(&gh, &repo, &head)).await
     };
 
     match asked {
-        Ok(found) => Some((repo_id, branch, found)),
+        Ok(found) => Some((repo_id, head, found)),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "asking gh for a pull request failed");
             None
         }
+    }
+}
+
+/// Which name to ask GitHub about for `branch` in `repo`: the one the remote is
+/// carrying it under, where that is not the name it has here.
+///
+/// A pull request's head is a branch on GitHub, and the branch on GitHub is
+/// whatever the push named — which is the pushing session's to decide, because
+/// the push follows the target repository's own review process rather than
+/// Verkstead's. A repository whose branch-naming rule disagrees with the name
+/// Verkstead cut gets both: the work on `modern-keystone/02-crm` here, and the
+/// pull request on `tobi/02-crm` there. Asked under the local name, `gh` says
+/// there is no pull request at all, which sends a finish step to open one that
+/// already exists and then stops the run over the same missing thing.
+///
+/// So the branch is asked where it went first — see [`crate::worktrees::pushed_to`]
+/// — and the local name stands wherever it has nothing to say. Which covers the
+/// ordinary case twice over: a branch pushed under its own name answers with
+/// that name, and a branch not pushed at all answers with nothing, and both are
+/// the name that was already going to be used.
+///
+/// Cheap enough to ask every time: one `git for-each-ref` in the repository,
+/// against a `gh` that goes to the network.
+async fn head_ref(conversation_id: i64, repo: &Path, branch: &str) -> String {
+    let pushed = {
+        let repo = repo.to_owned();
+        let branch = branch.to_owned();
+
+        // Off the runtime's threads: git is a process too.
+        tokio::task::spawn_blocking(move || crate::worktrees::pushed_to(&repo, &branch)).await
+    };
+
+    let pushed = match pushed {
+        Ok(pushed) => pushed,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading where a branch pushes to failed");
+            None
+        }
+    };
+
+    match pushed {
+        Some(head) if head != branch => {
+            tracing::info!(
+                conversation_id,
+                branch,
+                head,
+                "the branch is on its remote under another name, and that is the name \
+                 GitHub is asked about",
+            );
+
+            head
+        }
+        _ => branch.to_owned(),
     }
 }
 

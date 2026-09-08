@@ -370,6 +370,13 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 /// rung straight after it, and Implementing never happens on a Conversation whose
 /// building is its Stages'.
 ///
+/// And a third that is not an ending at all: a Draft holding a pull request
+/// somebody opened elsewhere, which the take-up has just put on that pull
+/// request's branch — see [`super::take_up`]. There the work was built before
+/// Verkstead saw it, so the wrap-up is the whole of what there is to do, and
+/// this record is what starts it. Which Drafts those are is a row rather than a
+/// state, so it is asked as one — see [`taking_one_up`].
+///
 /// One transaction, as every move is — and this one carries more than a move:
 /// the PR Event, the row it hangs off, the state, and the move itself. What the
 /// Timeline must never hold is one of them without the others.
@@ -409,10 +416,18 @@ pub async fn record_pull_request(
         return Ok(Wrapping::NoSuchConversation);
     };
 
-    if !matches!(
-        Lifecycle::read(&state)?,
-        Lifecycle::Implementing | Lifecycle::Grilling
-    ) {
+    // Three states reach here, and the third is a door rather than an ending: a
+    // Draft holding a pull request is one the human is taking up, its worktree
+    // is already on that pull request's head branch, and this record is the same
+    // move the finish step makes. Asked of the record rather than of the state
+    // alone, so that nothing else can carry a Draft into Wrapping.
+    let wrappable = match Lifecycle::read(&state)? {
+        Lifecycle::Implementing | Lifecycle::Grilling => true,
+        Lifecycle::Draft => taking_one_up(&mut tx, conversation_id).await?,
+        _ => false,
+    };
+
+    if !wrappable {
         return Ok(Wrapping::NothingToWrap);
     }
 
@@ -470,6 +485,32 @@ pub async fn record_another_pull_request(
         .context("recording another pull request")?;
 
     Ok(true)
+}
+
+/// Whether this Draft is one somebody is taking a pull request up on.
+///
+/// The one thing that lets a Draft move into Wrapping, and it is a row rather
+/// than a guess: a Conversation started off the *Wrap up a pull request* level
+/// has the pull request written beside it — see
+/// [`super::start_pull_request_adoption`] — and every other Draft in the
+/// database has nothing there and nothing to wrap.
+///
+/// Read inside the caller's transaction, so that the answer still holds when the
+/// move acts on it.
+async fn taking_one_up(
+    tx: &mut Transaction<'static, Sqlite>,
+    conversation_id: i64,
+) -> Result<bool> {
+    let held: Option<(i64,)> =
+        sqlx::query_as("SELECT number FROM pull_request_adoptions WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .with_context(|| {
+                format!("reading which pull request Conversation {conversation_id} is holding")
+            })?;
+
+    Ok(held.is_some())
 }
 
 /// The Event and the row under it, or nothing at all where that repository
@@ -725,6 +766,42 @@ pub(crate) async fn on_timeline(
                 },
             )
         })
+        .collect())
+}
+
+/// Which Conversation holds each pull request Verkstead has a record of, keyed
+/// by the Repo it was opened in and the number GitHub gave it.
+///
+/// What the *Wrap up a pull request* level is filtered against: GitHub answers
+/// with every open pull request in a repository, and the ones already in the
+/// pipeline are the ones a row leads to rather than loads.
+///
+/// **Every Conversation**, whatever state it is in — Done and Closed included.
+/// A pull request stays on the record it was written to, so a second
+/// Conversation over the same branch would be two wrap-ups pushing to it
+/// whether or not the first one has finished with it. Which is also why an
+/// Archived one counts: archiving is a Closed Conversation off the sidebar
+/// rather than a state of its own.
+///
+/// One read for the whole list rather than one per pull request. There are as
+/// many rows here as Verkstead has ever recorded, which is a handful per
+/// Conversation, and the alternative is a query per row of a list GitHub just
+/// answered with.
+///
+/// A pull request recorded twice against one Repo and number cannot happen —
+/// the table's unique index is the Conversation and the Repo, and a number is
+/// GitHub's own — but where a database somehow held two, the last read wins and
+/// the row leads to one of the two Conversations rather than to neither.
+pub async fn held_pull_requests(pool: &SqlitePool) -> Result<HashMap<(i64, i64), i64>> {
+    let rows: Vec<(i64, i64, i64)> =
+        sqlx::query_as("SELECT repo_id, number, conversation_id FROM pull_requests")
+            .fetch_all(pool)
+            .await
+            .context("reading which pull requests Conversations already hold")?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(repo_id, number, conversation_id)| ((repo_id, number), conversation_id))
         .collect())
 }
 

@@ -20,6 +20,11 @@
 //! forgotten, and the Worktree and base commit the steer had to make written
 //! beside the move.
 //!
+//! And the review a steer into Wrapping puts back to waiting, from whatever
+//! state it was steered: a steer is the human saying look at this again, so the
+//! wrap-up it lands in reads the branch rather than inheriting what the last one
+//! made of it.
+//!
 //! Nothing here is about what runs afterwards, and nothing here *makes*
 //! anything. Checking a branch out, clearing a stop and launching a session are
 //! the server's, and are asked of it there; what this is about is that the
@@ -424,8 +429,10 @@ async fn a_steer_into_grilling_without_one_writes_no_brief() {
 ///
 /// A round that inherited the one before it would reach Wrapping with everything
 /// wrap-up waits on already settled and would be over the moment it arrived. The
-/// steers that open no round leave all of it exactly where it is: a wrap-up
-/// steered back into wrapping up is the *same* round, looked at again.
+/// steers that open no round leave the round's bookkeeping where it is: a
+/// wrap-up steered back into wrapping up is the *same* round, looked at again —
+/// with the review the one thing it does put back, that being what looking again
+/// means. See [`a_steer_into_wrapping_reads_the_branch_afresh`].
 #[tokio::test]
 async fn a_steer_into_grilling_forgets_the_round_before_it() {
     let (_dir, pool) = fresh_pool().await;
@@ -433,7 +440,9 @@ async fn a_steer_into_grilling_forgets_the_round_before_it() {
 
     let repo = load_conversation(&pool, id).await.unwrap().unwrap().repo.id;
 
-    settle_wrap_up(&pool, id, WaitingOn::Review).await.unwrap();
+    settle_wrap_up(&pool, id, WaitingOn::Checks(repo))
+        .await
+        .unwrap();
     record_fix_attempt(&pool, id, repo, "Rust").await.unwrap();
 
     steer_conversation(&pool, id, into(Lifecycle::Wrapping))
@@ -442,7 +451,7 @@ async fn a_steer_into_grilling_forgets_the_round_before_it() {
 
     assert_eq!(
         wrap_up_settled(&pool, id).await.unwrap(),
-        [WaitingOn::Review],
+        [WaitingOn::Checks(repo)],
         "a wrap-up steered into wrapping up is the same round, looked at again",
     );
     assert_eq!(fix_attempts(&pool, id, repo, "Rust").await.unwrap(), 1);
@@ -456,6 +465,79 @@ async fn a_steer_into_grilling_forgets_the_round_before_it() {
         "and the round that starts here waits on all of it from nothing",
     );
     assert_eq!(fix_attempts(&pool, id, repo, "Rust").await.unwrap(), 0);
+}
+
+/// A steer into Wrapping puts the review back to waiting, whatever state it was
+/// steered from and whether or not one had settled already.
+///
+/// Which is what *a steer reads the branch afresh* comes to on the record. A
+/// review is one look at the branch and its settle says the look happened, so a
+/// wrap-up that arrived carrying somebody else's would be one the watchers found
+/// nothing left to do in — the Conversation the human just asked to be looked at
+/// again reviewed by nobody. The resolve press is the one move into Wrapping
+/// that leaves the settle standing, and is a press of its own for exactly this
+/// reason — see `wrapping::resolving_a_conflict_sends_a_done_conversation_back`.
+///
+/// Nothing else the round settled is touched. The checks, what has been said and
+/// the merge are asked of GitHub on every poll, so this round's own watchers
+/// settle them from the answers they get; putting them back would be Verkstead
+/// forgetting something it is about to be told again.
+#[tokio::test]
+async fn a_steer_into_wrapping_reads_the_branch_afresh() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    let repo = load_conversation(&pool, id).await.unwrap().unwrap().repo.id;
+
+    for waiting_on in [
+        WaitingOn::Review,
+        WaitingOn::Checks(repo),
+        WaitingOn::Comments(repo),
+        WaitingOn::Mergeable(repo),
+    ] {
+        settle_wrap_up(&pool, id, waiting_on).await.unwrap();
+    }
+
+    // Where the whole of that settling carried it, which is the state the steer
+    // this is about starts from: work Verkstead has finished with.
+    steer_conversation(&pool, id, into(Lifecycle::Done))
+        .await
+        .unwrap();
+
+    steer_conversation(&pool, id, into(Lifecycle::Wrapping))
+        .await
+        .unwrap();
+
+    let settled = wrap_up_settled(&pool, id).await.unwrap();
+
+    assert!(
+        !settled.contains(&WaitingOn::Review),
+        "the review it was carried to Done on is not this wrap-up's: {settled:?}",
+    );
+    assert!(
+        settled.contains(&WaitingOn::Checks(repo))
+            && settled.contains(&WaitingOn::Comments(repo))
+            && settled.contains(&WaitingOn::Mergeable(repo)),
+        "and everything GitHub is asked about on every poll is left where it \
+         was: {settled:?}",
+    );
+
+    // And again over a wrap-up that has already reviewed this round, which is
+    // the halted one the human steers to get moving: the settle a moment old
+    // goes the same way a settle from a finished round does.
+    settle_wrap_up(&pool, id, WaitingOn::Review).await.unwrap();
+
+    steer_conversation(&pool, id, into(Lifecycle::Wrapping))
+        .await
+        .unwrap();
+
+    let settled = wrap_up_settled(&pool, id).await.unwrap();
+
+    assert!(
+        !settled.contains(&WaitingOn::Review),
+        "a steer says look at this again whatever was looked at before it: \
+         {settled:?}",
+    );
 }
 
 /// What the steer had to make before anything could run in it: the Worktree it

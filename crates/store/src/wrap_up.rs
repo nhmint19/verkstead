@@ -75,6 +75,12 @@ pub enum WaitingOn {
     /// findings out into a backlog leaves Wrapping to build them, and what comes
     /// back is a branch nobody has read. So the move out takes this settle with
     /// it — see [`super::implement_again`] — and the second wrap reviews afresh.
+    ///
+    /// And a steer into Wrapping takes it too, from whatever state the human
+    /// steered from: a steer is them saying *look at this again*, so the wrap-up
+    /// it lands in reads the branch rather than inheriting what the last one made
+    /// of it. See [`super::steer_conversation`], and [`super::resolve_conflicts`]
+    /// for the one move into Wrapping that leaves it standing.
     Review,
 
     /// Nothing has been said on the pull request opened in this Repo that has
@@ -355,10 +361,13 @@ pub async fn unsettle_wrap_up(
 
 /// The same, inside a transaction that is doing something else as well.
 ///
-/// Which is the move out of Wrapping: leaving takes the review's settle with it,
-/// in the same breath as the state changes, so a Conversation being built again
-/// is never one carrying a settled review of work that has not been done yet.
-/// See [`super::implement_again`].
+/// Which is the two moves the review's settle does not survive, each taking it in
+/// the same breath as the state changes. Leaving Wrapping to build a split-out
+/// backlog takes it, so a Conversation being built again is never one carrying a
+/// settled review of work that has not been done yet — see
+/// [`super::implement_again`]; and a steer into Wrapping takes it, so the wrap-up
+/// the human asked for reads the branch rather than inheriting what the last one
+/// made of it — see [`super::steer_conversation`].
 pub(crate) async fn unsettle(
     tx: &mut sqlx::SqliteConnection,
     conversation_id: i64,

@@ -54,19 +54,51 @@
 //! it is created; this page has no draft yet, so it asks for the same answer and
 //! shows it — see `showing`, which is careful to show it rather than hold it.
 //!
-//! **And it is where a roadmap is adopted from**, that being the other way work
-//! gets into the pipeline rather than another page for it: the *Adopt a roadmap*
-//! dropdown under the box lists the roadmaps nothing is driving, and picking one
-//! loads it into what this device is holding. The box locks to a card naming the
-//! roadmap and the stage that would be started, the repo and the base are the
-//! roadmap's own, and the pairings and the repos alongside stay the human's to
-//! settle — which is the whole of what adopting asks for. Clearing it gives the
-//! box back whatever was typed in it.
+//! **And it is where work that is already somewhere else is taken up from**,
+//! that being the other way into the pipeline rather than another page for it:
+//! the *Other actions* menu under the box holds one nested level per way of
+//! doing it, and picking a row loads what it names into what this device is
+//! holding. *Continue a roadmap* is the first level — the roadmaps nothing is
+//! driving, each named with its Repo and the stage a press would start. The box
+//! locks to a card naming the roadmap and that stage, the repo and the base are
+//! the roadmap's own, and the pairings and the repos alongside stay the human's
+//! to settle — which is the whole of what adopting asks for. Clearing it gives
+//! the box back whatever was typed in it.
+//!
+//! *Wrap up a pull request* is the second: every pull request open across the
+//! registered Repos, read off GitHub when this page opens and again on each
+//! reopen, and held nowhere — GitHub owns that list, and a copy here would be
+//! one this page had to work out when to stop believing. Any author, forks left
+//! out, and one a Conversation already holds listed all the same with its row
+//! leading to that Conversation rather than loading anything. It is a `gh` per
+//! Repo, so the level opens on a line saying it is reading rather than on an
+//! empty card.
+//!
+//! **A free row of it loads differently from a roadmap row, and that is the
+//! point of it.** A roadmap locks a card over the box, an adopted stage's brief
+//! being the repository's own; a pull request brings words of its own — the one
+//! thing taken up that does — so the box stays a box and is *prefilled* with its
+//! title as a heading and its description under it, editable, and what is left
+//! there is the Brief. What was already typed is stowed and given back on clear,
+//! the way a held file is. The repo is the pull request's and reads settled, the
+//! branch and the base are not drawn at all — its branch is the head branch and
+//! its base is that branch's own head at take-up — and the grilling picker goes
+//! with them: the work is built, and the take-up moves it straight into the
+//! wrap-up.
+//!
+//! The menu is drawn whenever the box is empty and nothing is loaded, and a
+//! level with nothing under it is greyed rather than hidden: what there is to do
+//! here should not change shape with a list the human cannot see. *Adopt* stays
+//! the word in the code, the endpoints and the store; *continue* and *wrap up*
+//! are what the human reads.
 //!
 //! What the two presses do with a roadmap loaded is what they always do, under
 //! the other name: *Start work* creates the adopting Conversation and adopts the
 //! stage, and *Save as draft* creates it and leaves the stage to be adopted on
-//! its own page.
+//! its own page. With a pull request loaded they hold that shape once more:
+//! *Start work* creates the Conversation and takes the pull request up, which
+//! puts it on the head branch and starts the wrap-up, and *Save as draft*
+//! creates it and leaves the take-up on that draft's own page.
 //!
 //! What it does *not* do is decide anything the composer decides. Every control
 //! here is the composer's own component drawn over the compose state instead of
@@ -81,16 +113,17 @@ import { For, Show, createEffect, createSignal, type JSX } from "solid-js";
 import app from "../App.module.css";
 import { attaching } from "../Attaching";
 import { Icon } from "../Icon";
-import { Menu } from "../Menu";
+import { Menu, Nested } from "../Menu";
 import { PaneSticky, Panes } from "../Panes";
 import shell from "../Panes.module.css";
 import { Switch as Toggle } from "../Switch";
 import {
   listAbandonedRoadmaps,
+  listOpenPullRequests,
   listRepos,
   loadRepoPairings,
 } from "../api/client";
-import type { RepoEntry } from "../api/types";
+import type { OpenPullRequest, RepoEntry } from "../api/types";
 import { useReading } from "../freshness";
 import { holding } from "../holding";
 import { ErrorLine, Note } from "../notices";
@@ -113,6 +146,7 @@ import {
   RolePicker,
 } from "./Setup";
 import setup from "./Setup.module.css";
+import { HeldPullRequest } from "./TakeUp";
 import { AUTOMATIC } from "./naming";
 import {
   blank,
@@ -123,6 +157,7 @@ import {
   on,
   stored,
   type Adopting,
+  type AdoptingPullRequest,
   type Alongside,
   type Composed,
 } from "./composing";
@@ -234,7 +269,7 @@ function Compose(props: {
   }));
 
   // And the roadmaps nothing is driving, which is the other way work gets into
-  // the pipeline: the rows behind the Adopt dropdown under the box. Read under
+  // the pipeline: the rows behind Continue a roadmap under the box. Read under
   // the key the rest of the app reads them under, and read again whenever the
   // page looks again — a roadmap somebody has picked up since simply stops
   // being on the list.
@@ -248,8 +283,30 @@ function Compose(props: {
     freshness: { reconcile: "repo_id" },
   }));
 
+  // And the pull requests open in those same Repos, which is the other level of
+  // that menu: work already somewhere else, waiting to be wrapped up.
+  //
+  // Read when this page opens and again whenever it is opened, and held nowhere
+  // — GitHub owns the list, and a copy in the browser would be one this page had
+  // to work out when to stop believing. Its own key rather than the roadmaps'
+  // for what it costs: this is a `gh` per registered Repo, and a Nudge that
+  // re-read it would be a call out to GitHub every time anything anywhere moved.
+  const open = useReading(() => ({
+    queryKey: ["open-pull-requests"],
+    queryFn: listOpenPullRequests,
+
+    // Keyed by `repo_id` for the reason above it: the list is Repos, and a
+    // re-read landing while the level is open must not rebuild the row the human
+    // had tabbed to.
+    freshness: { reconcile: "repo_id" },
+  }));
+
   /// The roadmap this page is loaded with, where it is loaded with one.
   const adopting = (): Adopting | null => state().adopting;
+
+  /// And the pull request, where it is loaded with one of those instead. Never
+  /// both: the menu that loads either is drawn only while nothing is loaded.
+  const pull = (): AdoptingPullRequest | null => state().pull;
 
   /// Every roadmap there is to adopt, flat and in the shape the page holds one
   /// in — each still knowing which Repo it is in, which is what a line with two
@@ -264,6 +321,18 @@ function Compose(props: {
         stage: roadmap.stage,
         stage_title: roadmap.stage_title,
         base: roadmap.base,
+      })),
+    );
+
+  /// And every open pull request there is, flat and in the shape a row draws —
+  /// each still knowing which Repo it is in, because a number is a fact about
+  /// one repository and two of them may each have a `#41`.
+  const pulls = (): Pull[] =>
+    (open.data ?? []).flatMap((held) =>
+      held.pull_requests.map((pull) => ({
+        ...pull,
+        repo_id: held.repo_id,
+        repo: held.repo,
       })),
     );
 
@@ -341,10 +410,16 @@ function Compose(props: {
   /// loaded. Nothing chosen for a role is the empty string on all three pickers
   /// — the row that runs no session is a choice like any other, and it lets the
   /// work start.
+  ///
+  /// A pull request answers the grilling for itself, by never having one: the
+  /// work on it is built, the take-up moves it straight into the wrap-up, and
+  /// the picker is not drawn. Its Brief is a question like any other's — it
+  /// arrives prefilled with the pull request's own words, but the box is a box
+  /// and what is left in it is what the wrap-up reads.
   const startable = () =>
     ready() &&
     (adopting() !== null || state().brief.trim() !== "") &&
-    showing("grilling") !== "" &&
+    (pull() !== null || showing("grilling") !== "") &&
     showing("implementation") !== "" &&
     showing("review") !== "";
 
@@ -355,10 +430,15 @@ function Compose(props: {
   /// rather than about the page, and a sentence standing under the box whether
   /// or not anybody wanted it is the page explaining itself unasked — see the
   /// composer's own start, where the same words moved for the same reason.
-  const waiting = () =>
-    adopting() === null
+  const waiting = () => {
+    if (adopting() !== null) {
+      return "Starting needs every role picked and working.";
+    }
+
+    return pull() === null
       ? "Starting needs a brief, and every role picked and working."
-      : "Starting needs every role picked and working.";
+      : "Starting needs a brief, and both roles picked and working.";
+  };
 
   const [gone, setGone] = createSignal(false);
 
@@ -427,6 +507,49 @@ function Compose(props: {
 
   /// And unloaded, which puts the page back to composing work of its own.
   const unload = () => setState((was) => ({ ...was, adopting: null }));
+
+  /// A pull request loaded into what is being composed, which creates nothing
+  /// either: the row that was pressed is written into the compose state, and the
+  /// press under the box is still the first thing that reaches the server.
+  ///
+  /// What is different from a roadmap is what it does to the box. A roadmap
+  /// locks a card over it, so what was typed simply stays underneath; a pull
+  /// request *fills* it — the title as a heading, the description under it —
+  /// which is the whole reason it is worth loading one at all. So what was in
+  /// the box is stowed on the record that displaced it, and clearing gives it
+  /// back.
+  const take = (held: Pull) =>
+    setState((was) => ({
+      ...was,
+      brief: brief(held),
+      pull: {
+        repo_id: held.repo_id,
+        repo: held.repo,
+        number: held.number,
+        title: held.title,
+        url: held.url,
+        head: held.head,
+        base: held.base,
+        stowed: was.brief,
+      },
+      // Nothing is ever a companion of itself, which is what a switch onto
+      // another Repo does with one too.
+      companions: was.companions.filter((row) => row.repo_id !== held.repo_id),
+    }));
+
+  /// And put down again: the box goes back to whatever was in it, and the page
+  /// to composing work of its own.
+  ///
+  /// What was written *over* the prefill goes with it. The box is the pull
+  /// request's from the moment one is loaded — that is what a prefill is — so
+  /// giving back the stowed text is giving the box back rather than merging two
+  /// drafts of it.
+  const putDown = () =>
+    setState((was) => ({
+      ...was,
+      brief: was.pull?.stowed ?? was.brief,
+      pull: null,
+    }));
 
   /// Moving what is being composed onto another Repo, which takes the same two
   /// things with it that a switch on a saved draft takes: the base goes back to
@@ -502,6 +625,25 @@ function Compose(props: {
           classList={{ [styles.over!]: attach.over() }}
           {...attach.dropping}
         >
+          {/* And the pull request that has been loaded, where one has: a band
+              across the top of the box naming it, over the field rather than in
+              place of it. A pull request brings words of its own, so the box is
+              still a box — prefilled with its title and description, and what is
+              left there is the Brief. See `TakeUp.tsx`. */}
+          <Show when={pull()}>
+            {(held) => (
+              <HeldPullRequest
+                repo={held().repo}
+                number={held().number}
+                title={held().title}
+                url={held().url}
+                head={held().head}
+                base={held().base}
+                clear={() => putDown()}
+              />
+            )}
+          </Show>
+
           {/* The field, or the roadmap that has been loaded in place of it: an
               adopted stage's brief is the repository's own and arrives with the
               adoption, so there is nothing here to write and the box says which
@@ -565,19 +707,26 @@ function Compose(props: {
                   deregistered since, which is the picker inside the panel's to
                   put right. A blank line under the label would say neither. */}
               <RepoOptions
-                name={repo()?.name ?? adopting()?.repo ?? "Select"}
+                name={
+                  repo()?.name ?? adopting()?.repo ?? pull()?.repo ?? "Select"
+                }
                 alongside={state().companions.length}
               >
                 {() => (
                   <>
                     <RepoChoice
                       chosen={on(state()) === null ? "" : String(on(state()))}
-                      // Settled while a roadmap is loaded, the way it is
-                      // settled once a branch has been cut: the stage is in
-                      // the repository the roadmap is written in, and moving
-                      // the work off it would be moving it away from what it
-                      // is adopting.
-                      disabled={make.isPending || adopting() !== null}
+                      // Settled while anything is loaded, the way it is settled
+                      // once a branch has been cut: the stage is in the
+                      // repository the roadmap is written in, and `#41` is a
+                      // number in the repository the pull request was opened in
+                      // — so moving the work off would be moving it away from
+                      // what it is taking up.
+                      disabled={
+                        make.isPending ||
+                        adopting() !== null ||
+                        pull() !== null
+                      }
                       pick={(repoId) => moveTo(repoId)}
                     >
                       {/* And what the roadmap has settled, where one is loaded:
@@ -597,6 +746,21 @@ function Compose(props: {
                           </Note>
                         )}
                       </Show>
+
+                      {/* And what the pull request has settled, the same way:
+                          the branch is its head branch and the base is the
+                          commit that branch is at when it is taken up, so the
+                          two fields that would have asked are not drawn and
+                          this is where they are answered. */}
+                      <Show when={pull()}>
+                        {(held) => (
+                          <Note class={setup.aside}>
+                            The work carries on <code>{held().head}</code>, from
+                            wherever it stands when it is taken up. Clear the
+                            pull request to compose work of your own.
+                          </Note>
+                        )}
+                      </Show>
                     </RepoChoice>
 
                     <Show when={repo()}>
@@ -604,9 +768,12 @@ function Compose(props: {
                         <>
                           {/* Neither is asked of a page adopting a roadmap: a
                               stage is worked on its own slug, and the base went
-                              out with the row that loaded it. What a control
-                              cannot do it does not draw. */}
-                          <Show when={adopting() === null}>
+                              out with the row that loaded it. Nor of one holding
+                              a pull request, whose branch is the head branch
+                              GitHub names and whose base is that branch's own
+                              head at take-up. What a control cannot do it does
+                              not draw. */}
+                          <Show when={adopting() === null && pull() === null}>
                             <BranchField
                               id="branch"
                               label="Branch"
@@ -673,14 +840,19 @@ function Compose(props: {
             <ProfileChoices>
               {(saved) => (
                 <>
-                  <RolePicker
-                    saved={saved()}
-                    role="grilling"
-                    label="Grilling"
-                    away="No grilling"
-                    chosen={showing("grilling")}
-                    pick={(picked) => change({ grilling: picked })}
-                  />
+                  {/* Not drawn at all over a loaded pull request: the work on
+                      one is built, the take-up moves it straight into the
+                      wrap-up, and there is no round for a grilling to open. */}
+                  <Show when={pull() === null}>
+                    <RolePicker
+                      saved={saved()}
+                      role="grilling"
+                      label="Grilling"
+                      away="No grilling"
+                      chosen={showing("grilling")}
+                      pick={(picked) => change({ grilling: picked })}
+                    />
+                  </Show>
                   <RolePicker
                     saved={saved()}
                     role="implementation"
@@ -722,20 +894,29 @@ function Compose(props: {
                 <attach.Clip />
               </Show>
 
-              {/* And the roadmap somebody staged before Verkstead was driving
-                  anything, taken up as it stands. Drawn only when there is one
-                  to take up and the box is empty — what it loads stands in place
-                  of what would have been written there, and a dropdown offering
-                  to replace a half-written brief would be offering to lose
-                  it. */}
+              {/* And the work that is already somewhere else, taken up as it
+                  stands. Drawn while the box is empty and nothing is loaded —
+                  what a row loads stands in place of what would have been
+                  written there, and a menu offering to replace a half-written
+                  brief would be offering to lose it. Nothing to take up is a
+                  level greyed rather than a menu gone: what there is to do here
+                  is not a list the human can see, so it should not come and go
+                  with one. */}
               <Show
                 when={
-                  roadmaps().length &&
                   state().brief.trim() === "" &&
-                  adopting() === null
+                  adopting() === null &&
+                  pull() === null
                 }
               >
-                <AdoptRoadmap roadmaps={roadmaps()} load={load} />
+                <OtherActions
+                  roadmaps={roadmaps()}
+                  load={load}
+                  pulls={pulls()}
+                  take={take}
+                  reading={open.isPending}
+                  go={(id) => navigate(pathOf(id))}
+                />
               </Show>
             </div>
 
@@ -853,38 +1034,80 @@ function Loaded(props: {
   );
 }
 
-/// The roadmaps nothing is driving, and the dropdown that loads one.
+/// Everything that puts something in the box other than typing it, one nested
+/// level per way of doing it.
 ///
 /// An action with a chevron rather than a label over a value: the options along
 /// the box's edge say what the work *is*, and this says what to put in the box —
 /// which is why it stands under the box with the presses rather than in the row
 /// inside it.
 ///
-/// Pressing a row creates nothing. It writes the roadmap into what this device
-/// is holding, and the dropdown goes with the load: there is one roadmap on a
-/// page at a time, and the way to another is to clear the one in the box.
+/// One menu rather than a dropdown apiece. Each of these lists something the
+/// human cannot see from here, so a control that came and went with its list
+/// would be a row of chrome that changed shape between one visit and the next —
+/// and two of them would be two. So the menu is drawn whenever there is a box to
+/// put something in, and a level with nothing under it is greyed: *nothing to
+/// continue* is an answer, where a missing dropdown is not.
 ///
-/// Each row is worded the way the sidebar's menu worded it, this being where
-/// those rows moved to: the roadmap, the Repo it is in — the list is flat, and
-/// two repositories may each hold an `mvp` — the stage that would be started,
-/// and where the roadmap was found when that is somewhere other than the
-/// default branch.
-function AdoptRoadmap(props: {
+/// Pressing a row creates nothing. It writes what the row names into what this
+/// device is holding, and the menu goes with the load: there is one thing in the
+/// box at a time, and the way to another is to clear the one that is in it.
+function OtherActions(props: {
   roadmaps: Adopting[];
   load: (roadmap: Adopting) => void;
+
+  /// The pull requests open across the registered Repos, flat.
+  pulls: Pull[];
+
+  /// And what a free row of it does: the pull request loaded into the box.
+  take: (pull: Pull) => void;
+
+  /// Whether that reading is still on its way, which is the one thing this
+  /// level has that the roadmaps' does not: it is a call out to GitHub per Repo,
+  /// so it is often still going when the menu is opened. Greying it then would
+  /// say *there is nothing to wrap up* about a list nobody has read yet, so the
+  /// level opens and says it is looking.
+  reading: boolean;
+
+  /// Go to a Conversation, which is what a row for a pull request one already
+  /// holds does instead of loading it.
+  go: (id: number) => void;
 }): JSX.Element {
   // The menu's own way to shut, so a press that has done its work takes the
   // card back and hands the focus to the trigger it came from.
   let shut = (): void => {};
 
+  /// What a row of any level does: the menu taken back, and what it named
+  /// loaded into the box behind it.
+  const pick = (held: Adopting) => {
+    shut();
+    props.load(held);
+  };
+
+  /// And what a pull request another Conversation is already holding does: the
+  /// menu taken back, and that Conversation opened. There is one Conversation
+  /// per piece of work, so what a row like this offers is the one that has it
+  /// rather than a second one over the same branch.
+  const goTo = (id: number) => {
+    shut();
+    props.go(id);
+  };
+
+  /// And what a free one does: the same as a roadmap row, over the other kind of
+  /// thing to take up.
+  const takeUp = (pull: Pull) => {
+    shut();
+    props.take(pull);
+  };
+
   return (
     <Menu
-      class={styles.adopt!}
-      name="Adopt a roadmap"
+      class={styles.actions!}
+      name="Other actions"
       closer={(close) => (shut = close)}
       trigger={
         <>
-          Adopt a roadmap
+          Other actions
           {/* Which way the menu will go, and no part of what the button
               says. */}
           <Icon of={faChevronDown} />
@@ -892,36 +1115,173 @@ function AdoptRoadmap(props: {
       }
     >
       {() => (
-        <For each={props.roadmaps}>
-          {(held) => (
-            <button
-              type="button"
-              role="menuitem"
-              class={styles.roadmapRow}
-              onClick={() => {
-                shut();
-                props.load(held);
-              }}
-            >
-              <span class={styles.what}>
-                <code>{held.roadmap}</code>
-                <span class={styles.in}>in {held.repo}</span>
-              </span>
-              <span class={styles.next}>
-                next is stage {held.stage}: {held.stage_title}
-              </span>
-              <Show when={held.base}>
-                {(base) => (
-                  <span class={styles.found}>
-                    on <code>{base()}</code>
-                  </span>
-                )}
-              </Show>
-            </button>
-          )}
-        </For>
+        <>
+          <Nested
+            label="Continue a roadmap"
+            disabled={props.roadmaps.length === 0}
+          >
+            {() => <RoadmapRows roadmaps={props.roadmaps} load={pick} />}
+          </Nested>
+
+          {/* Greyed on an answer rather than on the absence of one: while the
+              reading is still out there is no list to say anything about, and a
+              level that greyed until GitHub answered would be a control that
+              ungreyed under the hand reaching past it. */}
+          <Nested
+            label="Wrap up a pull request"
+            disabled={!props.reading && props.pulls.length === 0}
+          >
+            {() => (
+              <PullRows
+                pulls={props.pulls}
+                reading={props.reading}
+                take={takeUp}
+                go={goTo}
+              />
+            )}
+          </Nested>
+        </>
       )}
     </Menu>
+  );
+}
+
+/// The roadmaps nothing is driving, as the rows of the level that lists them.
+///
+/// Each row is worded the way the sidebar's menu worded it, this being where
+/// those rows moved to: the roadmap, the Repo it is in — the list is flat, and
+/// two repositories may each hold an `mvp` — the stage that would be started,
+/// and where the roadmap was found when that is somewhere other than the
+/// default branch.
+function RoadmapRows(props: {
+  roadmaps: Adopting[];
+  load: (roadmap: Adopting) => void;
+}): JSX.Element {
+  return (
+    <For each={props.roadmaps}>
+      {(held) => (
+        <button
+          type="button"
+          role="menuitem"
+          class={styles.roadmapRow}
+          onClick={() => props.load(held)}
+        >
+          <span class={styles.what}>
+            <code>{held.roadmap}</code>
+            <span class={styles.in}>in {held.repo}</span>
+          </span>
+          <span class={styles.next}>
+            next is stage {held.stage}: {held.stage_title}
+          </span>
+          <Show when={held.base}>
+            {(base) => (
+              <span class={styles.found}>
+                on <code>{base()}</code>
+              </span>
+            )}
+          </Show>
+        </button>
+      )}
+    </For>
+  );
+}
+
+/// One open pull request as this page holds one: what the server said about it,
+/// with the Repo it was read in carried down onto the row.
+///
+/// The Repo is flattened on for the roadmap rows' reason — the list is flat, and
+/// `#41` in one repository is a different pull request from `#41` in the next,
+/// so a row that did not say which repository would be a row naming nothing.
+type Pull = OpenPullRequest & { repo_id: number; repo: string };
+
+/// What loading a pull request puts in the box: its title as a heading, and its
+/// description under it.
+///
+/// A Brief the human then edits rather than a card locked over the box. A pull
+/// request is the one thing taken up that brings words of its own, and the one
+/// the human is likeliest to have something to add to — so what it fills the box
+/// with is a starting point, and what is left there is what the wrap-up reads.
+///
+/// The heading is the title even where the description already opens with one:
+/// two headings is something to delete, where a Brief that opened on a paragraph
+/// nobody could see the subject of is something to go and find.
+function brief(pull: Pull): string {
+  return pull.body.trim() === ""
+    ? `# ${pull.title}\n`
+    : `# ${pull.title}\n\n${pull.body.trim()}\n`;
+}
+
+/// The open pull requests, as the rows of the level that lists them.
+///
+/// Each row says what a human picks a pull request by: which repository, its
+/// number and title, the branch the work is on and the branch it goes into, and
+/// whose it is. Any author, because whose it is says nothing about whether it is
+/// worth wrapping up — it is on the row because a list of a repository's open
+/// pull requests is a list of several people's work.
+///
+/// **A row for a pull request a Conversation already holds leads there instead.**
+/// There is one Conversation per piece of work, so what such a row offers is the
+/// one that has it rather than a second one over the same branch — and it says
+/// so, because a row that quietly navigated somewhere else would be a row that
+/// did not do what the level said it would.
+///
+/// And while the reading is still out, one row saying so. This level is a `gh`
+/// per registered Repo, each a call to GitHub, so a card that came down empty
+/// would read as *there is nothing here* for as long as GitHub took to answer.
+///
+/// A free row loads it into the box, which creates nothing: the row is written
+/// into what this device is holding, the box is prefilled with the pull
+/// request's own title and description, and the press under the box is still the
+/// first thing that reaches the server.
+function PullRows(props: {
+  pulls: Pull[];
+  reading: boolean;
+  take: (pull: Pull) => void;
+  go: (id: number) => void;
+}): JSX.Element {
+  return (
+    <Show
+      when={!props.reading}
+      fallback={
+        // Not a `menuitem`: there is nothing here to press, and a row a
+        // keyboard could land on would be one that answered nothing.
+        <p class={styles.reading}>Reading GitHub…</p>
+      }
+    >
+      <For each={props.pulls}>
+        {(pull) => (
+          <button
+            type="button"
+            role="menuitem"
+            class={styles.pullRow}
+            onClick={() => {
+              if (pull.conversation_id === null) {
+                props.take(pull);
+              } else {
+                props.go(pull.conversation_id);
+              }
+            }}
+          >
+            <span class={styles.what}>
+              <code>
+                {pull.repo} #{pull.number}
+              </code>
+              <span class={styles.pullTitle}>{pull.title}</span>
+            </span>
+            <span class={styles.next}>
+              <code>{pull.head}</code> into <code>{pull.base}</code>
+            </span>
+            <span class={styles.found}>
+              <Show when={pull.author}>by {pull.author}</Show>
+              <Show when={pull.conversation_id !== null}>
+                {" "}
+                — already in a conversation
+              </Show>
+            </span>
+          </button>
+        )}
+      </For>
+    </Show>
   );
 }
 

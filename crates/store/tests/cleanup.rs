@@ -748,6 +748,20 @@ async fn written_straight_in(pool: &SqlitePool, id: i64, companion: i64, event: 
         .await
         .unwrap();
 
+    // The other thing a Draft adopts. Never on one Conversation alongside the
+    // roadmap above — a Draft adopts one thing or none — but this fixture is
+    // filling every table a Conversation is named from rather than composing a
+    // Conversation anybody could have made.
+    sqlx::query(
+        "INSERT INTO pull_request_adoptions (conversation_id, number, title, url, head, base)
+         VALUES (?, 41, 'Rate limiting', 'https://github.com/tobico/verkstead/pull/41',
+                 'rate-limiting', 'main')",
+    )
+    .bind(id)
+    .execute(pool)
+    .await
+    .unwrap();
+
     sqlx::query(
         "INSERT INTO wrap_up_narrowings (conversation_id, at)
          VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",

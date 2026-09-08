@@ -429,6 +429,14 @@ fn apart(value: &OsStr) -> impl Iterator<Item = &OsStr> {
         .map(|piece| unsafe { OsStr::from_encoded_bytes_unchecked(piece) })
 }
 
+/// And those pieces as the directories they are, which is what a `PATH` holds
+/// wherever one is written with semicolons — see [`super::entries`], the one
+/// caller, which is the wizard putting a session's own list in front of
+/// somebody.
+pub(crate) fn entries(value: &OsStr) -> Vec<std::path::PathBuf> {
+    apart(value).map(std::path::PathBuf::from).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

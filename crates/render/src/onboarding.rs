@@ -35,10 +35,17 @@
 //! reasoning is.
 //!
 //! **A row is present, absent or neither.** Neither is the Windows sandbox
-//! row, which is not a thing to install there — see [`DependencyState`] — and
-//! an absent one carries whatever the machine said about it, which on Linux is
-//! the failed `bwrap` run's own standard error and nowhere else anything at
-//! all.
+//! row, which is not a thing to install there — see [`DependencyState`]. A
+//! present one carries the file a session would run, and an absent one carries
+//! whatever the machine said about it: the failed `bwrap` run's own standard
+//! error on Linux, and — for a name that is on this machine somewhere a session
+//! cannot use it — where it was seen. See [`Seen`], which is the difference
+//! between a program to install and a `PATH` to fix.
+//!
+//! **And where a session looks is the list itself.** A session's `PATH` is
+//! composed out of the one the server was started with, so which directories
+//! those are is a fact about this machine rather than about the platform — see
+//! [`OnboardingView::path`].
 
 use serde::{Deserialize, Serialize};
 
@@ -62,6 +69,21 @@ pub struct OnboardingView {
 
     /// Every row of the dependencies step, in the order it is drawn.
     pub dependencies: Vec<DependencyView>,
+
+    /// And where a session looks for a program, in the order it looks: the
+    /// `PATH` a session is given, as this server composed it out of its own.
+    ///
+    /// **The list rather than a sentence about one.** What a session searches
+    /// is the server's own `PATH` ahead of the platform's floor — see
+    /// `sandbox::composed` — so which directories those are is a fact about
+    /// *this* machine rather than about the platform, and a tab of written-down
+    /// prose could not say it. A wizard telling somebody where to put a binary
+    /// has to name the directories a session really looks in, which is the
+    /// whole of why this is on the wire.
+    ///
+    /// Verkstead's own directory is not on it, that being the one entry
+    /// holding nothing a human installs.
+    pub path: Vec<String>,
 
     /// And every agent account already on this machine, in the order the
     /// harnesses above are drawn. Empty on a machine that has none, which is
@@ -150,8 +172,27 @@ pub enum Dependency {
 #[serde(tag = "state")]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum DependencyState {
-    /// A session would find it.
-    Present,
+    /// A session would find it, and this is the file it would run.
+    ///
+    /// **Which file it is, is the point.** A distribution's `claude` too old to
+    /// connect, shadowing the current one the human installed under their own
+    /// home, is a row that ticks either way and two entirely different
+    /// programs — so a row that is there says which one it found.
+    Present {
+        /// The path the name resolved to on a session's `PATH`: the entry it
+        /// was found in with the name on the end of it.
+        ///
+        /// Nothing on the sandbox row of the two platforms where a sandbox is
+        /// no program to find — Apple's own, and the identity a Windows session
+        /// runs under. Every other present row has one.
+        at: Option<String>,
+
+        /// And the file that path finally lands on, where it is a link and the
+        /// two are not the same file. Claude's native installer leaves
+        /// `~/.local/bin/claude` pointing into its versions directory, and
+        /// which version is about to run is the half worth reading.
+        target: Option<String>,
+    },
 
     /// It would not.
     Absent {
@@ -161,11 +202,59 @@ pub enum DependencyState {
         /// says so in its own words. Nothing where the answer was simply that
         /// no such program is on the sandbox's `PATH`.
         trouble: Option<String>,
+
+        /// And where the name *was* seen, where it was seen somewhere a session
+        /// cannot use it — see [`Seen`]. Nothing where it is on no `PATH` at
+        /// all, which is a row with nothing to say beyond *install one*.
+        seen: Option<Seen>,
     },
 
     /// It is not a thing on this platform: the Windows sandbox row, where a
     /// session's boundary is an identity rather than something to install.
     NotApplicable,
+}
+
+/// Where a program was seen that a session still cannot run.
+///
+/// The half of *absent* that is worth a sentence. A name is missing in three
+/// ways that are not the same thing to do anything about, and a row saying only
+/// *absent* would send somebody to install what they have already got: a
+/// program on the server's own `PATH` and not on a session's is a shell profile
+/// and a restart rather than an install.
+///
+/// Flat on the wire — `{"seen": "Beyond", "at": "…"}` — the way
+/// [`DependencyState`] is, so the viewer narrows on a field rather than
+/// unwrapping a variant name. The wording is the viewer's own, like the install
+/// commands beside it: what is here is what the machine is, and what to say
+/// about it is the same three sentences on every Verkstead.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "seen")]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Seen {
+    /// On the `PATH` the *server* was started with, in a directory a session's
+    /// own does not hold: an `/opt/foo/bin`, or one of the `/mnt/c/…` entries
+    /// WSL appends. The program is on this machine and no session can open it.
+    Beyond {
+        /// Where it was seen, with the name on the end of it.
+        at: String,
+    },
+
+    /// Where a session looks, and a link into somewhere a session cannot
+    /// reach: an install under `/opt` that no sandbox binds.
+    Leading {
+        /// The link, on a `PATH` entry a session has.
+        at: String,
+
+        /// And what it points at, which is the part a session cannot open.
+        target: String,
+    },
+
+    /// Where a session looks, and a link with nothing at the end of it — what
+    /// an uninstall leaves behind.
+    Dangling {
+        /// The link that leads nowhere.
+        at: String,
+    },
 }
 
 /// One account this machine already has, offered as the Agent Profile it would

@@ -5,13 +5,14 @@ use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Account, Archiving, Closing, Edited, Event, Grilling, Lifecycle, Picked, ProfileFacts,
-    RowState, Switched, Unarchiving, add_companion, adopting, any_archived, archive_conversation,
-    archived, close_conversation, conversation_branch, conversations, create_profile,
-    follow_branch, load_conversation, open_database, register_repo, reinvent_branch, rename_branch,
-    save_brief, set_base_commit, set_grilling_pairing, set_state, settle_naming, show_archived,
-    showing_archived, start_adoption, start_building, start_conversation, start_grilling,
-    start_unnamed_conversation, switch_repo, timeline, unarchive_conversation,
+    Account, AdoptedPullRequest, Archiving, Closing, Edited, Event, Grilling, Lifecycle, Picked,
+    ProfileFacts, RowState, Switched, Unarchiving, add_companion, adopted_pull_request, adopting,
+    any_archived, archive_conversation, archived, close_conversation, conversation_branch,
+    conversations, create_profile, follow_branch, load_conversation, open_database, register_repo,
+    reinvent_branch, rename_branch, save_brief, set_base_commit, set_grilling_pairing, set_state,
+    settle_naming, show_archived, showing_archived, start_adoption, start_building,
+    start_conversation, start_grilling, start_pull_request_adoption, start_unnamed_conversation,
+    switch_repo, timeline, unarchive_conversation,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -812,6 +813,112 @@ async fn a_repo_switch_is_refused_while_a_roadmap_is_being_adopted() {
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
     assert_eq!(conversation.repo.name, "verkstead");
     assert_eq!(adopting(&pool, id).await.unwrap().as_deref(), Some("mvp"));
+}
+
+/// And the same freeze over the other thing a Draft adopts. A pull request is a
+/// number in the repository it was opened in — `#41` names something else in
+/// the next one along, or nothing — so which repository the work is in was
+/// settled by the row that started the Conversation rather than by the human.
+#[tokio::test]
+async fn a_repo_switch_is_refused_while_a_pull_request_is_being_held() {
+    let (_dir, pool) = fresh_pool().await;
+    let verkstead = repo(&pool, "verkstead").await;
+    let askance = repo(&pool, "askance").await;
+
+    let id = start_pull_request_adoption(&pool, verkstead, "amber-kestrel", &rate_limiting())
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        switch_repo(&pool, id, askance).await.unwrap(),
+        Switched::HoldingPullRequest
+    );
+
+    // And nothing moved: the number still names the pull request it was listed
+    // as.
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(conversation.repo.name, "verkstead");
+    assert_eq!(
+        conversation
+            .adopting_pull_request
+            .as_ref()
+            .map(|held| held.number),
+        Some(41),
+    );
+}
+
+/// Starting one to hold a pull request writes down what GitHub said and nothing
+/// else: a Draft like any other, with five facts beside it and no roadmap.
+#[tokio::test]
+async fn a_conversation_started_over_a_pull_request_carries_what_was_listed() {
+    let (_dir, pool) = fresh_pool().await;
+    let verkstead = repo(&pool, "verkstead").await;
+
+    let id = start_pull_request_adoption(&pool, verkstead, "amber-kestrel", &rate_limiting())
+        .await
+        .unwrap()
+        .unwrap();
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(conversation.state, Lifecycle::Draft);
+    assert_eq!(
+        conversation.adopting, None,
+        "a Draft adopts one thing or none",
+    );
+    assert_eq!(
+        conversation.adopting_pull_request.as_ref(),
+        Some(&rate_limiting()),
+    );
+
+    // And read on its own, which is what the view is drawn off.
+    assert_eq!(
+        adopted_pull_request(&pool, id).await.unwrap().as_ref(),
+        Some(&rate_limiting()),
+    );
+
+    // The Brief is empty and the branch is Verkstead's own invention, exactly as
+    // an adoption's is: what the human writes arrives with the create's replay,
+    // and the branch is discarded at the take-up.
+    assert!(!conversation.branch_named);
+    assert_eq!(
+        timeline(&pool, id).await.unwrap().len(),
+        1,
+        "the empty Brief, and nothing else",
+    );
+}
+
+/// An ordinary Conversation, and one adopting a roadmap, are both holding no
+/// pull request — which is what keeps their pages on the shapes they have.
+#[tokio::test]
+async fn a_conversation_started_any_other_way_is_holding_no_pull_request() {
+    let (_dir, pool) = fresh_pool().await;
+    let verkstead = repo(&pool, "verkstead").await;
+
+    let ordinary = start_unnamed_conversation(&pool, verkstead, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+    let roadmap = start_adoption(&pool, verkstead, "quiet-heron", "mvp")
+        .await
+        .unwrap()
+        .unwrap();
+
+    for id in [ordinary, roadmap] {
+        assert_eq!(adopted_pull_request(&pool, id).await.unwrap(), None);
+    }
+}
+
+/// The pull request the tests above are about, as the *Wrap up a pull request*
+/// level listed it.
+fn rate_limiting() -> AdoptedPullRequest {
+    AdoptedPullRequest {
+        number: 41,
+        title: "Rate limiting for the public API".to_owned(),
+        url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+        head: "rate-limiting".to_owned(),
+        base: "main".to_owned(),
+    }
 }
 
 /// The two refusals about the asking rather than about the state.

@@ -161,6 +161,7 @@ const CONVERSATION_KEYED: &[&str] = &[
     "pairing_models",
     "skipped_roles",
     "adoptions",
+    "pull_request_adoptions",
     // The archiving that authorised all of this, and the trim mark under it.
     "archived_conversations",
     "trimmed_conversations",

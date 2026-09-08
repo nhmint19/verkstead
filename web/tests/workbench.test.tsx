@@ -41,6 +41,7 @@ import type {
   PinnedEvent,
   PullRequestDetails,
   RemoteBanner,
+  RepoSwitched,
   RepoView,
   Resolved,
   Resumed,
@@ -53,6 +54,7 @@ import type {
   StageListEvent,
   SteerOpened,
   Submitted,
+  TakenUp,
   TaskListEvent,
   TerminalOpened,
   TerminalsView,
@@ -207,6 +209,10 @@ import { STATE } from "../src/workbench/states";
 import setup from "../src/workbench/Setup.module.css";
 import setupCss from "../src/workbench/Setup.module.css?raw";
 import steerModal from "../src/workbench/Steer.module.css";
+// The band naming the pull request a draft is holding, over the box it writes
+// its Brief in — and the press under it that takes the pull request up.
+import { TAKE_UP_REFUSAL } from "../src/workbench/TakeUp";
+import takeUp from "../src/workbench/TakeUp.module.css";
 // The status button at the foot of the sticky block over the Conversation pane,
 // both ways: the hashed names its line is queried by, and the source of the
 // paint that says when it is in the accent.
@@ -268,6 +274,9 @@ import {
 } from "./serving";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
 import adopting from "./fixtures/conversation-adopting.json" with { type: "json" };
+import holdingPull from "./fixtures/conversation-pull-request.json" with {
+  type: "json",
+};
 import building from "./fixtures/conversation-building.json" with { type: "json" };
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
 import stopped from "./fixtures/conversation-stopped.json" with { type: "json" };
@@ -323,6 +332,10 @@ const ABANDONED = abandoned as AbandonedRepo[];
 /// The conversation that clicking one of those roadmaps made: a draft adopting
 /// `mvp`, on the page shaped for adopting.
 const ADOPTING = adopting as ConversationView;
+
+/// And the one that pressing a free row of the level beside it made: a draft
+/// holding a pull request, on the page shaped for wrapping one up.
+const HOLDING = holdingPull as ConversationView;
 
 /// The one the fixture opens, which is the second row of the sidebar.
 const DRAFTING = SIDEBAR.find((entry) => entry.id === OPEN.id)!;
@@ -2177,7 +2190,7 @@ describe("the adoption page", () => {
     expect(panel.textContent).toContain(ADOPTION.stage!.branch);
   });
 
-  it("offers both profiles, the base commit and one adopt press", async () => {
+  it("offers both profiles, the base commit and one continue press", async () => {
     theAdoption();
     const { container } = mount(`/conversations/${ADOPTING.id}`);
 
@@ -2191,7 +2204,7 @@ describe("the adoption page", () => {
     // repository is settled.
     await openRepo(container);
     expect(screen.getByLabelText("Base branch")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Adopt" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeTruthy();
   });
 
   /// There is nothing to type and nothing to grill: the brief is the stage
@@ -2355,6 +2368,217 @@ describe("the adoption page", () => {
 
       unmount();
     }
+  });
+});
+
+/// And the page a conversation started from the level beside that notice opens
+/// on: the pull request named over a Brief the human still writes, the two
+/// pairings that will run the wrap-up, and none of the three things the pull
+/// request has already settled.
+describe("the page of a draft holding a pull request", () => {
+  /// What the server said the draft is holding — written down when the row was
+  /// pressed rather than read off GitHub again, a re-read being a `gh` call to
+  /// name what is already on the screen.
+  const PULL = HOLDING.adopting_pull_request!;
+
+  /// The workbench with that draft opened instead of the ordinary one. Every
+  /// conversation fixture carries the same id, which is what the sidebar row and
+  /// the URL are shared through.
+  function theHolding(...answers: Parameters<typeof serving>) {
+    return theWorkbench(
+      whenever(`/api/ui/conversations/${HOLDING.id}`, json(HOLDING)),
+      ...answers,
+    );
+  }
+
+  it("names the pull request over the box, with its branches and a way out", async () => {
+    theHolding();
+    const { container } = mount(`/conversations/${HOLDING.id}`);
+
+    const band = await drawn(container, `.${takeUp.held}`);
+    expect(band.textContent).toContain(HOLDING.repo.name);
+    expect(band.textContent).toContain(`#${PULL.number}`);
+    expect(band.textContent).toContain(PULL.title);
+    expect(band.textContent).toContain(PULL.head);
+    expect(band.textContent).toContain(PULL.base);
+
+    expect(band.querySelector("a")!.getAttribute("href")).toBe(PULL.url);
+
+    // And no way to put it down: the conversation was created holding this, and
+    // the way out of one is to close it.
+    expect(
+      screen.queryByRole("button", { name: `Clear #${PULL.number}` }),
+    ).toBeNull();
+  });
+
+  /// The Brief is the human's here, unlike an adopting draft's: a pull request
+  /// brings words of its own, they were put in the box when the row was loaded,
+  /// and what is left there is what the wrap-up reads.
+  it("holds the brief in a field, prefilled as the compose page left it", async () => {
+    theHolding();
+    const { container } = mount(`/conversations/${HOLDING.id}`);
+
+    const field = (await drawn(
+      container,
+      `.${composer.box} textarea`,
+    )) as HTMLTextAreaElement;
+
+    expect(field.value).toBe(briefOf(HOLDING).markdown);
+    expect(field.value).toContain(PULL.title);
+  });
+
+  /// The two pairings the wrap-up runs under, and nothing that the pull request
+  /// has already answered: its branch is the head branch, its base is that
+  /// branch's own head at take-up, and there is no round for a grilling to open.
+  it("offers the two pairings and no branch, base or grilling picker", async () => {
+    theHolding();
+    const { container } = mount(`/conversations/${HOLDING.id}`);
+
+    await openComposer(container);
+
+    await waitFor(() => screen.getByLabelText("Implementation"));
+    expect(screen.getByLabelText("Review")).toBeTruthy();
+    expect(screen.queryByLabelText("Grilling")).toBeNull();
+
+    await openRepo(container);
+
+    // And the repos alongside are still the human's, as they are on every
+    // draft — waited for, the control inside that label arriving with the list
+    // of repos.
+    await waitFor(() => screen.getByLabelText("Works alongside"));
+
+    expect(screen.queryByLabelText("Branch")).toBeNull();
+    expect(screen.queryByLabelText("Base branch")).toBeNull();
+  });
+
+  /// The repo is the pull request's own — `#41` is a number in one repository
+  /// and something else entirely in the next — so the picker reads settled, and
+  /// the refusal behind it is named for what refused it.
+  ///
+  /// That the server gives that refusal is
+  /// `crates/server/tests/conversations.rs`'s; what is asked here is that the
+  /// control says so and that the name has a sentence to be read as.
+  it("refuses a repo move by name", async () => {
+    theHolding();
+    const { container } = mount(`/conversations/${HOLDING.id}`);
+
+    await openRepo(container);
+
+    expect((screen.getByLabelText("Repo") as HTMLSelectElement).disabled).toBe(
+      true,
+    );
+
+    const said: Record<RepoSwitched, string> = REPO_SWITCH_REFUSAL;
+    expect(said.HoldingPullRequest).toContain("pull request");
+  });
+
+  /// The take-up stands where `Start grilling` does on every other draft, and
+  /// never beside it. The work on a pull request is built, and what it is
+  /// waiting for is the wrap-up — so the press that opens a round would be the
+  /// wrong act offered plainly.
+  it("offers the take-up in place of a start grilling or a continue", async () => {
+    theHolding();
+    const { container } = mount(`/conversations/${HOLDING.id}`);
+
+    await drawn(container, `.${takeUp.takingUp}`);
+
+    expect(container.querySelector(`.${composer.startGrilling}`)).toBeNull();
+    expect(container.querySelector(`.${adoption.adoption}`)).toBeNull();
+  });
+
+  /// The press posts to the conversation's own take-up route with nothing in the
+  /// body, for the reason the adoption's own sends nothing: which conversation
+  /// is in the path, and what the branch is now is the repository's own answer —
+  /// read by the server when the button is pressed.
+  it("posts to the conversation's own take-up route, with nothing in the body", async () => {
+    const fetching = theHolding(
+      whenever(
+        `/api/ui/conversations/${HOLDING.id}/take-up`,
+        json("TakenUp" satisfies TakenUp),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${HOLDING.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${takeUp.takingUp} .${takeUp.press}`),
+    );
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${HOLDING.id}/take-up`),
+      ).toEqual({}),
+    );
+
+    // And what a press leaves behind is a conversation that has moved and a
+    // level with one row fewer free in it, so both are read again.
+    await waitFor(() =>
+      expect(
+        askedFor(fetching, `/api/ui/conversations/${HOLDING.id}`),
+      ).toBeGreaterThan(1),
+    );
+  });
+
+  /// A press that was refused says which refusal it was. Every one of them is
+  /// something different to go and do — a profile to choose, a branch somebody
+  /// has pushed to, a branch somebody is standing on — so a single "cannot take
+  /// up" would leave the human guessing which.
+  it("says which refusal a press came back with", async () => {
+    for (const outcome of [
+      "NoImplementationProfile",
+      "NoHeadBranch",
+      "BranchAhead",
+      "BranchDiverged",
+    ] satisfies TakenUp[]) {
+      theHolding(
+        whenever(
+          `/api/ui/conversations/${HOLDING.id}/take-up`,
+          json(outcome satisfies TakenUp),
+          "POST",
+        ),
+      );
+      const { container, unmount } = mount(`/conversations/${HOLDING.id}`);
+
+      fireEvent.click(
+        await drawn(container, `.${takeUp.takingUp} .${takeUp.press}`),
+      );
+
+      await waitFor(() =>
+        expect(
+          container.querySelector(`.${takeUp.takingUp} .${notices.error}`)!
+            .textContent,
+        ).toBe(TAKE_UP_REFUSAL[outcome]),
+      );
+
+      unmount();
+    }
+  });
+
+  /// And the one refusal that carries something with it says the thing it
+  /// carries: git holds one checkout per branch, so *where* the head branch is
+  /// already checked out is the whole of what makes it actionable.
+  it("names the place where the head branch is already checked out", async () => {
+    theHolding(
+      whenever(
+        `/api/ui/conversations/${HOLDING.id}/take-up`,
+        json({
+          CheckedOutElsewhere: { at: "/home/tobi/src/verkstead" },
+        } satisfies TakenUp),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${HOLDING.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${takeUp.takingUp} .${takeUp.press}`),
+    );
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${takeUp.takingUp} .${notices.error}`)!
+          .textContent,
+      ).toContain("/home/tobi/src/verkstead"),
+    );
   });
 });
 

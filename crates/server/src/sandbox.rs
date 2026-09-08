@@ -459,6 +459,22 @@ pub(crate) const OPENCODE_DB_FILE: &str = "opencode.db";
 const OPENCODE_BASH_DEFAULT_TIMEOUT: &str = "OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS";
 const OPENCODE_BASH_DEFAULT_TIMEOUT_MS: &str = "86400000";
 
+/// What tells a Claude session not to update itself.
+///
+/// Claude's native binary keeps its versions under
+/// `~/.local/share/claude/versions/` and writes a new one there when it finds
+/// one, and that directory is read-only inside a session — see [`installs`],
+/// which is what puts it inside at all. So an updater in there is a session
+/// spending its first minutes on a write that cannot land, and a human's own
+/// install is not a session's to move on either: what version the human runs is
+/// theirs to say, and a session that changed it would change what every later
+/// session runs.
+///
+/// Claude's own spelling, which is why it is named here rather than composed:
+/// moving it costs one edit. Nothing but that backend reads it, so nothing else
+/// is told it.
+const DISABLE_AUTOUPDATER: &str = "DISABLE_AUTOUPDATER";
+
 /// Which backend a session is running, in its own environment.
 ///
 /// Set for the Guide alone. Nothing else inside a sandbox needs to know — the
@@ -526,21 +542,20 @@ pub(crate) fn sccache_inside(platform: Platform, ours: &Path, sccache: &Path) ->
 /// the running image is really in where nothing is linked either — see
 /// [`own_directory`] and [`Executable::at`].
 ///
-/// Nothing on the two Unixes is inherited from the server's own environment:
-/// what a session can run should be a fact about the sandbox rather than about
-/// however the unit that started the orchestrator happened to be launched. On
-/// Windows the machine's own half *is* that environment, which is the one place
-/// this gives that up and is argued at [`servers_path`].
+/// The machine's own half is the `PATH` the server itself was started with,
+/// composed for the platform a session runs on — see [`machine_path`], and
+/// [`composed`] for the rules the two Unixes read it by. So the harness a human
+/// installed for themselves is the one a session finds, and the fixed list this
+/// used to be is a floor under what they wrote rather than the whole of it.
 ///
-/// And what the compile server has, for the same reason: it is a fact about
-/// what a sandbox holds rather than about either process.
+/// And what the compile server has, for the same reason it has everything else
+/// a session does: what it can run is what a sandbox holds.
 ///
-/// **On Windows the machine's own half is the server's own `PATH`** rather than
-/// a list written down here — see [`servers_path`], which is where that is
-/// argued — and the two halves are joined by that platform's separator rather
-/// than by a colon, which there is a drive letter's own punctuation. The
-/// separator is this one's own: `crate::PATH_LIST_SEPARATOR` is what a flag is
-/// parsed with, and a session's `PATH` is not a flag.
+/// **On Windows that half is the server's `PATH` as it stands**, and the two
+/// halves are joined by that platform's separator rather than by a colon, which
+/// there is a drive letter's own punctuation. The separator is this one's own:
+/// `crate::PATH_LIST_SEPARATOR` is what a flag is parsed with, and a session's
+/// `PATH` is not a flag.
 pub(crate) fn path(platform: Platform, ours: &Path) -> OsString {
     let mut path = ours.as_os_str().to_owned();
 
@@ -685,25 +700,793 @@ pub(crate) fn taken_back(data_dir: &Path, conversation: i64) {
     granting::remembering::forget(data_dir, conversation);
 }
 
-/// The machine's own half of a session's `PATH`, on the platform whose answer
-/// is a list rather than a lookup — see [`path`], and [`servers_path`] for the
-/// one whose answer is neither.
+/// The machine's own half of a session's `PATH`: the `PATH` the server itself
+/// was started with, composed for `platform` — see [`composed`], which is where
+/// the rules are, and [`path`], which is this behind Verkstead's own directory.
 ///
-/// One list or the other and never both: a NixOS box has nothing under
-/// `/opt/homebrew` and a Mac has nothing under `/run/current-system/sw` unless
-/// somebody put it there.
+/// **One value rather than one per caller**, which is what [`started_with`] is
+/// for: the sandbox builder asks this to say what a session gets, and the
+/// onboarding probes ask it to say what a session would *find*, and two reads
+/// of an environment that had moved in between would be two answers to the one
+/// question.
 ///
 /// Reachable from outside this module because it is what *present* means: the
 /// onboarding probes ask whether a session would find a program, and a session
 /// finds one on this list — see [`crate::onboarding`], which walks it with
 /// [`on_the_path`]. Verkstead's own directory is left off, that being the one
 /// entry holding nothing a human installs.
-pub(crate) fn machine_path(platform: Platform) -> OsString {
+pub fn machine_path(platform: Platform) -> OsString {
+    let started = started_with();
+
+    composed(platform, &started.path, started.home.as_deref())
+}
+
+/// The `PATH` the server itself was started with, as it stands — the value
+/// [`machine_path`] is composed out of, before any of the composing.
+///
+/// **One caller and one question**: the wizard asks where a name was seen when
+/// a session would not find it, and a directory this holds that a session's
+/// `PATH` does not is exactly the answer worth giving — an `/opt/foo/bin` with
+/// a `claude` in it is a program the human has installed and no session can
+/// open. See [`standing`], where that is decided, and [`crate::onboarding`],
+/// which is what draws it.
+///
+/// The same read [`machine_path`] is of, so the raw list and the composed one
+/// cannot come from two different moments — see [`started_with`].
+pub fn servers_path() -> OsString {
+    started_with().path.clone()
+}
+
+/// The directories `path` names, read the way `platform` writes one.
+///
+/// The one place a `PATH` is taken apart for something other than a search: the
+/// wizard puts the list a session gets in front of the human, and a Windows
+/// `PATH` is written with semicolons while the two Unixes' is written with
+/// colons. Both splits are already here — see [`apart`] and [`open::entries`] —
+/// so this is which of them, said as a value rather than as a `cfg`.
+pub(crate) fn entries(platform: Platform, path: &OsStr) -> Vec<PathBuf> {
     match platform {
-        Platform::Linux => OsString::from(LINUX_PATH),
-        Platform::MacOs => OsString::from(APPLE_PATH),
-        Platform::Windows => servers_path(),
+        Platform::Windows => open::entries(path),
+        Platform::Linux | Platform::MacOs => apart(path).map(PathBuf::from).collect(),
     }
+}
+
+/// The machine's own half of a session's `PATH` on `platform`, out of the
+/// `servers` `PATH` and the `home` the server is running under.
+///
+/// A function of the two values rather than of the process, for the reason
+/// [`crate::platform`] resolves its directories that way: every arm, including
+/// the two this runner will never be, is then an ordinary unit test on
+/// whichever machine is running the suite.
+///
+/// **The two Unixes lead with what the server was started with.** A harness
+/// installed the vendor's way lands in `~/.local/bin`, and a machine whose
+/// distribution packages one too old to connect has that install as its only
+/// current one — so the order the human wrote is the order a session searches,
+/// and the fixed list below is a floor under it rather than the whole of it.
+/// Three rules on the way through, each of them about an entry a session could
+/// not use:
+///
+/// - **The first occurrence of a directory wins**, which is how every shell
+///   reads a `PATH` and is what keeps a `/usr/bin` written twice from being
+///   searched twice.
+/// - **An empty entry and a relative one are dropped.** Both mean the working
+///   directory, which is a Worktree here rather than somewhere to go looking
+///   for a program.
+/// - **An entry neither under the server's home nor under the platform's own
+///   floor is dropped**, because a session cannot reach it — see
+///   [`reachable`], which is the one question and is asked of a followed link's
+///   target too: what a sandbox makes readable is [`SYSTEM`] and the per-user
+///   directories the `PATH` itself named, and nothing else. That is what takes
+///   the `/mnt/c/...` entries WSL appends off the end of it, and `/snap/bin`
+///   and an `/opt/something/bin` with them.
+///
+/// Then [`LINUX_PATH`] or [`APPLE_PATH`] under it, deduplicated against what is
+/// already there: a server started from a unit file with a `PATH` of two
+/// entries still reaches the machine's own toolchain. Nothing is added that the
+/// `PATH` did not name and the floor does not hold — a server whose `PATH` has
+/// no `~/.local/bin` gives a session none.
+///
+/// **Windows is the server's own `PATH` and nothing else**, which is what it
+/// has always been — see [`started_with`], where that is argued. There is no
+/// floor to add and nothing to drop: what a session there reaches is decided by
+/// a grant written on the entry rather than by a mount table, so an entry that
+/// is not the human's own is an entry a session finds nothing in.
+pub(crate) fn composed(platform: Platform, servers: &OsStr, home: Option<&Path>) -> OsString {
+    let floor = match platform {
+        Platform::Linux => LINUX_PATH,
+        Platform::MacOs => APPLE_PATH,
+        Platform::Windows => return servers.to_owned(),
+    };
+
+    let named = apart(servers)
+        .filter(|entry| rooted(entry))
+        .filter(|entry| reachable(platform, entry, home));
+
+    let mut kept: Vec<&OsStr> = Vec::new();
+
+    for entry in named.chain(apart(OsStr::new(floor))) {
+        if !kept.iter().any(|held| same(held, entry)) {
+            kept.push(entry);
+        }
+    }
+
+    joined(&kept)
+}
+
+/// Whether a Unix `PATH` entry names somewhere to look at all: a path from the
+/// root, rather than `.` or anything else measured from wherever a session
+/// happens to be standing.
+///
+/// Its own reading rather than [`absolute`]'s, which is the Sandbox
+/// Configuration's and answers for a bind a human typed on any of the three
+/// platforms. What is read here is a Unix `PATH` entry, where a drive letter is
+/// not a place and the root is the one thing a path can start from.
+fn rooted(entry: &OsStr) -> bool {
+    entry.as_encoded_bytes().first() == Some(&b'/')
+}
+
+/// Whether `path` is `directory` or somewhere under it, both read as the Unix
+/// paths they are.
+///
+/// By hand rather than by [`Path::starts_with`] for the reason [`apart`] splits
+/// by hand: these are Unix paths wherever they are being read, and the job that
+/// asks what a Mac would compose is asking about paths written with forward
+/// slashes on whatever platform the suite is running on.
+fn within(path: &OsStr, directory: &OsStr) -> bool {
+    let (path, directory) = (ending(path), ending(directory));
+
+    path == directory
+        || (path.starts_with(directory)
+            && (directory == b"/" || path.get(directory.len()) == Some(&b'/')))
+}
+
+/// And whether two entries name the one directory, which is the same reading
+/// with neither of them holding the other.
+fn same(one: &OsStr, other: &OsStr) -> bool {
+    ending(one) == ending(other)
+}
+
+/// A path as the two comparisons above read one: with the trailing separators
+/// off it, so that an entry written `/usr/bin/` and one written `/usr/bin` are
+/// the one directory. The root keeps its own, having nothing else.
+fn ending(path: &OsStr) -> &[u8] {
+    let mut bytes = path.as_encoded_bytes();
+
+    while bytes.len() > 1 && bytes.ends_with(b"/") {
+        bytes = &bytes[..bytes.len() - 1];
+    }
+
+    bytes
+}
+
+/// And the entries put back together as the one value a session is handed.
+///
+/// By hand for [`apart`]'s reason, and on the same guarantee: an `OsStr`'s
+/// encoding is self-synchronising, so pieces a split on an ASCII byte handed
+/// back join on one too.
+fn joined(entries: &[&OsStr]) -> OsString {
+    let mut path = OsString::new();
+
+    for entry in entries {
+        if !path.is_empty() {
+            path.push(":");
+        }
+
+        path.push(entry);
+    }
+
+    path
+}
+
+/// The directories of `path` a session has to be *granted* rather than merely
+/// told about: the entries under `home`, which is the home of whoever is
+/// running the server.
+///
+/// A directory on a session's `PATH` is worth nothing unless a session can read
+/// it, and the two Unixes both start from nothing. On Linux `~` inside is an
+/// empty directory of Verkstead's own with the account mounted into it, and
+/// what is not bound is not there at all; a Mac's policy denies by default, and
+/// what is not allowed is refused. So a harness installed the vendor's way into
+/// `~/.local/bin` is a name a session finds nothing at until this says
+/// otherwise — see [`reaching`], which is where each of these becomes a
+/// read-only grant like any other, and which both the sandboxes that hand out
+/// a composed `PATH` go through.
+///
+/// **Read-only, and per-user directories the `PATH` itself named.** That is the
+/// whole of the hole: nothing outside the home becomes reachable, an entry
+/// [`composed`] dropped was never on this list to begin with, and a session
+/// that could write into the human's own install would be a session that could
+/// rewrite the harness the next one runs.
+///
+/// **Strictly under the home**, which is the rule rather than a nicety and is
+/// the one the Windows boundary already reads a `PATH` by — see
+/// [`granting::entries`]. An entry that *is* the home would otherwise grant the
+/// human's whole account read-only, and the account is the one thing a boundary
+/// is about.
+///
+/// **A directory that is not there is skipped rather than refused.** A stale
+/// entry in somebody's shell profile is not a reason a session cannot start,
+/// and on Linux a bind of a path with nothing behind it is a sandbox that will
+/// not start at all.
+///
+/// **Nothing at all on Windows**, where the same rule is the boundary's own
+/// rather than the description's: an entry is written on each `PATH` directory
+/// under the human's profile as the container is made, out of the same
+/// description and against the same home — see [`granting::entries`]. One rule,
+/// said where each platform's boundary can hear it.
+pub(crate) fn per_user(platform: Platform, path: &OsStr, home: &Path) -> Vec<PathBuf> {
+    match platform {
+        Platform::Windows => Vec::new(),
+        Platform::Linux | Platform::MacOs => apart(path)
+            .filter(|entry| beneath(entry, home.as_os_str()))
+            .map(PathBuf::from)
+            .filter(|directory| directory.is_dir())
+            .collect(),
+    }
+}
+
+/// Whether `path` is somewhere *under* `directory` rather than the directory
+/// itself — [`within`] less the one case that would hand over a whole home.
+fn beneath(path: &OsStr, directory: &OsStr) -> bool {
+    within(path, directory) && !same(path, directory)
+}
+
+/// Whether a session could reach `path` at all, which is the one question a
+/// `PATH` entry is kept by and a followed link's target is found by.
+///
+/// Two ways to be reachable and no third. **Strictly under the home of whoever
+/// runs the server**, where a grant of Verkstead's own is what puts it inside —
+/// see [`per_user`] for the `PATH`'s own entries and [`installs`] for the
+/// directories a program's links land in, which are the two things that make
+/// this true rather than merely hoped. Or **under the platform's own floor**,
+/// which is the system every sandbox holds already — see [`system`].
+///
+/// Nothing else, and that is the boundary rather than a shortcut: a path this
+/// says nothing of is a path a session opens and finds absent, so a `PATH`
+/// entry naming one is worth nothing and a link leading to one is a program
+/// that would fail to exec.
+///
+/// **Strictly, on the home's side, because that is what the two grants are.**
+/// Neither [`per_user`] nor [`holding`] will hand over a home itself — an entry
+/// that *is* one would grant the human's whole account read-only — so a path
+/// this said was reachable on the home's own account would be a `PATH` entry
+/// kept and never bound, and a name found in it that no session could then run.
+/// One rule read the one way by the three that ask it: [`beneath`] here as
+/// there.
+///
+/// The floor's side stays [`within`], and for the same reason turned around: a
+/// `PATH` entry that *is* `/usr` is a directory bound whole, so a session
+/// really does reach it.
+fn reachable(platform: Platform, path: &OsStr, home: Option<&Path>) -> bool {
+    home.is_some_and(|home| beneath(path, home.as_os_str()))
+        || system(platform)
+            .iter()
+            .any(|directory| within(path, OsStr::new(directory)))
+}
+
+/// The system directories a session on `platform` holds read-only — [`SYSTEM`]
+/// asked of a platform rather than of the build, the way every other arm here
+/// is a value rather than a `cfg`.
+///
+/// Nothing at all on Windows, where no directory is bound and reach is decided
+/// by a grant written on the real path instead — which is why the two callers
+/// return before ever asking this with one.
+fn system(platform: Platform) -> &'static [&'static str] {
+    match platform {
+        Platform::Linux => LINUX_SYSTEM,
+        Platform::MacOs => APPLE_SYSTEM,
+        Platform::Windows => &[],
+    }
+}
+
+/// Every program a session is launched as or reaches for by name: the four
+/// harnesses, then `git` and `gh`.
+///
+/// **One list, and it is every name the wizard has a row for** — see
+/// [`crate::onboarding`], whose rows are drawn from the same names and whose
+/// probe is [`opened`] below, so a row and a session cannot come to disagree
+/// about which file a name is. Adding a name here is the whole of extending the
+/// rule: it is resolved on a session's `PATH`, followed into whatever install
+/// it links into, and granted where that install is the human's own.
+///
+/// The harness names are [`crate::sessions::binary`]'s rather than written
+/// again, because what a row is about is the program a session of that type is
+/// launched as.
+pub(crate) const PROGRAMS: &[&str] = &[
+    crate::sessions::binary(store::AgentType::Claude),
+    crate::sessions::binary(store::AgentType::Codex),
+    crate::sessions::binary(store::AgentType::Grok),
+    crate::sessions::binary(store::AgentType::OpenCode),
+    GIT,
+    GH,
+];
+
+/// The two names on that list that are nobody's harness: the one every session
+/// works with and the one it opens a pull request with.
+pub(crate) const GIT: &str = "git";
+pub(crate) const GH: &str = "gh";
+
+/// Where `program` really is for a session: the file a session would run, or —
+/// where there is none — where the name was seen instead.
+///
+/// **The whole answer, because *absent* is three different things.** A name
+/// nothing on the machine has is somebody's install to do; a name on the
+/// server's own `PATH` in a directory a session's is not composed with is a
+/// shell profile and a restart; a link into somewhere no sandbox binds is an
+/// install to move. The wizard says which of the three a row is — see
+/// [`crate::onboarding`], which is the caller that wants more than *found* —
+/// and [`opened`] beside this is the same walk asked what a grant is made of.
+///
+/// **A name that is a link is followed, and where it lands has to be somewhere
+/// a session can reach** — see [`reachable`], the same question a `PATH` entry
+/// is kept by. Claude's native installer leaves `~/.local/bin/claude` a link
+/// into `~/.local/share/claude/versions/`, which is under the home and is
+/// granted on the program's account — see [`installs`]. A link into
+/// `/opt/claude` is [`Standing::Leading`] and one that leads nowhere at all is
+/// [`Standing::Dangling`]: a session given either would find a path with
+/// nothing behind it, so neither is found.
+///
+/// **A name that resolves to a file where it stands is found as it is.** The
+/// entry it was found in is one [`composed`] already kept, which is that same
+/// question asked of the directory, so there is nothing left to ask of the
+/// file.
+///
+/// **And the search goes on past one that lands nowhere**, rather than stopping
+/// at the first entry holding the name. That is what a session's own `execvp`
+/// does: a link with nothing behind it is `ENOENT`, and `ENOENT` is what makes
+/// a `PATH` search a search. So a stale link in `~/.local/bin` leaves the
+/// distribution's own `claude` further down the list still found — which is
+/// [`on_the_path`]'s walk with one more thing asked of each candidate, and is
+/// why this does not simply call it. What the walk passed over is what is said
+/// when nothing further answers, the first such entry rather than the last:
+/// where a session looks is what somebody is going to go and look at.
+///
+/// **`servers` is the `PATH` the server itself was started with**, and it is
+/// read only once nothing on a session's own answered — see [`beyond`]. `None`
+/// where the caller is not asking that question, which is every caller but the
+/// wizard: a grant is made for a program a session can run.
+///
+/// **Windows follows nothing here.** What a session reaches on that platform is
+/// granted on the real path rather than bound, and what a name means there is
+/// `%PATHEXT%`'s — see [`on_the_path`], which is the whole of the resolving
+/// there. A session's `PATH` is the server's own besides, so there is no entry
+/// for a name to be seen beyond.
+///
+/// Blocks: a handful of `stat` calls, and a `readlink` per hop.
+pub(crate) fn standing(
+    platform: Platform,
+    program: &str,
+    path: Option<&OsStr>,
+    servers: Option<&OsStr>,
+    pathext: Option<&OsStr>,
+    home: Option<&Path>,
+) -> Standing {
+    if platform == Platform::Windows {
+        return match on_the_path(platform, program, path, pathext) {
+            Some(at) => Standing::Found {
+                landed: at.clone(),
+                at,
+                through: Vec::new(),
+            },
+            None => Standing::Nowhere,
+        };
+    }
+
+    // What the walk passed over, kept in case nothing further answers.
+    let mut passed: Option<Standing> = None;
+
+    for entry in path.into_iter().flat_map(apart) {
+        let at = Path::new(entry).join(program);
+
+        match landing(&at) {
+            // Nothing of that name here: the next entry is where the search
+            // goes, exactly as an `execvp` would.
+            Landing::Nothing => {}
+
+            // A file where it stands, which is nothing further to ask: the
+            // entry it was found in is one the composing already kept.
+            Landing::File { landed, through } if landed == at => {
+                return Standing::Found {
+                    at,
+                    landed,
+                    through,
+                };
+            }
+
+            Landing::File { landed, through } => {
+                // Every hop is a path a session opens, so every hop has to be
+                // one a session can reach: a chain whose middle link sits
+                // somewhere no sandbox binds fails to exec exactly as one whose
+                // end does. The first out of reach is what is said about it,
+                // that being where the trail goes cold.
+                let out_of_reach = through
+                    .iter()
+                    .chain(std::iter::once(&landed))
+                    .find(|opened| !reachable(platform, opened.as_os_str(), home))
+                    .cloned();
+
+                match out_of_reach {
+                    None => {
+                        return Standing::Found {
+                            at,
+                            landed,
+                            through,
+                        };
+                    }
+                    Some(target) => {
+                        passed.get_or_insert(Standing::Leading { at, target });
+                    }
+                }
+            }
+
+            Landing::Dangling => {
+                passed.get_or_insert(Standing::Dangling { at });
+            }
+        }
+    }
+
+    passed.unwrap_or_else(|| beyond(program, path, servers))
+}
+
+/// Where `program` stands for a session, which is one of four things and not
+/// simply there or not — see [`standing`], the one thing that says which.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Standing {
+    /// A session finds it: the entry the name resolved to, and the file the
+    /// links from it land on — the same path where the name is no link.
+    Found {
+        /// Where the name resolved, on a `PATH` entry a session gets.
+        at: PathBuf,
+
+        /// And the file that is really run, which is what a grant is made of
+        /// and what a version number is read off.
+        landed: PathBuf,
+
+        /// And every link's target walked through on the way between the two,
+        /// `at` and `landed` neither of them among it — empty on all but a
+        /// chain of more than one link. See [`Landing::File`], whose own field
+        /// this is, and [`installs`], which grants each of these a directory
+        /// the way it grants `landed` one.
+        ///
+        /// Nothing the wizard draws: what a row says is where the name resolved
+        /// and what it runs, and the hops between are a fact about what a
+        /// session must be able to open rather than about which program it got.
+        through: Vec<PathBuf>,
+    },
+
+    /// The name is on the `PATH` the *server* was started with, in a directory
+    /// the composing dropped: an `/opt/foo/bin`, or one of the `/mnt/c/…`
+    /// entries WSL appends. The program is installed and no session is told
+    /// about the directory it is in.
+    Beyond { at: PathBuf },
+
+    /// The name is where a session looks and is a link into somewhere a session
+    /// cannot reach — an install under `/opt` that no sandbox binds.
+    Leading { at: PathBuf, target: PathBuf },
+
+    /// And a link with nothing at the end of it, which is what an uninstall
+    /// leaves behind.
+    Dangling { at: PathBuf },
+
+    /// On no `PATH` at all: there is nothing to say about it but that it is not
+    /// there.
+    Nowhere,
+}
+
+/// Where `program` was seen on the `PATH` the server itself was started with,
+/// in a directory a session's own does not hold.
+///
+/// The last thing [`standing`] asks, and only because *absent* on its own sends
+/// somebody to install what they have already got. What a session gets is
+/// [`composed`] out of this list, and the entries it dropped are the ones a
+/// session could not reach — so a `claude` in one of them is a program on this
+/// machine that no session can open, and saying where it is, is saying what to
+/// do about it.
+///
+/// **The entries a session's `PATH` already holds are skipped**, they having
+/// been walked already: what is left is what the composing took out.
+fn beyond(program: &str, path: Option<&OsStr>, servers: Option<&OsStr>) -> Standing {
+    let held = |entry: &OsStr| {
+        path.into_iter()
+            .flat_map(apart)
+            .any(|kept| same(kept, entry))
+    };
+
+    servers
+        .into_iter()
+        .flat_map(apart)
+        .filter(|entry| !held(entry))
+        .map(|entry| Path::new(entry).join(program))
+        .find(|at| matches!(landing(at), Landing::File { .. }))
+        .map_or(Standing::Nowhere, |at| Standing::Beyond { at })
+}
+
+/// Every file a session opens to run `program`, in the order it opens them —
+/// each link's target on the way, and the file at the end of them last. Empty
+/// where a session would not find it at all: [`standing`] asked the shorter
+/// question.
+///
+/// The one every caller that is making a grant asks — see [`installs`] — a
+/// directory being bound for a program a session runs rather than for one it
+/// was going to be told about.
+///
+/// **The whole chain rather than the file at the end of it.** A chain of links
+/// is resolved by whoever runs the program, so a link in the middle of one is a
+/// path a session opens exactly as the file at the end is: a session granted
+/// the file and not the link that points at it finds an `ENOENT` where a
+/// harness was, however plainly the two ends are there. The name a session
+/// resolved is not among these — the directory *it* is in is a `PATH` entry,
+/// which is [`per_user`]'s to grant.
+pub(crate) fn opened(
+    platform: Platform,
+    program: &str,
+    path: Option<&OsStr>,
+    pathext: Option<&OsStr>,
+    home: Option<&Path>,
+) -> Vec<PathBuf> {
+    match standing(platform, program, path, None, pathext, home) {
+        Standing::Found {
+            landed,
+            mut through,
+            ..
+        } => {
+            through.push(landed);
+
+            through
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// What `program` is at the end of its symlink chain: a file, a chain with
+/// nothing at the end of it, or no such name at all.
+///
+/// The three rather than an `Option`, because the middle one is what a row has
+/// something to say about — a `~/.local/bin/claude` left behind by an install
+/// that has gone is not the same thing as a machine with no Claude Code on it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Landing {
+    /// No such name: no link and no file.
+    Nothing,
+
+    /// A file, at the end of a chain of none or more links.
+    File {
+        /// The file itself.
+        landed: PathBuf,
+
+        /// And every link's target on the way to it, in the order they were
+        /// followed, `landed` not among them — empty where the name was a file
+        /// where it stood, and empty again where one link was the whole of it.
+        ///
+        /// **What a session has to be able to open besides the file.** A chain
+        /// is resolved by whoever runs the program rather than by whoever found
+        /// it, so a middle link is a path a session opens exactly as the file at
+        /// the end is: a session given the two ends and not the middle finds an
+        /// `ENOENT` where a harness was. See [`installs`], which grants the
+        /// directory each of these sits in.
+        through: Vec<PathBuf>,
+    },
+
+    /// A chain of links with nothing at the end of it — or one that never ends,
+    /// which is the same thing to whoever tries to run it.
+    Dangling,
+}
+
+/// Following that chain, the way the kernel follows one.
+///
+/// The chain rather than [`std::fs::canonicalize`], which would resolve every
+/// directory above the file as well: what is being followed is the link an
+/// installer left, and a home reached through a symlink of the machine's own —
+/// which is every Mac's `/var` and every temporary directory under it — would
+/// otherwise come back spelled a way the home it is measured against is not.
+///
+/// A relative target is read against the directory the link is in, the way the
+/// kernel reads one, and [`HOPS`] is where a chain that never ends stops.
+///
+/// **What that join comes to is normalised before anything reads it** — see
+/// [`normalised`]. A target of `../../opt/claude/claude` joined onto
+/// `~/bin` spells a path that begins with the home and ends up outside it, and
+/// what asks whether a target is under the home is [`within`], which compares
+/// the name rather than the place. So the `..` comes out here, where the join
+/// that put it in is: an unnormalised name would be read as the human's own and
+/// bound on that account, which is the one thing nothing outside the home is to
+/// be.
+fn landing(program: &Path) -> Landing {
+    let mut at = program.to_owned();
+
+    // Every target walked through on the way, the one landed on taken off the
+    // end below: what a session opens to reach the file is the file and each of
+    // these — see [`Landing::File`].
+    let mut through: Vec<PathBuf> = Vec::new();
+
+    for hop in 0..HOPS {
+        let Ok(target) = std::fs::read_link(&at) else {
+            // Not a link, which is the end of the chain: a file is what was
+            // being looked for, and anything else is a name with nothing
+            // runnable at it — nothing at all where no link was followed to get
+            // here, and a chain that led nowhere where one was.
+            return match (at.is_file(), hop) {
+                (true, _) => {
+                    through.pop();
+
+                    Landing::File {
+                        landed: at,
+                        through,
+                    }
+                }
+                (false, 0) => Landing::Nothing,
+                (false, _) => Landing::Dangling,
+            };
+        };
+
+        at = match (target.is_absolute(), at.parent()) {
+            (true, _) => normalised(&target),
+            (false, Some(directory)) => normalised(&directory.join(target)),
+            (false, None) => return Landing::Dangling,
+        };
+
+        through.push(at.clone());
+    }
+
+    Landing::Dangling
+}
+
+/// `path` with the `.` and `..` written in it taken out of the name.
+///
+/// What a link's target is spelled as, once it has been joined onto the
+/// directory the link sits in — see [`landing`], the one caller. A `..` is the
+/// ordinary way an installer writes a target, `npm` leaving
+/// `~/.npm-global/bin/codex` pointing at `../lib/node_modules/…`, and the name
+/// that join makes is what [`within`] and [`beneath`] are then asked about.
+/// Those two read the name rather than the place, so a `..` in it is a path
+/// that reads as under one directory and is under another.
+///
+/// **The name and not the machine**, which is [`landing`]'s own rule and the
+/// reason [`std::fs::canonicalize`] is no part of this: what a target has to be
+/// measured against is a home spelled the way the server was told it, and
+/// resolving the directories above the file would spell it the other way. What
+/// that costs is a `..` climbing out through a directory that is itself a link,
+/// where the kernel would land somewhere else than the name says — a path
+/// nothing here has ever followed, every directory on this walk being one an
+/// installer wrote rather than one a session opens.
+///
+/// A `..` at the root stays at the root, having nowhere above it to go, which
+/// is what the kernel does with one.
+fn normalised(path: &Path) -> PathBuf {
+    let mut normalised = PathBuf::new();
+
+    for piece in path.components() {
+        match piece {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalised.pop();
+            }
+            piece => normalised.push(piece),
+        }
+    }
+
+    normalised
+}
+
+/// How many links are followed before a chain is one nothing is at the end of.
+///
+/// The kernel's own limit, so that what this gives up on is what an `exec`
+/// would have given up on: a chain longer than this is `ELOOP` to whoever runs
+/// the program, which is a program that is not there.
+const HOPS: usize = 40;
+
+/// The directories a session has to be granted on a *program's* account: for
+/// every name on [`PROGRAMS`], the directory holding each file that name is
+/// opened through, where that is under the home of whoever runs the server.
+///
+/// [`per_user`]'s sibling and the other half of the same hole. That one grants
+/// the directories a session's `PATH` names, which is `~/.local/bin`; this one
+/// grants what the program in there is a link *into*, which for Claude's native
+/// install is `~/.local/share/claude/versions/X` — a directory no `PATH` names
+/// and one a session without it finds a dangling link at.
+///
+/// **Every hop of the chain and not only the end of it** — see [`opened`],
+/// which is what walks one. A link is resolved by whoever runs the program, so
+/// a chain of two needs the directory the middle link sits in as much as it
+/// needs the one holding the file: a session granted the two ends and not the
+/// middle would find an `ENOENT` where the wizard's row said a harness was, the
+/// row having probed out here where the whole chain is there.
+///
+/// **The directory holding each file and nothing above it.** A version's own
+/// directory rather than the versions directory it is in, and an install's own
+/// rather than the `~/.local/share` half the machine keeps everything else in
+/// too: what a session needs is the file it runs and what sits beside it.
+///
+/// **Read-only, strictly under the home, and only what [`opened`] found.** A
+/// chain leading anywhere else is not on this list at all — [`standing`] finds
+/// no such name in the first place, whichever hop of it left the home — which
+/// is what keeps the hole where [`per_user`] left it: nothing outside the home
+/// is bound on a link's account. A directory the `PATH` itself already names is
+/// not on it either: that one is [`per_user`]'s, and a path said twice in a
+/// description is a path said once.
+///
+/// **Nothing at all on Windows**, for [`per_user`]'s reason: the same rule is
+/// the boundary's own there, written on the real path as the container is made.
+pub(crate) fn installs(platform: Platform, path: &OsStr, home: &Path) -> Vec<PathBuf> {
+    let mut directories: Vec<PathBuf> = Vec::new();
+
+    if platform == Platform::Windows {
+        return directories;
+    }
+
+    for program in PROGRAMS {
+        for landed in opened(platform, program, Some(path), None, Some(home)) {
+            let Some(directory) = holding(&landed, home) else {
+                continue;
+            };
+
+            if !apart(path).any(|entry| same(entry, directory.as_os_str()))
+                && !directories.contains(&directory)
+            {
+                directories.push(directory);
+            }
+        }
+    }
+
+    directories
+}
+
+/// The directory holding `landed` where that is a directory to grant: strictly
+/// under `home`, for [`per_user`]'s reason — a file the human keeps in their
+/// home itself would otherwise grant their whole account read-only.
+///
+/// `None` where it is anywhere else, which is a file a session reaches through
+/// the floor already or not at all.
+fn holding(landed: &Path, home: &Path) -> Option<PathBuf> {
+    let directory = landed.parent()?;
+
+    beneath(directory.as_os_str(), home.as_os_str()).then(|| directory.to_owned())
+}
+
+/// Everything `path` names that a sandbox has to be *told* about as well as
+/// hand out, put on `surface` read-only: the per-user entries of the list
+/// itself, and the installs the programs on it link into — see [`per_user`] and
+/// [`installs`], which are the two halves and where each one's rule and bounds
+/// are.
+///
+/// **Said once because two sandboxes hand out the same `PATH`.** A session's is
+/// one and the compile server outside every session is the other — see
+/// [`Sandbox::surface`] and [`crate::build_cache::BuildCache::compiling`] — and
+/// both are given [`path`]'s answer, which leads with the human's own
+/// directories. A list handed out without these is a sandbox told to look in
+/// directories that are not inside it, which is not what either of them means
+/// by a `PATH`.
+///
+/// **The `PATH` that was handed out rather than one composed again beside it.**
+/// Both callers read the one value into this and set the same one on the
+/// environment, because what a sandbox is granted has to be the directories it
+/// was told about: two composings would be two answers to the one question.
+///
+/// **Where in the description it goes is the caller's**, the order being what a
+/// description says — see [`Surface`]. Both put it after the empty HOME, that
+/// directory being one these sit under on a Linux machine, and ahead of
+/// whatever each of them says later.
+pub(crate) fn reaching(platform: Platform, path: &OsStr, home: &Path, surface: &mut Surface) {
+    for directory in per_user(platform, path, home) {
+        surface.own(directory, Reach::ReadOnly);
+    }
+
+    for directory in installs(platform, path, home) {
+        surface.own(directory, Reach::ReadOnly);
+    }
+}
+
+/// The home of whoever is running the server, as it was read at startup, or
+/// `None` on a machine that names none.
+///
+/// [`started_with`]'s other half, reachable for the one caller that has no
+/// Conversation to take a home off: the compile server is made once, outside
+/// every session, where a session's description carries the same value by way
+/// of [`Homes`] — see [`Sandbox::servers_home`]. One read either way, so the
+/// two cannot come to disagree about whose home a `PATH` entry is under.
+pub(crate) fn servers_home() -> Option<&'static Path> {
+    started_with().home.as_deref()
 }
 
 /// Where `program` is on `path`, read the way `platform` reads a name, or
@@ -757,8 +1540,16 @@ fn apart(path: &OsStr) -> impl Iterator<Item = &OsStr> {
         .map(|piece| unsafe { OsStr::from_encoded_bytes_unchecked(piece) })
 }
 
-/// And what it is on Windows, which is not a list here at all: the `PATH` the
-/// server itself was started with.
+/// What the server itself was started with, as far as a session's `PATH` goes:
+/// its own `PATH`, and the home it is running under.
+///
+/// **Read once, at the first ask, and held for the rest of the run.** Every
+/// answer about what a session can run is composed out of this — see
+/// [`machine_path`], whose two callers are the sandbox builder and the
+/// onboarding probes — and the wizard's whole rule is *present means a session
+/// would find it*, which two readings of a `PATH` that had moved in between
+/// could not both be. A human who changes their `PATH` restarts the server,
+/// which is what the wizard's own instructions say.
 ///
 /// **There is no `WINDOWS_PATH` beside [`LINUX_PATH`] and [`APPLE_PATH`]**, and
 /// that is the decision rather than an omission. Those two are lists of where a
@@ -767,18 +1558,51 @@ fn apart(path: &OsStr) -> impl Iterator<Item = &OsStr> {
 /// started the orchestrator was handed. A Windows machine has no such list:
 /// where `git`, `node` and an agent live there is wherever their installers put
 /// them and wherever the human added, which is written down in one place and
-/// that place is the machine's `PATH`. So a session gets that, behind
-/// Verkstead's own directory.
+/// that place is the machine's `PATH`. So a session there gets that and nothing
+/// beside it, behind Verkstead's own directory.
 ///
-/// What it costs is the one thing the other two arms buy: a session's `PATH` is
-/// a fact about how the server was launched. What it does not cost is reach: a
-/// directory on this list is somewhere a session looks for a program rather
-/// than somewhere it may read, and the boundary grants only those of them that
-/// are under the human's own profile — see [`granting::entries`], which is
-/// where that rule is.
-fn servers_path() -> OsString {
-    std::env::var_os("PATH").unwrap_or_default()
+/// What it costs is a session's `PATH` being a fact about how the server was
+/// launched, which is now what the two Unixes buy too — the whole point being
+/// that the harness the human prefers is the one a session finds. What it does
+/// not cost is reach: a directory on this list is somewhere a session looks for
+/// a program rather than somewhere it may read, and only those under the
+/// server's own home are made readable — see [`granting::entries`], which is
+/// where that rule is on the platform that already had it.
+///
+/// The home beside it because that is what the rule above is measured against,
+/// and because it is the one other thing about the server's environment a
+/// composed `PATH` turns on: read here rather than off [`Homes`] so that the
+/// two callers share the one read, and read the platform's own way — see
+/// [`crate::platform::home_dir`].
+fn started_with() -> &'static StartedWith {
+    static STARTED_WITH: std::sync::OnceLock<StartedWith> = std::sync::OnceLock::new();
+
+    STARTED_WITH.get_or_init(|| StartedWith {
+        path: std::env::var_os(PATH).unwrap_or_default(),
+        home: crate::platform::home_dir(
+            Platform::HERE,
+            &crate::platform::Environment::of_the_process(),
+        ),
+    })
 }
+
+/// The two values that read is of — see [`started_with`], the one thing that
+/// makes one.
+#[derive(Debug)]
+struct StartedWith {
+    /// `PATH`, as the server was handed it.
+    path: OsString,
+
+    /// And the home of whoever is running the server, or `None` on a machine
+    /// that names none — which is a machine whose `PATH` keeps only what the
+    /// platform floor holds, there being nowhere for a per-user entry to be
+    /// under.
+    home: Option<PathBuf>,
+}
+
+/// The name that read is under, which is the name a session's own is set under
+/// too — see [`Sandbox::command`].
+const PATH: &str = "PATH";
 
 /// What that is on Linux: the system profile, then the Nix default profile,
 /// then the paths a non-NixOS `/usr` would put things in.
@@ -2436,10 +3260,11 @@ pub struct Sandbox {
     /// And the home of whoever is running the server, which is the human's own
     /// profile on the platform that has one.
     ///
-    /// What the `PATH` rule is measured against — see
-    /// [`granting::entries`]: a per-user tool install is readable by a
-    /// container only where it has been granted, and which of a session's
-    /// `PATH` entries are per-user is which of them are under this.
+    /// What the `PATH` rule is measured against on all three — see [`per_user`]
+    /// for the two whose description carries the grant and
+    /// [`granting::entries`] for the one whose boundary writes it: a per-user
+    /// tool install is reachable only where it has been granted, and which of a
+    /// session's `PATH` entries are per-user is which of them are under this.
     servers_home: PathBuf,
 }
 
@@ -2733,6 +3558,13 @@ impl Sandbox {
     /// after the account, and why the handoff directory is after the temporary
     /// filesystem that would otherwise be over it.
     fn surface<S: AsRef<OsStr>>(&self, argv: &[S]) -> Surface {
+        // What a session searches for a program in, said once: Verkstead's own
+        // directory and then the machine's own half of it — see [`path`]. Read
+        // twice below, and both readings are of this one value: what a session
+        // is granted has to be the directories a session is told about, and two
+        // composings would be two answers to the one question.
+        let session_path = path(self.platform, self.verkstead.bin());
+
         // The floor every sandbox of Verkstead's stands on — see
         // [`on_the_machine`], which is where the compile server outside every
         // session gets the same one.
@@ -2755,6 +3587,31 @@ impl Sandbox {
                 surface.made(made);
             }
         }
+
+        // And everything that `PATH` names which a session has to be granted as
+        // well as told about: the per-user directories it is to look for a
+        // program in, and the installs the programs in them link into — see
+        // [`reaching`], which is where the rule and its bounds are and which the
+        // compile server outside every session goes through too. What is on this
+        // `PATH` is the human's own order, so what a session finds is the
+        // harness they actually installed rather than whichever one the
+        // machine's packages hold.
+        //
+        // **The `PATH` a session gets rather than one composed again beside
+        // it**, which is what makes this the entries a session really searches:
+        // the value said below is the value read here.
+        //
+        // **After the empty HOME**, because on Linux that HOME *is* the
+        // server's own home and these are inside it: a bind said before it is
+        // one the directory made over it takes away again. And ahead of the
+        // account and of what covers the account's own skills, so that what is
+        // said later still stands over them.
+        reaching(
+            self.platform,
+            &session_path,
+            &self.servers_home,
+            &mut surface,
+        );
 
         surface
             .own(&self.worktree, Reach::ReadWrite)
@@ -2873,7 +3730,7 @@ impl Sandbox {
 
         surface
             .set("HOME", self.home.path())
-            .set("PATH", path(self.platform, self.verkstead.bin()))
+            .set(PATH, &session_path)
             // Which shell is inside, for the same reason `PATH` is said here:
             // the environment is cleared, so a tool that shells out reaches for
             // whatever this holds — and with nothing in it, it would fall back
@@ -2913,6 +3770,19 @@ impl Sandbox {
         // host's profile the moment it starts.
         if self.shell.is_some() {
             surface.set(NIXOS_ENVIRONMENT_DONE, "1");
+        }
+
+        // What a Claude session is told about itself: that it is not to update
+        // the install it is running. The native binary writes a new version
+        // into `~/.local/share/claude/versions/`, which is read-only inside —
+        // see [`installs`], which is what puts it inside — so an updater in
+        // there is a session spending its first minutes failing at something
+        // nobody asked it to do, and the install is the human's own besides.
+        // Every Claude session wherever `claude` was found, rather than only
+        // the ones that found the human's: a session is never what moves an
+        // install on, whosever it is.
+        if matches!(self.account, store::Account::Claude { .. }) {
+            surface.set(DISABLE_AUTOUPDATER, "1");
         }
 
         // The two an OpenCode session is told about itself: where its store
@@ -3202,6 +4072,23 @@ fn nix(dir: &Path, args: &[&str]) -> Option<String> {
 mod tests {
     use super::*;
 
+    /// The file a session would run `program` from, or nothing at all.
+    ///
+    /// The last of what [`opened`] walks, which is the half of that answer
+    /// these read by: what a grant is made of is the whole chain, and what a
+    /// row says and a session starts is the file at the end of it.
+    fn install(
+        platform: Platform,
+        program: &str,
+        path: Option<&OsStr>,
+        pathext: Option<&OsStr>,
+        home: Option<&Path>,
+    ) -> Option<PathBuf> {
+        opened(platform, program, path, pathext, home)
+            .last()
+            .cloned()
+    }
+
     /// An executable that is really there, wherever a test's temporary
     /// directory is.
     fn executable(bin: &Path, name: &str, data_dir: &Path) -> Option<Executable> {
@@ -3333,15 +4220,16 @@ mod tests {
     }
 
     /// What a session's `PATH` holds after the directory of Verkstead's own,
-    /// which is where a Windows machine differs from the other two in kind: the
-    /// two Unixes are told a list written down here, and Windows is handed the
-    /// `PATH` the server itself was started with — see [`servers_path`].
+    /// which is where a Windows machine differs from the other two in kind:
+    /// the two Unixes compose the server's own `PATH` and Windows is handed it
+    /// as it stands — see [`composed`], and [`started_with`] for the one read
+    /// both of them are of.
     #[test]
     fn a_windows_session_is_given_the_machines_own_path_rather_than_a_list() {
         let ours = Path::new("C:/verkstead/bin");
         let inside = path(Platform::Windows, ours);
         let inside = inside.to_string_lossy();
-        let servers = servers_path();
+        let servers = &started_with().path;
 
         assert_eq!(
             inside.split_once(';'),
@@ -3351,8 +4239,853 @@ mod tests {
             )),
             "the whole of it is Verkstead's own directory, a semicolon because a \
              colon on this platform is a drive letter's own, and then the `PATH` \
-             the server itself was started with — there is no list of Windows \
-             paths written down anywhere"
+             the server itself was started with — nothing is composed on this \
+             platform and nothing is written down for it"
+        );
+    }
+
+    /// And what a Windows session is handed is that `PATH` entry for entry,
+    /// whatever is on it: an entry under nothing this machine would call a
+    /// system directory is still an entry, because what a session there may
+    /// read is a grant written on the directory rather than a mount table — see
+    /// [`granting::entries`].
+    #[test]
+    fn a_windows_session_loses_no_entry_of_the_servers_own_path() {
+        let servers =
+            OsString::from(r"C:\Users\you\AppData\Roaming\npm;C:\Windows\System32;D:\odd");
+
+        assert_eq!(
+            composed(
+                Platform::Windows,
+                &servers,
+                Some(Path::new(r"C:\Users\you"))
+            ),
+            servers,
+            "the composing is the two Unixes', and this platform's answer is the \
+             one it has always been"
+        );
+    }
+
+    /// The composing the other two do: what the server was started with, in the
+    /// order it was written, and the platform's own list under it as a floor.
+    ///
+    /// The whole of the shape in one case — a per-user directory first, a
+    /// system one after it, an entry a session could not reach at all, that
+    /// system one again, and then the two an entry may not be.
+    #[test]
+    fn a_session_leads_with_the_servers_own_path_and_stands_on_the_platforms() {
+        let home = Path::new("/home/you");
+        let servers = OsString::from("/home/you/.local/bin:/usr/bin:/mnt/c/Windows:/usr/bin::.");
+
+        let composed = composed(Platform::Linux, &servers, Some(home));
+        let entries: Vec<&OsStr> = apart(&composed).collect();
+
+        let floor: Vec<&OsStr> = apart(OsStr::new(LINUX_PATH))
+            .filter(|entry| *entry != OsStr::new("/usr/bin"))
+            .collect();
+
+        assert_eq!(
+            entries,
+            ["/home/you/.local/bin", "/usr/bin"]
+                .iter()
+                .map(OsStr::new)
+                .chain(floor)
+                .collect::<Vec<_>>(),
+            "the human's own directory first because that is where they wrote \
+             it, `/usr/bin` once however many times it was written, the floor \
+             under both — and nothing of `/mnt/c/Windows`, the empty entry or \
+             the relative one, none of which a session could look in"
+        );
+    }
+
+    /// And what a Mac composes, which is the same rules over the other two
+    /// lists: Homebrew's prefix is under the Apple floor and reachable, and
+    /// `/opt/anything-else` is under nothing and is not.
+    #[test]
+    fn a_mac_keeps_what_its_own_floor_reaches_and_drops_what_it_does_not() {
+        let home = Path::new("/Users/you");
+        let servers =
+            OsString::from("/Users/you/.local/bin:/opt/homebrew/bin:/opt/elsewhere/bin:/usr/bin");
+
+        let composed = composed(Platform::MacOs, &servers, Some(home));
+        let entries: Vec<&OsStr> = apart(&composed).collect();
+
+        assert_eq!(
+            entries.first(),
+            Some(&OsStr::new("/Users/you/.local/bin")),
+            "the human's own install leads, as on Linux"
+        );
+        assert!(
+            entries.contains(&OsStr::new("/opt/homebrew/bin")),
+            "and Homebrew's prefix is under the Apple floor, so a session \
+             reaches it: {entries:?}"
+        );
+        assert!(
+            !entries.contains(&OsStr::new("/opt/elsewhere/bin")),
+            "and `/opt` itself is not, so nothing else under it is: {entries:?}"
+        );
+
+        for entry in apart(OsStr::new(APPLE_PATH)) {
+            assert!(
+                entries.contains(&entry),
+                "and the whole of the Apple floor is still under it, {entry:?} \
+                 among the rest: {entries:?}"
+            );
+        }
+    }
+
+    /// A machine that names no home keeps what the floor reaches and nothing
+    /// else — there being nowhere for a per-user entry to be under.
+    #[test]
+    fn a_server_with_no_home_keeps_the_floor_alone() {
+        let servers = OsString::from("/home/you/.local/bin:/usr/local/bin");
+
+        let composed = composed(Platform::Linux, &servers, None);
+        let entries: Vec<&OsStr> = apart(&composed).collect();
+
+        assert!(
+            !entries.contains(&OsStr::new("/home/you/.local/bin")),
+            "there is no home for that to be under, so a session could not reach \
+             it: {entries:?}"
+        );
+        assert_eq!(
+            entries
+                .iter()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>(),
+            apart(OsStr::new(LINUX_PATH)).collect::<std::collections::BTreeSet<_>>(),
+            "and what is left is the floor and nothing beside it — `/usr/local/bin` \
+             is on that floor, so naming it moved it up rather than added it"
+        );
+    }
+
+    /// And a `PATH` that named nothing at all is still the machine's own
+    /// toolchain: the floor is what a session stands on however the unit that
+    /// started the server was launched.
+    #[test]
+    fn a_server_started_with_no_path_still_reaches_the_machines_own() {
+        for (platform, floor) in [(Platform::Linux, LINUX_PATH), (Platform::MacOs, APPLE_PATH)] {
+            assert_eq!(
+                composed(platform, OsStr::new(""), Some(Path::new("/home/you"))),
+                OsString::from(floor),
+                "on {platform:?} an empty `PATH` composes to the floor and to \
+                 nothing else"
+            );
+        }
+    }
+
+    /// An entry written with a trailing separator and one written without are
+    /// the one directory, on the way in and against the floor alike.
+    #[test]
+    fn an_entry_is_one_directory_however_it_was_written() {
+        let composed = composed(
+            Platform::Linux,
+            OsStr::new("/usr/bin/:/home/you/bin//:/home/you/bin"),
+            Some(Path::new("/home/you/")),
+        );
+        let entries: Vec<&OsStr> = apart(&composed).collect();
+
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| within(entry, OsStr::new("/usr/bin")))
+                .count(),
+            1,
+            "`/usr/bin/` and the floor's `/usr/bin` are the one entry: {entries:?}"
+        );
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| within(entry, OsStr::new("/home/you/bin")))
+                .count(),
+            1,
+            "and so are the two spellings of the human's own: {entries:?}"
+        );
+    }
+
+    /// The directories a session is *granted* out of the `PATH` it is told
+    /// about: the human's own, in the order they were written, and nothing of
+    /// the machine's — which needs no grant, being the system every session
+    /// already reaches.
+    ///
+    /// **Unix alone, as every test here that stands a home on the disk is.**
+    /// This arm reads a Unix `PATH` wherever the suite runs — see [`apart`] —
+    /// and what it keeps are entries naming directories that are really there,
+    /// so the home has to be one the machine really has. A Windows machine
+    /// spells that `C:\Users\…`, which a split on colons takes apart at the
+    /// drive letter: a fixture this arm cannot be handed rather than an answer
+    /// it gives differently.
+    #[cfg(unix)]
+    #[test]
+    fn what_a_session_is_granted_is_the_path_entries_under_the_servers_home() {
+        let home = tempfile::tempdir().unwrap();
+        let (local, npm) = (home.path().join(".local/bin"), home.path().join("npm/bin"));
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::create_dir_all(&npm).unwrap();
+
+        let path = joined(&[
+            OsStr::new("/verkstead/bin"),
+            local.as_os_str(),
+            OsStr::new("/usr/local/bin"),
+            npm.as_os_str(),
+            OsStr::new("/usr/bin"),
+        ]);
+
+        for platform in [Platform::Linux, Platform::MacOs] {
+            assert_eq!(
+                per_user(platform, &path, home.path()),
+                vec![local.clone(), npm.clone()],
+                "the human's own installs are what a session cannot reach \
+                 without being granted them, and the order is the one they \
+                 were written in",
+            );
+        }
+    }
+
+    /// And an entry naming a directory that is not there is skipped rather than
+    /// refused: a line left in somebody's shell profile is not a reason a
+    /// session cannot start, and on Linux a bind of one would be exactly that.
+    #[cfg(unix)]
+    #[test]
+    fn a_path_entry_that_is_not_there_is_no_grant_and_no_refusal() {
+        let home = tempfile::tempdir().unwrap();
+        let there = home.path().join("bin");
+        std::fs::create_dir_all(&there).unwrap();
+
+        let path = joined(&[home.path().join("gone/bin").as_os_str(), there.as_os_str()]);
+
+        assert_eq!(
+            per_user(Platform::Linux, &path, home.path()),
+            vec![there],
+            "what is not on the machine is nothing to grant: {path:?}",
+        );
+    }
+
+    /// And an entry that *is* the home is not what any of this is for: granting
+    /// it would hand a session the whole of the human's account, which is the
+    /// one thing a boundary is about.
+    ///
+    /// So the composing does not keep one either, and a program in it is a name
+    /// no session has. The three readings are one rule: an entry kept and never
+    /// bound would be a row that ticked and a session that could not start.
+    #[cfg(unix)]
+    #[test]
+    fn the_servers_home_itself_is_never_what_a_path_entry_grants() {
+        let home = tempfile::tempdir().unwrap();
+
+        assert!(
+            per_user(Platform::Linux, home.path().as_os_str(), home.path()).is_empty(),
+            "a `PATH` entry that is the home is a whole account read-only",
+        );
+
+        let composed = composed(Platform::Linux, home.path().as_os_str(), Some(home.path()));
+
+        assert!(
+            !apart(&composed).any(|entry| same(entry, home.path().as_os_str())),
+            "so it is nowhere on the `PATH` a session is given either: {composed:?}",
+        );
+
+        // And a program sitting in it is a program no session can run, the
+        // entry it is in being one no session was given — which is what the row
+        // has to say rather than a tick. Under a name nothing on the machine
+        // this is running on could answer to, the floor under that composed
+        // `PATH` being the real one.
+        let only_here = "the-harness-nobody-elses-machine-has";
+        std::fs::write(home.path().join(only_here), "#!/bin/sh\n").unwrap();
+
+        assert_eq!(
+            install(
+                Platform::Linux,
+                only_here,
+                Some(&composed),
+                None,
+                Some(home.path()),
+            ),
+            None,
+            "a name in a directory nothing binds is one a session opens and \
+             finds absent",
+        );
+    }
+
+    /// And on Windows the description says none of it, the same rule being the
+    /// boundary's own there — an entry written on each per-user directory as
+    /// the container is made, out of this same `PATH` and against this same
+    /// home. See [`granting::entries`].
+    #[test]
+    fn a_windows_session_is_granted_its_path_entries_by_its_boundary_instead() {
+        let home = tempfile::tempdir().unwrap();
+        let local = home.path().join("AppData/Roaming/npm");
+        std::fs::create_dir_all(&local).unwrap();
+
+        assert!(
+            per_user(Platform::Windows, local.as_os_str(), home.path()).is_empty(),
+            "what a Windows session reaches is an access-control entry rather \
+             than a bind, and the description carries none of it",
+        );
+    }
+
+    /// A harness the vendor's own installer left is a link into a versions
+    /// directory no `PATH` names, and that directory is what a session is
+    /// granted on the program's account.
+    ///
+    /// The install this whole feature is about: `~/.local/bin/claude` linking
+    /// into `~/.local/share/claude/versions/`, which the `PATH` grant alone
+    /// leaves a session a dangling link at.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_into_an_install_under_the_home_is_granted_the_directory_it_lands_in() {
+        let home = tempfile::tempdir().unwrap();
+        let (local, version) = (
+            home.path().join(".local/bin"),
+            home.path().join(".local/share/claude/versions/0.0.0"),
+        );
+
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::create_dir_all(&version).unwrap();
+        std::fs::write(version.join("claude"), "#!/bin/sh\n").unwrap();
+        std::os::unix::fs::symlink(version.join("claude"), local.join("claude")).unwrap();
+
+        let path = joined(&[local.as_os_str(), OsStr::new("/usr/bin")]);
+
+        for platform in [Platform::Linux, Platform::MacOs] {
+            assert_eq!(
+                install(platform, "claude", Some(&path), None, Some(home.path()),).as_deref(),
+                Some(version.join("claude").as_path()),
+                "what a session runs is the file the link lands on",
+            );
+            assert_eq!(
+                installs(platform, &path, home.path()),
+                vec![version.clone()],
+                "so the directory holding it is granted, and nothing above it",
+            );
+        }
+    }
+
+    /// And a program that is a file where it stands grants nothing further: the
+    /// directory it is in is the `PATH` entry [`per_user`] already granted, and
+    /// a description that said it twice would say it once.
+    #[cfg(unix)]
+    #[test]
+    fn a_program_that_is_no_link_is_granted_nothing_beyond_its_path_entry() {
+        let home = tempfile::tempdir().unwrap();
+        let local = home.path().join(".local/bin");
+
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::write(local.join("claude"), "#!/bin/sh\n").unwrap();
+
+        let path = joined(&[local.as_os_str()]);
+
+        assert_eq!(
+            install(
+                Platform::Linux,
+                "claude",
+                Some(&path),
+                None,
+                Some(home.path())
+            )
+            .as_deref(),
+            Some(local.join("claude").as_path()),
+            "the file is found where it stands",
+        );
+        assert!(
+            installs(Platform::Linux, &path, home.path()).is_empty(),
+            "and the directory it is in is the entry itself, which is \
+             `per_user`'s to grant",
+        );
+    }
+
+    /// Both halves of the hole are put on a description by the one call, so a
+    /// sandbox that hands out a composed `PATH` cannot come to have one and not
+    /// the other.
+    ///
+    /// Which is what the compile server outside every session was given wrong:
+    /// it takes the same `PATH` a session does — see
+    /// [`crate::build_cache::BuildCache::compiling`] — and had neither grant, so
+    /// it was told to look in directories of the human's own that were not
+    /// inside it.
+    #[cfg(unix)]
+    #[test]
+    fn what_a_composed_path_names_is_granted_by_the_one_call() {
+        let home = tempfile::tempdir().unwrap();
+        let (local, version) = (
+            home.path().join(".local/bin"),
+            home.path().join(".local/share/claude/versions/0.0.0"),
+        );
+
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::create_dir_all(&version).unwrap();
+        std::fs::write(version.join("claude"), "#!/bin/sh\n").unwrap();
+        std::os::unix::fs::symlink(version.join("claude"), local.join("claude")).unwrap();
+
+        let path = joined(&[local.as_os_str(), OsStr::new("/usr/bin")]);
+        let mut surface = Surface::starting_in(home.path().to_owned());
+
+        reaching(Platform::Linux, &path, home.path(), &mut surface);
+
+        let granted: Vec<(&Path, Reach)> = surface
+            .reaches()
+            .iter()
+            .filter_map(|access| match access {
+                Access::Own { path, reach } => Some((path.as_path(), *reach)),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(
+            granted,
+            vec![
+                (local.as_path(), Reach::ReadOnly),
+                (version.as_path(), Reach::ReadOnly),
+            ],
+            "the entry the `PATH` named and the install its program links into, \
+             both read-only and neither of them without the other",
+        );
+    }
+
+    /// A chain of more than one link is granted every directory it goes
+    /// through, and not only the one it ends in.
+    ///
+    /// A link is resolved by whoever runs the program, so a session handed the
+    /// two ends of a chain and not its middle finds an `ENOENT` where a harness
+    /// is — a row that ticked out here, where the whole chain is there, and a
+    /// session that could not start.
+    #[cfg(unix)]
+    #[test]
+    fn a_chain_of_links_is_granted_every_directory_it_goes_through() {
+        let home = tempfile::tempdir().unwrap();
+        let (local, current, version) = (
+            home.path().join(".local/bin"),
+            home.path().join(".local/state/claude"),
+            home.path().join(".local/share/claude/versions/0.0.0"),
+        );
+
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::create_dir_all(&current).unwrap();
+        std::fs::create_dir_all(&version).unwrap();
+        std::fs::write(version.join("claude"), "#!/bin/sh\n").unwrap();
+
+        // Two hops: the name, a link naming whichever version is current, and
+        // the version's own directory at the end of it.
+        std::os::unix::fs::symlink(version.join("claude"), current.join("claude")).unwrap();
+        std::os::unix::fs::symlink(current.join("claude"), local.join("claude")).unwrap();
+
+        let path = joined(&[local.as_os_str()]);
+
+        assert_eq!(
+            opened(
+                Platform::Linux,
+                "claude",
+                Some(&path),
+                None,
+                Some(home.path())
+            ),
+            vec![current.join("claude"), version.join("claude")],
+            "what a session opens to run it is the middle link and the file, in \
+             the order it opens them",
+        );
+        assert_eq!(
+            installs(Platform::Linux, &path, home.path()),
+            vec![current.clone(), version.clone()],
+            "so both of their directories are granted, the middle one being as \
+             much a path a session opens as the last",
+        );
+    }
+
+    /// And a chain whose middle leaves the home is a name a session does not
+    /// have, however plainly the file at the end of it is under one: what says
+    /// so is the hop that left, that being where the trail goes cold.
+    #[cfg(unix)]
+    #[test]
+    fn a_chain_that_leaves_the_home_partway_is_a_name_not_found() {
+        let home = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let (local, version) = (
+            home.path().join(".local/bin"),
+            home.path().join(".local/share/claude/versions/0.0.0"),
+        );
+
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::create_dir_all(&version).unwrap();
+        std::fs::write(version.join("claude"), "#!/bin/sh\n").unwrap();
+
+        // Out of the home and back into it: both ends are the human's own and
+        // the middle is somewhere no sandbox binds.
+        std::os::unix::fs::symlink(version.join("claude"), elsewhere.path().join("claude"))
+            .unwrap();
+        std::os::unix::fs::symlink(elsewhere.path().join("claude"), local.join("claude")).unwrap();
+
+        let path = joined(&[local.as_os_str()]);
+
+        assert_eq!(
+            standing(
+                Platform::Linux,
+                "claude",
+                Some(&path),
+                None,
+                None,
+                Some(home.path()),
+            ),
+            Standing::Leading {
+                at: local.join("claude"),
+                target: elsewhere.path().join("claude"),
+            },
+            "the hop a session could not open is what the row has to name",
+        );
+        assert!(
+            installs(Platform::Linux, &path, home.path()).is_empty(),
+            "and nothing of either end is bound on the chain's account",
+        );
+    }
+
+    /// A link into somewhere outside the home, and one that leads nowhere at
+    /// all, are both a name a session does not have: the row reads absent, and
+    /// neither directory is bound on the link's account.
+    ///
+    /// Which is what keeps the hole where [`per_user`] left it — nothing
+    /// outside the home becomes reachable because a program pointed at it — and
+    /// what keeps a session from being handed a name that would fail to exec.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_out_of_the_home_and_a_link_to_nothing_are_both_a_name_not_found() {
+        let home = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let local = home.path().join(".local/bin");
+
+        std::fs::create_dir_all(&local).unwrap();
+
+        // An install of the machine's own, somewhere no sandbox binds: an
+        // `/opt/claude` is what this stands for, and a temporary directory is
+        // under neither the home nor the floor the same way.
+        std::fs::write(elsewhere.path().join("claude"), "#!/bin/sh\n").unwrap();
+        std::os::unix::fs::symlink(elsewhere.path().join("claude"), local.join("claude")).unwrap();
+
+        // And a link whose target was taken away, which is what an uninstall
+        // leaves behind.
+        std::os::unix::fs::symlink(home.path().join("gone/codex"), local.join("codex")).unwrap();
+
+        let path = joined(&[local.as_os_str()]);
+
+        for program in ["claude", "codex"] {
+            assert_eq!(
+                install(
+                    Platform::Linux,
+                    program,
+                    Some(&path),
+                    None,
+                    Some(home.path())
+                ),
+                None,
+                "a session given `{program}` would find a path with nothing \
+                 behind it, so the name is not found at all",
+            );
+        }
+
+        assert!(
+            installs(Platform::Linux, &path, home.path()).is_empty(),
+            "and nothing is bound on either link's account",
+        );
+    }
+
+    /// A relative target is read as the place it lands rather than as the name
+    /// the join spells: a `..` climbing out of the home is a link out of the
+    /// home, and nothing outside it is bound because a program pointed at it.
+    ///
+    /// The way `npm` writes a target — `../lib/node_modules/…` — is the reason
+    /// this is the ordinary case rather than a corner. One of them stays inside
+    /// the home and is granted; the other climbs past it and is not found at
+    /// all.
+    #[cfg(unix)]
+    #[test]
+    fn a_relative_target_is_read_as_where_it_lands_rather_than_how_it_is_spelled() {
+        let holding = tempfile::tempdir().unwrap();
+        let (home, elsewhere) = (holding.path().join("you"), holding.path().join("opt"));
+        let (local, lib) = (home.join(".npm-global/bin"), home.join(".npm-global/lib"));
+
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::create_dir_all(&lib).unwrap();
+        std::fs::create_dir_all(&elsewhere).unwrap();
+
+        // The install `npm` leaves: a link out of `bin` and back down into the
+        // `lib` beside it, which is under the home however it is spelled.
+        std::fs::write(lib.join("codex"), "#!/bin/sh\n").unwrap();
+        std::os::unix::fs::symlink("../lib/codex", local.join("codex")).unwrap();
+
+        // And one climbing past the home altogether, which is the same spelling
+        // and a different place.
+        std::fs::write(elsewhere.join("claude"), "#!/bin/sh\n").unwrap();
+        std::os::unix::fs::symlink("../../../opt/claude", local.join("claude")).unwrap();
+
+        let path = joined(&[local.as_os_str()]);
+
+        assert_eq!(
+            install(Platform::Linux, "codex", Some(&path), None, Some(&home)).as_deref(),
+            Some(lib.join("codex").as_path()),
+            "the `..` is taken out of the name, so what a row says is the file \
+             a session runs",
+        );
+        assert_eq!(
+            install(Platform::Linux, "claude", Some(&path), None, Some(&home)),
+            None,
+            "and a target that climbs out of the home is a link out of the \
+             home, whatever the name it is spelled with begins with",
+        );
+        assert_eq!(
+            installs(Platform::Linux, &path, &home),
+            vec![lib.clone()],
+            "so the one inside is granted and the one outside is bound by \
+             nothing at all",
+        );
+    }
+
+    /// And a link that lands nowhere a session reaches does not end the search:
+    /// the entry after it is where a session's own `execvp` would go next, an
+    /// `ENOENT` being what makes a `PATH` search a search.
+    ///
+    /// Which is the case a machine really has: a `~/.local/bin/claude` left over
+    /// from an install that has gone, and the distribution's own further down
+    /// the list.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_landing_nowhere_leaves_the_entry_after_it_still_found() {
+        let home = tempfile::tempdir().unwrap();
+        let (local, system) = (home.path().join(".local/bin"), home.path().join("system"));
+
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::create_dir_all(&system).unwrap();
+        std::os::unix::fs::symlink(home.path().join("gone/claude"), local.join("claude")).unwrap();
+        std::fs::write(system.join("claude"), "#!/bin/sh\n").unwrap();
+
+        let path = joined(&[local.as_os_str(), system.as_os_str()]);
+
+        assert_eq!(
+            install(
+                Platform::Linux,
+                "claude",
+                Some(&path),
+                None,
+                Some(home.path())
+            )
+            .as_deref(),
+            Some(system.join("claude").as_path()),
+            "the stale link is passed over rather than answered with",
+        );
+        assert_eq!(
+            installs(Platform::Linux, &path, home.path()),
+            Vec::<std::path::PathBuf>::new(),
+            "and what was found is a `PATH` entry's own file, which grants \
+             nothing further",
+        );
+    }
+
+    /// A link into the machine's own toolchain is found all the same, and
+    /// nothing is granted for it: the floor is a directory every session holds
+    /// already.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_into_the_machines_own_floor_is_found_and_granted_nothing() {
+        assert!(
+            reachable(Platform::Linux, OsStr::new("/usr/lib/git/git"), None),
+            "what a `/usr/bin/git` linking into the machine's own lands on is \
+             under the floor, which is bound in every sandbox there is",
+        );
+        assert!(
+            !reachable(Platform::Linux, OsStr::new("/opt/claude/claude"), None),
+            "and an install nothing binds is somewhere a session opens and \
+             finds absent",
+        );
+        assert!(
+            reachable(
+                Platform::Linux,
+                OsStr::new("/home/you/.local/bin/claude"),
+                Some(Path::new("/home/you"))
+            ),
+            "while the human's own home is reachable because Verkstead grants \
+             it — see `per_user` and `installs`",
+        );
+    }
+
+    /// And on Windows nothing is followed and nothing is granted: what a
+    /// session reaches there is written on the real path as the container is
+    /// made, and what a name means is `%PATHEXT%`'s.
+    #[test]
+    fn a_windows_name_is_resolved_and_left_where_it_was_found() {
+        let home = tempfile::tempdir().unwrap();
+        let local = home.path().join("AppData/Roaming/npm");
+
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::write(local.join("claude.CMD"), "@echo off\n").unwrap();
+
+        assert_eq!(
+            install(
+                Platform::Windows,
+                "claude",
+                Some(local.as_os_str()),
+                Some(OsStr::new(".COM;.EXE;.BAT;.CMD")),
+                Some(home.path()),
+            )
+            .as_deref(),
+            Some(local.join("claude.CMD").as_path()),
+            "the name resolves by that platform's rules and nothing more is \
+             asked of it",
+        );
+        assert!(
+            installs(Platform::Windows, local.as_os_str(), home.path()).is_empty(),
+            "and the description carries none of it, the rule being the \
+             boundary's own there",
+        );
+    }
+
+    /// A name a session cannot run is not simply absent: where it *was* seen is
+    /// what says whether somebody has an install to do or a `PATH` to fix.
+    ///
+    /// The four answers in one machine's worth of fixture — a program on an
+    /// entry the composing dropped, a link into somewhere no sandbox binds, a
+    /// link with nothing at the end of it, and a name nothing on the machine
+    /// has.
+    #[cfg(unix)]
+    #[test]
+    fn a_name_a_session_cannot_run_says_where_it_was_seen() {
+        let home = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let (local, dropped) = (home.path().join(".local/bin"), home.path().join("opt/bin"));
+
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::create_dir_all(&dropped).unwrap();
+
+        // A `claude` the human really has, in a directory no session's `PATH`
+        // holds — an `/opt/foo/bin`, which is the case this is written for.
+        std::fs::write(dropped.join("claude"), "#!/bin/sh\n").unwrap();
+
+        // A `codex` linking into an install nothing binds, and a `grok` left
+        // behind by an install that has gone.
+        std::fs::write(elsewhere.path().join("codex"), "#!/bin/sh\n").unwrap();
+        std::os::unix::fs::symlink(elsewhere.path().join("codex"), local.join("codex")).unwrap();
+        std::os::unix::fs::symlink(home.path().join("gone/grok"), local.join("grok")).unwrap();
+
+        // What a session gets is the entry under the home; what the server was
+        // started with is that and the one the composing dropped.
+        let path = joined(&[local.as_os_str()]);
+        let servers = joined(&[local.as_os_str(), dropped.as_os_str()]);
+
+        let said = |program| {
+            standing(
+                Platform::Linux,
+                program,
+                Some(&path),
+                Some(&servers),
+                None,
+                Some(home.path()),
+            )
+        };
+
+        assert_eq!(
+            said("claude"),
+            Standing::Beyond {
+                at: dropped.join("claude"),
+            },
+            "the program is on this machine and no session is told about the \
+             directory it is in",
+        );
+        assert_eq!(
+            said("codex"),
+            Standing::Leading {
+                at: local.join("codex"),
+                target: elsewhere.path().join("codex"),
+            },
+            "and a link into somewhere no sandbox binds says where it leads, \
+             that being the install to move",
+        );
+        assert_eq!(
+            said("grok"),
+            Standing::Dangling {
+                at: local.join("grok"),
+            },
+            "while a link with nothing at the end of it is an uninstall left \
+             behind rather than a harness never installed",
+        );
+        assert_eq!(
+            said("opencode"),
+            Standing::Nowhere,
+            "and a name on neither list was seen nowhere at all",
+        );
+    }
+
+    /// Where a session looks answers first: a name that is both found and seen
+    /// somewhere out of reach is found.
+    ///
+    /// Which is the ordinary machine, rather than a corner: a distribution's
+    /// `claude` on a `PATH` entry every session has, and another one under an
+    /// `/opt` nothing composes in.
+    #[cfg(unix)]
+    #[test]
+    fn a_name_that_is_both_found_and_seen_beyond_is_found() {
+        let home = tempfile::tempdir().unwrap();
+        let (local, dropped) = (home.path().join(".local/bin"), home.path().join("opt/bin"));
+
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::create_dir_all(&dropped).unwrap();
+        std::fs::write(local.join("claude"), "#!/bin/sh\n").unwrap();
+        std::fs::write(dropped.join("claude"), "#!/bin/sh\n").unwrap();
+
+        assert_eq!(
+            standing(
+                Platform::Linux,
+                "claude",
+                Some(&joined(&[local.as_os_str()])),
+                Some(&joined(&[local.as_os_str(), dropped.as_os_str()])),
+                None,
+                Some(home.path()),
+            ),
+            Standing::Found {
+                at: local.join("claude"),
+                landed: local.join("claude"),
+                through: Vec::new(),
+            },
+            "the `PATH` a session gets is searched first and answers, the other \
+             list being asked only where nothing did",
+        );
+    }
+
+    /// And a `PATH` is taken apart the way the platform it belongs to writes
+    /// one, which is the wizard putting a session's own list in front of
+    /// somebody.
+    #[test]
+    fn a_path_is_listed_with_the_separator_its_platform_writes() {
+        assert_eq!(
+            entries(Platform::Linux, OsStr::new("/usr/bin:/bin")),
+            vec![PathBuf::from("/usr/bin"), PathBuf::from("/bin")],
+        );
+        assert_eq!(
+            entries(Platform::MacOs, OsStr::new("/opt/homebrew/bin:/usr/bin")),
+            vec![
+                PathBuf::from("/opt/homebrew/bin"),
+                PathBuf::from("/usr/bin"),
+            ],
+        );
+        assert_eq!(
+            entries(
+                Platform::Windows,
+                OsStr::new(r"C:\Program Files\Git\cmd;C:\Windows\system32"),
+            ),
+            vec![
+                PathBuf::from(r"C:\Program Files\Git\cmd"),
+                PathBuf::from(r"C:\Windows\system32"),
+            ],
+            "a drive letter's own colon is not a separator, so this one is read \
+             with semicolons wherever the suite is running",
+        );
+    }
+
+    /// The names followed are one list, and it is every name the wizard has a
+    /// row for: a backend that lands adds one arm to
+    /// [`crate::sessions::binary`] and appears here with it.
+    #[test]
+    fn the_names_a_session_is_followed_into_are_the_harnesses_and_the_two_tools() {
+        assert_eq!(
+            PROGRAMS,
+            &["claude", "codex", "grok", "opencode", "git", "gh"],
+            "the four harnesses, then the one every session works with and the \
+             one it opens a pull request with",
         );
     }
 

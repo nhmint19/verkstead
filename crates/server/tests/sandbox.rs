@@ -1231,6 +1231,10 @@ async fn the_open_rendering_hands_a_session_the_environment_it_was_described_wit
         "TMP",
         "GIT_CONFIG_COUNT",
         "GIT_TERMINAL_PROMPT",
+        // This fixture's Profile is a Claude one, and every Claude session is
+        // told not to update the install it is running — see
+        // `a_claude_session_is_told_not_to_update_the_install_it_is_running`.
+        "DISABLE_AUTOUPDATER",
     ]
     .into_iter()
     .map(str::to_owned)
@@ -1891,6 +1895,43 @@ async fn an_opencode_session_holds_a_shell_command_far_longer_than_opencodes_own
     assert_eq!(
         reported["timeout"], "unset",
         "and nothing is said to a backend with no such tool to say it to"
+    );
+}
+
+/// A Claude session is told not to update itself, and no other backend is told
+/// anything of the sort.
+///
+/// Claude's native binary keeps its versions under
+/// `~/.local/share/claude/versions/` and writes a new one there when it finds
+/// one — a directory a session reaches read-only, and the human's own besides:
+/// what version they run is theirs to say, and a session that moved it would
+/// move it for every session after this one. So the updater is off in every
+/// Claude session, wherever `claude` was found.
+///
+/// Codex is the other half of the claim rather than a second case: the variable
+/// is one backend's own spelling, and a session running any other has nothing
+/// to read it.
+#[tokio::test]
+async fn a_claude_session_is_told_not_to_update_the_install_it_is_running() {
+    let fixture = grilling().await;
+    let codex = fixture.codex_profile().await;
+
+    let reported = probe(
+        &fixture.sandbox(vec![]),
+        r#"say updater "${DISABLE_AUTOUPDATER-unset}""#,
+    );
+    assert_eq!(
+        reported["updater"], "1",
+        "a session never writes into the human's install",
+    );
+
+    let reported = probe(
+        &fixture.sandbox_under(&codex, LISTENING, &BuildCache::none(), vec![]),
+        r#"say updater "${DISABLE_AUTOUPDATER-unset}""#,
+    );
+    assert_eq!(
+        reported["updater"], "unset",
+        "and a backend with no such updater is told nothing about one",
     );
 }
 
