@@ -15,8 +15,8 @@ import {
   empty,
   restorable,
   unanswered,
-} from "../src/set/sheet";
-import type { Draft, Filled } from "../src/set/sheet";
+} from "../src/set/filling";
+import type { Draft, Filled } from "../src/set/filling";
 
 function filled(
   label: string,

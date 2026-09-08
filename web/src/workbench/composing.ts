@@ -5,7 +5,7 @@
 //! saves itself the moment it is touched — there is a record to save into. The
 //! compose page has none: it is the composer before there is anything for it to
 //! be about, and what it holds is held on the device the way an answer sheet's
-//! draft is (`src/set/sheet.ts`), so closing the tab or reloading the page loses
+//! draft is (`src/set/filling.ts`), so closing the tab or reloading the page loses
 //! nothing.
 //!
 //! Nothing reaches the server until a button, and when one is pressed the whole

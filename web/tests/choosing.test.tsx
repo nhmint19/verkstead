@@ -20,7 +20,7 @@ import stylesheet from "../src/set/Sheet.module.css?raw";
 import type { Direction, Submitted } from "../src/api/types";
 import contents from "../src/set/Contents.module.css";
 import submitting from "../src/set/Answering.module.css";
-import { draftKey } from "../src/set/sheet";
+import { draftKey } from "../src/set/filling";
 import { answering, sent, texts } from "./reading";
 import { json, readable } from "./serving";
 import proposed from "./fixtures/set-proposed.json" with { type: "json" };
