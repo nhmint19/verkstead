@@ -328,7 +328,7 @@ export function Answering(props: {
         <div class={page.confirmActions}>
           <button
             type="button"
-            class={page.secondary}
+            class={`${page.secondary} secondary`}
             onClick={() => setConfirming(null)}
           >
             Keep answering

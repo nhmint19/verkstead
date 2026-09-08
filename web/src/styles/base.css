@@ -286,16 +286,19 @@ textarea::placeholder {
 
 /* The secondary press: the quiet half of a pair, standing beside the one that
    does the thing. Cancel on the Open repo, Create repo and Steer cards, the way
-   back from the field a token is pasted into, and **Save as draft** on the
-   composer, which is the one the rest are drawn from.
+   back from the field a token is pasted into, the two that keep a Set open
+   rather than sending or locking it, and **Save as draft** on the composer,
+   which is the one the rest are drawn from.
 
    Written once here, and reached by a class rather than by a component, for the
    reason the link above it is written once here: it is a piece of the app's
-   shared vocabulary rather than any one card's look, and five copies of it in
-   five modules were five things to drift — which they had, into three different
-   greys and two different hovers. What is *not* here is where one sits: the row
-   it stands in, the gap to the press beside it and whatever a caller has to say
-   about being pressable are still each module's own.
+   shared vocabulary rather than any one card's look, and six copies of it in
+   six modules were six things to drift — which they had, into two backgrounds
+   and three different hovers. What is *not* here is where one sits: the row it
+   stands in, the shape that row gives it, the gap to the press beside it and
+   whatever a caller has to say about being pressable are still each module's
+   own — the Set sheet's pair are half a row each and taller than these, and
+   they say so themselves.
 
    No accent in it anywhere. An outline in the accent reads as a second thing to
    press rather than as the way back out of the first, so the paint is the card

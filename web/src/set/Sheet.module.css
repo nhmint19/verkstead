@@ -639,22 +639,29 @@
   margin-top: 1rem;
 }
 
+/* The shape both presses take, which is this row's own: half the row each, and
+   taller than the presses on a card because this is the last thing asked before
+   a Set goes. Said for both of them and over `.secondary`, which is the paint
+   rather than the shape. */
 .confirmActions button {
   flex: 1 1 9rem;
   padding: 0.7rem 1rem;
   font: inherit;
   font-weight: 600;
-  color: var(--paper);
-  background: var(--accent);
-  border: 1px solid var(--accent);
   border-radius: 0.5rem;
   cursor: pointer;
 }
 
-.confirmActions .secondary {
-  color: var(--ink);
-  background: transparent;
-  border-color: var(--edge);
+/* And the press that does the thing, filled. The way back beside it is a
+   secondary press like every other way back in the app — `.secondary` in
+   `styles/base.css` paints it, and it is stood out of the way here with
+   `:where`, which weighs nothing: a bare `:not` would carry its class into this
+   selector's weight, and a rule written to sit over one of these presses would
+   find itself under it. */
+.confirmActions button:not(:where(.secondary)) {
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
 }
 
 /* The Gutter this page's sections reserve down their left once the column is
@@ -755,13 +762,10 @@
     background: var(--paper);
   }
 
-  .confirmActions button:not(:disabled):hover {
+  /* The filled press deepens the accent it is filled with. The way back beside
+     it darkens its own border, out of `.secondary` in `styles/base.css`. */
+  .confirmActions button:not(:where(.secondary)):not(:disabled):hover {
     background: var(--accent-deep);
     border-color: var(--accent-deep);
-  }
-
-  .confirmActions .secondary:not(:disabled):hover {
-    background: var(--paper);
-    border-color: var(--ink-soft);
   }
 }
