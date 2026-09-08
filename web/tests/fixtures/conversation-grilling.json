@@ -5,6 +5,7 @@
     {
       "bytes": 20418,
       "id": 3,
+      "label": null,
       "name": "delivery-failures.csv",
       "origin": "Brief"
     }

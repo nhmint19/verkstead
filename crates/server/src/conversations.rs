@@ -20,10 +20,10 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{
-    Adopted, Attached, AttachmentOrigin, AttachmentRemoved, AttachmentView, BaseRecorded,
-    BranchRenamed, BriefSaved, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
-    CompanionMode, CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationClosed,
-    GrillingStarted, PairingView, PickedView, RepoPairingsView, RepoSwitched, Started, Worktree,
+    Adopted, Attached, AttachmentRemoved, AttachmentView, BaseRecorded, BranchRenamed, BriefSaved,
+    CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
+    CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationClosed, GrillingStarted,
+    PairingView, PickedView, RepoPairingsView, RepoSwitched, Started, Worktree,
 };
 use verkstead_schema::{Direction, Nudge};
 
@@ -611,7 +611,7 @@ pub(crate) async fn attach(state: &AppState, id: i64, name: &str, body: &[u8]) -
     .await?;
 
     Ok(Attached::Attached {
-        attachment: view(attachment),
+        attachment: attachments::view(attachment),
     })
 }
 
@@ -649,25 +649,21 @@ pub(crate) async fn detach(
     Ok(AttachmentRemoved::Removed)
 }
 
-/// Every file attached to a Conversation, in the shape the workbench draws them.
+/// The Brief's files, in the shape the workbench draws them.
+///
+/// The Brief's alone rather than every file in the Conversation's directory:
+/// what this fills is the row of pills under the Brief — the composer's while it
+/// drafts, the frozen pane's after it, and a Share's copy of that row — and a
+/// file put on an Answer is drawn under the Question it answers, on that Set's
+/// own page. Both are in the one directory all the same, which is what the
+/// record says and what a session's prompt lists.
 pub(crate) async fn attached(pool: &SqlitePool, id: i64) -> Result<Vec<AttachmentView>> {
     Ok(store::attachments(pool, id)
         .await?
         .into_iter()
-        .map(view)
+        .filter(|attachment| attachment.origin == store::Origin::Brief)
+        .map(attachments::view)
         .collect())
-}
-
-/// One row as the wire carries it.
-fn view(attachment: store::Attachment) -> AttachmentView {
-    AttachmentView {
-        id: attachment.id,
-        name: attachment.name,
-        bytes: attachment.bytes,
-        origin: match attachment.origin {
-            store::Origin::Brief => AttachmentOrigin::Brief,
-        },
-    }
 }
 
 /// Why a Conversation's files are not the human's to change, or `None` where

@@ -273,6 +273,7 @@ describe("the files on a draft", () => {
       name: "notes.md",
       bytes: 4,
       origin: "Brief",
+      label: null,
     };
 
     // The read the upload asks for, held: the whole of what this is about is

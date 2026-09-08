@@ -657,15 +657,26 @@ where, and nothing about what to do with it, because the Brief says what a
 file is for. The copy is the record, and an agent that wants to work on one
 copies it into the Worktree.
 
-**What a file is attached to is its origin.** The Brief is the one origin
-there is, and an Answer to a Question Set is the one planned next — a second
-value on the same record rather than a second kind of thing, the upload being
-the Conversation's and not the Brief's. Attachments freeze with the Brief:
-attached and removed while the round drafts, fixed once the work starts, and
-the frozen Brief pane draws them as a read-only row under the text. A Share
-carries the names and sizes and never the bytes. A same-named file is not
-replaced: the newcomer is renamed `name-2.ext`, and both stay. One flat
-directory per Conversation, 32 MB a file, any kind of file, folders skipped.
+**What a file is attached to is its origin, and there are two of them.** The
+Brief, and an Answer to a Question Set — a second value on the same record
+rather than a second kind of thing, the upload being the Conversation's and
+not the Brief's. **An Answer's file is keyed by the Set it was put on and the
+label of the Question it answers**, which is what its pills are drawn under
+and what a later session finds it named by; the Brief's are keyed by neither.
+The two share the one directory, so a file named like one already there is
+renamed whichever origin either of them has.
+
+**Each freezes when what it is a file of does.** The Brief's are attached and
+removed while the round drafts and fixed once the work starts, and the frozen
+Brief pane draws them as a read-only row under the text. An Answer's are
+attached and removed while the Set waits, and fixed the moment it settles —
+answered or locked unanswered — or its Conversation is Closed; a Set the agent
+locked unanswered keeps what was put on it as record. A file may only be put
+under a label the Set actually asks, which is every Question that is not a
+Heading and every Sub-question. A Share carries the names and sizes and never
+the bytes. A same-named file is not replaced: the newcomer is renamed
+`name-2.ext`, and both stay. One flat directory per Conversation, 32 MB a
+file, any kind of file, folders skipped.
 
 **On the compose page they are held in the page until the press**, because
 nothing exists on the server until Start or Save as draft: the files ride with

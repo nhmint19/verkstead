@@ -811,3 +811,21 @@ questions:
         "the error should name the unknown field, got: {error}"
     );
 }
+
+/// What a Set asks is what an Answer — and a file put on one — may name: every
+/// Question that is not a Heading, and every Sub-question under any of them.
+#[test]
+fn a_set_asks_its_questions_and_its_subquestions() {
+    let set = QuestionSet::from_yaml(FULL_SET).expect("the full fixture should parse");
+
+    assert!(set.asks("Q1"), "an ordinary Question is asked");
+    assert!(set.asks("Q2a"), "and so is a Sub-question");
+    assert!(set.asks("Q2b"));
+
+    assert!(
+        !set.asks("Q2"),
+        "Q2 heads its Sub-questions and asks nothing of its own",
+    );
+    assert!(!set.asks("Q9"), "and the Set has no Q9 at all");
+    assert!(!set.asks(""));
+}

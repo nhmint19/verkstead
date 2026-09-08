@@ -312,11 +312,13 @@ describe("a shared conversation", () => {
     expect(row.querySelector("button")).toBeNull();
 
     // And the file itself carries a record of each and not a byte of any: the
-    // id it is known by, the name it stands under and how large it was.
+    // id it is known by, the name it stands under, how large it was, and what
+    // it was attached to.
     for (const attachment of attached) {
       expect(Object.keys(attachment).sort()).toEqual([
         "bytes",
         "id",
+        "label",
         "name",
         "origin",
       ]);

@@ -898,10 +898,9 @@ pub(crate) fn alongside(prompt: &str, branch: &str, companions: &[store::Compani
 /// an upload button.
 ///
 /// **Grouped under what each file was attached to**, which is its origin — the
-/// Brief now, and an Answer to a Question Set next. Walked in the record's own
-/// order rather than sorted into groups, because that order is the order they
-/// were attached in and an origin's files therefore arrive together: what a
-/// second origin needs here is one more arm on [`attached_to`].
+/// Brief, or the Answer it was put on. Walked in the record's own order rather
+/// than sorted into groups, because that order is the order they were attached
+/// in and an origin's files therefore arrive together.
 ///
 /// `inside` is where the Conversation's directory is reached from inside the
 /// sandbox, which is not the same path on both platforms — see
@@ -917,13 +916,13 @@ pub(crate) fn attached(prompt: &str, files: &[store::Attachment], inside: &Path)
     let mut under = None;
 
     for file in files {
-        if under != Some(file.origin) {
+        if under != Some(&file.origin) {
             if under.is_some() {
                 listed.push('\n');
             }
 
-            listed.push_str(&format!("{}\n\n", attached_to(file.origin)));
-            under = Some(file.origin);
+            listed.push_str(&format!("{}\n\n", attached_to(&file.origin)));
+            under = Some(&file.origin);
         }
 
         listed.push_str(&format!(
@@ -942,12 +941,16 @@ pub(crate) fn attached(prompt: &str, files: &[store::Attachment], inside: &Path)
 
 /// What an origin is called where its files are listed under it.
 ///
-/// One line rather than a heading of its own: there is one origin today and two
-/// planned, and a section made of sub-sections would be a shape built for a list
-/// that is a handful of lines long.
-fn attached_to(origin: store::Origin) -> &'static str {
+/// One line rather than a heading of its own: there are two origins, and a
+/// section made of sub-sections would be a shape built for a list that is a
+/// handful of lines long.
+///
+/// An Answer's line names the Question it answers, which is what a later session
+/// reading the Set back would look the file up by.
+fn attached_to(origin: &store::Origin) -> String {
     match origin {
-        store::Origin::Brief => "Attached to the Brief:",
+        store::Origin::Brief => "Attached to the Brief:".to_owned(),
+        store::Origin::Answer { label, .. } => format!("Attached to the Answer to {label}:"),
     }
 }
 

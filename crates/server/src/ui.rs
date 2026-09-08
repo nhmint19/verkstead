@@ -29,20 +29,21 @@ use axum::routing::{delete, get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    Adopted, Attached, AttachmentRemoved, Author, BaseBranchChoice, BranchRename, BriefEdit,
-    BuildCacheView, CheckRollup, CleanupStepView, CleanupView, CommentedOn, CompanionAdded,
-    CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode, CompanionModeChoice,
-    CompanionModeChosen, CompanionRemoved, CompanionView, CompileCaching, ConflictResolutionEdit,
-    ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
-    ConversationStopped, ConversationUnarchived, ConversationView, Creation, Cursor,
-    GrillingStarted, IgnoreRule, IgnoredCommentsEdit, Lifecycle, Locked, Merging, MissedOut,
-    NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry,
-    PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved,
-    Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress, SetReading, SetView,
-    SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit,
-    SharedConversation, ShowArchived, ShowingArchived, Standing, SteerOpened, SteerSubmission,
-    Submitted, Subscribed, Subscription, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved,
-    UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    Adopted, AnswerAttached, AnswerAttachmentRemoved, Attached, AttachmentRemoved, Author,
+    BaseBranchChoice, BranchRename, BriefEdit, BuildCacheView, CheckRollup, CleanupStepView,
+    CleanupView, CommentedOn, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
+    CompanionMode, CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView,
+    CompileCaching, ConflictResolutionEdit, ConversationArchived, ConversationClosed,
+    ConversationEntry, ConversationSteered, ConversationStopped, ConversationUnarchived,
+    ConversationView, Creation, Cursor, GrillingStarted, IgnoreRule, IgnoredCommentsEdit,
+    Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder,
+    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView,
+    RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused,
+    ServeEdit, ServePress, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
+    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
+    ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription,
+    TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice,
+    Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -60,6 +61,30 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route("/api/ui/sets/{id}", get(set))
         .route("/api/ui/sets/{id}/response", post(submit_response))
         .route("/api/ui/sets/{id}/lock", post(lock_set))
+        // And the files the human puts on its Answers, which are the Brief's
+        // own two presses made from the sheet — see [`crate::answer_files`].
+        //
+        // Under the Set rather than under its Conversation, because the sheet
+        // is a page about one Set: which Conversation's directory the file
+        // lands in is read off the Set, the way everything else on that page
+        // is. The Answer is in the path too, there being one paperclip per
+        // Question and nothing set-wide to put a file on.
+        //
+        // One request per file, the raw bytes as the body and the name in the
+        // path — and a body limit of its own over the router's default, exactly
+        // as the Brief's upload has both.
+        .route(
+            "/api/ui/sets/{id}/answers/{label}/attachments/{name}",
+            post(attach_to_answer).layer(DefaultBodyLimit::max(crate::attachments::MAX_BYTES + 1)),
+        )
+        // And taking one off, by the row's own id rather than by its name and
+        // its label: two files on one Answer may share a name, and neither of
+        // them is a key. Under the Set rather than under the Answer for that
+        // reason as well — the id is the whole of what says which file this is.
+        .route(
+            "/api/ui/sets/{id}/attachments/{attachment}/remove",
+            post(detach_from_answer),
+        )
         .route("/api/ui/repos", get(repos).post(register_repo))
         // And making one, which is the other way a Repo arrives. Its own path
         // beside the registration rather than a shape the one above also takes:
@@ -549,6 +574,19 @@ pub(crate) async fn set_reading(state: &AppState, id: i64) -> Result<SetReading,
         }
     };
 
+    // And the files the human put on its Answers, which the sheet draws under
+    // the Questions they name — with a × while the Set waits, and read-only
+    // once it has settled. Read here rather than fetched by the page for the
+    // reason the standing is: a pill that turned up a moment after the Answer
+    // it belongs to would be the record arriving in two pieces.
+    let attachments = match crate::answer_files::attached(&state.pool, id).await {
+        Ok(attachments) => attachments,
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, "reading the files put on a Set failed");
+            return Err(unavailable("the Question Set could not be read"));
+        }
+    };
+
     // Everything the agent wrote, rendered — which is the whole of what is left
     // to do, and none of it this crate's.
     //
@@ -557,7 +595,7 @@ pub(crate) async fn set_reading(state: &AppState, id: i64) -> Result<SetReading,
     // work to do on an async worker thread while other requests wait behind it.
     let set_id = stored.id;
     let view = tokio::task::spawn_blocking(move || {
-        verkstead_render::set_view(set_id, conversation, set, standing, follow_up)
+        verkstead_render::set_view(set_id, conversation, set, standing, follow_up, attachments)
     })
     .await;
 
@@ -2951,6 +2989,56 @@ async fn detach(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, attachment, "removing an attached file failed");
+            unavailable("the file could not be removed")
+        }
+    }
+}
+
+/// `POST /api/ui/sets/{id}/answers/{label}/attachments/{name}` — put a file on
+/// one of a Set's Answers.
+///
+/// The Brief's upload made from the answer sheet, refused by where the Set
+/// stands rather than by where the Brief does — see [`crate::answer_files`].
+async fn attach_to_answer(
+    State(state): State<AppState>,
+    Path((id, label, name)): Path<(String, String, String)>,
+    body: axum::body::Bytes,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(AnswerAttached::NoSuchSet).into_response();
+    };
+
+    match crate::answer_files::attach(&state, id, &label, &name, &body).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, label = %label, name = %name, "putting a file on an Answer failed");
+            unavailable("the file could not be attached")
+        }
+    }
+}
+
+/// `POST /api/ui/sets/{id}/attachments/{attachment}/remove` — and take one off
+/// again, file and row together.
+async fn detach_from_answer(
+    State(state): State<AppState>,
+    Path((id, attachment)): Path<(String, String)>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(AnswerAttachmentRemoved::NoSuchSet).into_response();
+    };
+
+    // An id that is not a number names no attachment, which is a file that is
+    // not there — and that is what the press asked for. See
+    // [`AnswerAttachmentRemoved`], which has no *no such attachment* for this
+    // reason.
+    let Ok(attachment) = attachment.parse::<i64>() else {
+        return Json(AnswerAttachmentRemoved::Removed).into_response();
+    };
+
+    match crate::answer_files::detach(&state, id, attachment).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, attachment, "removing a file from an Answer failed");
             unavailable("the file could not be removed")
         }
     }

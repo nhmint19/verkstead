@@ -1,5 +1,6 @@
-//! The files the human puts on a Conversation: the upload, the removal, and
-//! every way each of them is refused.
+//! The files the human puts on a Conversation and on the Answers to its
+//! Question Sets: the upload, the removal, and every way each of them is
+//! refused.
 //!
 //! Asked of the *server*, through the endpoints, because both halves of an
 //! attachment are the server's: the row in the record and the file in the
@@ -19,8 +20,8 @@ use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
-    Attached, AttachmentOrigin, AttachmentRemoved, AttachmentView, ConversationView, Registered,
-    Started,
+    AnswerAttached, AnswerAttachmentRemoved, Attached, AttachmentOrigin, AttachmentRemoved,
+    AttachmentView, ConversationView, Registered, SetReading, Started,
 };
 use verkstead_server::{attachments::MAX_BYTES, open_database, router_keeping, store};
 
@@ -475,4 +476,416 @@ async fn a_stray_directory_is_swept_at_a_server_start_and_a_live_ones_is_not() {
             .collect::<Vec<_>>(),
         vec!["notes.md".to_owned()],
     );
+}
+
+/// The Set these tests put files on: one Question, one Sub-question and a
+/// Heading over it, so that every way a label can be wrong has something real
+/// to be wrong about.
+const ASKED: &str = "
+title: Where the counter lives
+questions:
+  - label: Q1
+    text: Where should the count be kept?
+    options:
+      - n: 1
+        text: In the process
+      - n: 2
+        text: In Redis
+  - label: Q2
+    text: And what about the window?
+    subquestions:
+      - letter: a
+        text: How long is it?
+";
+
+/// One Question Set on that Conversation's Timeline, asked the way a session
+/// asks one.
+async fn asked(pool: &SqlitePool, conversation: i64) -> i64 {
+    let set = verkstead_schema::QuestionSet::from_yaml(ASKED).expect("the fixture Set parses");
+
+    store::ask(pool, conversation, &set, store::Ask::Blocking)
+        .await
+        .unwrap()
+        .expect("the Conversation is there to ask from")
+        .id
+}
+
+/// Put a file on one of that Set's Answers, the way the sheet does: the bytes as
+/// the body, and the label and the name in the path.
+async fn put_on(app: &Router, set: i64, label: &str, name: &str, body: &[u8]) -> AnswerAttached {
+    let (status, said) = fetch(
+        app,
+        Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/api/ui/sets/{set}/answers/{}/attachments/{}",
+                urlencoding(label),
+                urlencoding(name),
+            ))
+            .header(header::CONTENT_TYPE, "application/octet-stream")
+            .body(Body::from(body.to_vec()))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "putting {name:?} on {label} failed: {said}"
+    );
+    read(&said)
+}
+
+async fn take_off(app: &Router, set: i64, attachment: i64) -> AnswerAttachmentRemoved {
+    post(
+        app,
+        &format!("/api/ui/sets/{set}/attachments/{attachment}/remove"),
+        &serde_json::json!({}),
+    )
+    .await
+}
+
+/// The record the upload made, or the refusal said plainly.
+fn on_the_answer(attached: AnswerAttached) -> AttachmentView {
+    match attached {
+        AnswerAttached::Attached { attachment } => attachment,
+        other => panic!("expected the file to be attached, got {other:?}"),
+    }
+}
+
+/// Every file the Set says it is holding, which is what the sheet and the record
+/// after it are drawn from.
+async fn on_the_set(app: &Router, set: i64) -> Vec<AttachmentView> {
+    let reading: SetReading = get(app, &format!("/api/ui/sets/{set}")).await;
+
+    match reading {
+        SetReading::Set(view) => view.attachments,
+        SetReading::Unreadable(unreadable) => {
+            panic!("this build wrote that Set and cannot read it: {unreadable:?}")
+        }
+    }
+}
+
+/// Answer the Set, which is one of the three things that fixes its files.
+async fn answer(app: &Router, set: i64) {
+    let submitted: serde_json::Value = post(
+        app,
+        &format!("/api/ui/sets/{set}/response"),
+        &serde_json::json!({
+            "answers": [
+                { "label": "Q1", "selected": 2 },
+                { "label": "Q2a", "free_text": "a minute" },
+            ],
+        }),
+    )
+    .await;
+
+    assert_eq!(
+        submitted,
+        serde_json::json!("Accepted"),
+        "the Response was refused"
+    );
+}
+
+/// The whole of the path in one: the bytes land in the Conversation's own
+/// directory beside the Brief's, the record says which Answer they are on, and
+/// the Set says so on every read after it.
+#[tokio::test]
+async fn a_file_on_an_answer_lands_in_the_directory_and_on_the_set() {
+    let (_elsewhere, dir, app, pool, id) = drafting().await;
+    let set = asked(&pool, id).await;
+
+    let attachment = on_the_answer(put_on(&app, set, "Q1", "counter.png", b"PNG bytes").await);
+
+    assert_eq!(attachment.name, "counter.png");
+    assert_eq!(attachment.bytes, 9);
+    assert_eq!(attachment.origin, AttachmentOrigin::Answer);
+    assert_eq!(attachment.label.as_deref(), Some("Q1"));
+
+    assert_eq!(
+        std::fs::read(directory(&dir, id).join("counter.png")).unwrap(),
+        b"PNG bytes",
+    );
+    assert_eq!(on_the_set(&app, set).await, vec![attachment]);
+}
+
+/// A Sub-question is a Question to put a file on, and a second file of a name
+/// the Brief already took counts up: one flat directory, and the Brief's file
+/// is not replaced.
+#[tokio::test]
+async fn a_name_the_brief_took_counts_up_in_the_one_directory() {
+    let (_elsewhere, dir, app, pool, id) = drafting().await;
+    let set = asked(&pool, id).await;
+
+    kept(attach(&app, id, "notes.md", b"the Brief's").await);
+    let second = on_the_answer(put_on(&app, set, "Q2a", "notes.md", b"the Answer's").await);
+
+    assert_eq!(second.name, "notes-2.md");
+    assert_eq!(second.label.as_deref(), Some("Q2a"));
+
+    assert_eq!(on_disk(&dir, id), ["notes-2.md", "notes.md"]);
+    assert_eq!(
+        std::fs::read(directory(&dir, id).join("notes.md")).unwrap(),
+        b"the Brief's",
+        "the Brief's file is still the Brief's file",
+    );
+
+    assert_eq!(
+        attached(&app, id)
+            .await
+            .into_iter()
+            .map(|file| file.name)
+            .collect::<Vec<_>>(),
+        vec!["notes.md".to_owned()],
+        "and the row of pills under the Brief is the Brief's own",
+    );
+}
+
+/// Removing one takes the row and the file together, and leaves the Brief's
+/// alone.
+#[tokio::test]
+async fn removing_one_from_an_answer_takes_the_row_and_the_file() {
+    let (_elsewhere, dir, app, pool, id) = drafting().await;
+    let set = asked(&pool, id).await;
+
+    kept(attach(&app, id, "brief.md", b"the Brief's").await);
+    let put = on_the_answer(put_on(&app, set, "Q1", "answer.md", b"the Answer's").await);
+
+    assert_eq!(
+        take_off(&app, set, put.id).await,
+        AnswerAttachmentRemoved::Removed
+    );
+    assert_eq!(on_the_set(&app, set).await, Vec::new());
+    assert_eq!(on_disk(&dir, id), ["brief.md"]);
+}
+
+/// One Set's file is not another's to remove — not even another Set of the same
+/// Conversation.
+#[tokio::test]
+async fn another_sets_attachment_is_not_this_ones_to_remove() {
+    let (_elsewhere, dir, app, pool, id) = drafting().await;
+    let mine = asked(&pool, id).await;
+    let theirs = asked(&pool, id).await;
+
+    let put = on_the_answer(put_on(&app, theirs, "Q1", "notes.md", b"theirs").await);
+
+    assert_eq!(
+        take_off(&app, mine, put.id).await,
+        AnswerAttachmentRemoved::Removed,
+        "there is no such file on this Set, which is what was asked for",
+    );
+    assert_eq!(
+        on_the_set(&app, theirs).await.len(),
+        1,
+        "and theirs is intact"
+    );
+    assert_eq!(on_disk(&dir, id), ["notes.md"]);
+}
+
+/// A label the Set does not ask is refused, however it is not one — a Heading,
+/// which asks nothing of its own, or a Question the Set never carried — and
+/// nothing lands anywhere.
+#[tokio::test]
+async fn a_label_the_set_does_not_ask_is_refused() {
+    let (_elsewhere, dir, app, pool, id) = drafting().await;
+    let set = asked(&pool, id).await;
+
+    for label in ["Q2", "Q9", "Q1a", ""] {
+        assert_eq!(
+            put_on(&app, set, label, "notes.md", b"nope").await,
+            AnswerAttached::NoSuchLabel,
+            "{label:?} is not a Question this Set asks",
+        );
+    }
+
+    assert_eq!(on_the_set(&app, set).await, Vec::new());
+    assert_eq!(on_disk(&dir, id), Vec::<String>::new());
+}
+
+/// And a Set this build cannot read asks nothing anybody here can name.
+#[tokio::test]
+async fn a_set_that_cannot_be_read_takes_no_files() {
+    let (_elsewhere, dir, app, pool, id) = drafting().await;
+    let set = asked(&pool, id).await;
+
+    sqlx::query("UPDATE question_sets SET body = ? WHERE id = ?")
+        .bind(r#"{"title":"from the future","questions":[],"telepathy":true}"#)
+        .bind(set)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        put_on(&app, set, "Q1", "notes.md", b"nope").await,
+        AnswerAttached::NoSuchLabel,
+    );
+    assert_eq!(on_disk(&dir, id), Vec::<String>::new());
+}
+
+/// An answered Set is the record of what the human sent: both presses are
+/// refused by name, and what was already on it stays where it is.
+#[tokio::test]
+async fn an_answered_set_takes_no_more_files_and_gives_none_up() {
+    let (_elsewhere, dir, app, pool, id) = drafting().await;
+    let set = asked(&pool, id).await;
+
+    let put = on_the_answer(put_on(&app, set, "Q1", "counter.png", b"before").await);
+    answer(&app, set).await;
+
+    assert_eq!(
+        put_on(&app, set, "Q1", "late.png", b"too late").await,
+        AnswerAttached::Answered,
+    );
+    assert_eq!(
+        take_off(&app, set, put.id).await,
+        AnswerAttachmentRemoved::Answered,
+    );
+
+    assert_eq!(on_disk(&dir, id), ["counter.png"]);
+    assert_eq!(
+        on_the_set(&app, set).await.len(),
+        1,
+        "and the answered Set still carries what was put on it",
+    );
+}
+
+/// A Set locked unanswered keeps its files and takes no more, which is the same
+/// freeze said the other way.
+#[tokio::test]
+async fn a_locked_set_takes_no_more_files_and_gives_none_up() {
+    let (_elsewhere, dir, app, pool, id) = drafting().await;
+    let set = asked(&pool, id).await;
+
+    let put = on_the_answer(put_on(&app, set, "Q1", "counter.png", b"before").await);
+
+    let locked: serde_json::Value = post(
+        &app,
+        &format!("/api/ui/sets/{set}/lock"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(
+        locked,
+        serde_json::json!("Closed"),
+        "the Set was not locked"
+    );
+
+    assert_eq!(
+        put_on(&app, set, "Q1", "late.png", b"too late").await,
+        AnswerAttached::Locked,
+    );
+    assert_eq!(
+        take_off(&app, set, put.id).await,
+        AnswerAttachmentRemoved::Locked,
+    );
+    assert_eq!(on_disk(&dir, id), ["counter.png"]);
+}
+
+/// And a Closed Conversation is work nothing is going to pick up: its Sets take
+/// nothing, and give nothing up either.
+#[tokio::test]
+async fn a_set_of_a_closed_conversation_takes_no_files() {
+    let (_elsewhere, dir, app, pool, id) = drafting().await;
+    let set = asked(&pool, id).await;
+
+    let put = on_the_answer(put_on(&app, set, "Q1", "counter.png", b"before").await);
+
+    store::set_state(&pool, id, store::Lifecycle::Closed)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        put_on(&app, set, "Q1", "late.png", b"too late").await,
+        AnswerAttached::Closed,
+    );
+    assert_eq!(
+        take_off(&app, set, put.id).await,
+        AnswerAttachmentRemoved::Closed,
+    );
+    assert_eq!(on_disk(&dir, id), ["counter.png"]);
+}
+
+/// The cap and the name rule are the Brief's, said on the sheet.
+#[tokio::test]
+async fn a_file_over_the_cap_or_under_no_name_is_refused_on_an_answer() {
+    let (_elsewhere, dir, app, pool, id) = drafting().await;
+    let set = asked(&pool, id).await;
+
+    assert_eq!(
+        put_on(&app, set, "Q1", "huge.bin", &vec![0u8; MAX_BYTES + 1]).await,
+        AnswerAttached::TooLarge,
+    );
+
+    for name in ["../escape.md", "sub/notes.md", ".hidden.md"] {
+        assert_eq!(
+            put_on(&app, set, "Q1", name, b"nope").await,
+            AnswerAttached::NotAName,
+            "{name:?} is not a plain base name",
+        );
+    }
+
+    assert_eq!(on_the_set(&app, set).await, Vec::new());
+    assert_eq!(on_disk(&dir, id), Vec::<String>::new());
+    assert!(!dir.path().join("escape.md").exists());
+}
+
+/// A Set that is not there says so, both ways round.
+#[tokio::test]
+async fn a_file_on_no_set_says_so() {
+    let (_elsewhere, _dir, app, _pool, _id) = drafting().await;
+
+    assert_eq!(
+        put_on(&app, 404, "Q1", "notes.md", b"nobody").await,
+        AnswerAttached::NoSuchSet,
+    );
+    assert_eq!(
+        take_off(&app, 404, 1).await,
+        AnswerAttachmentRemoved::NoSuchSet,
+    );
+}
+
+/// A record written before an Answer could carry files opens, and what is in it
+/// reads as the Brief's — which is what the two columns arriving empty means.
+///
+/// The columns are dropped and the database opened again, which is what a
+/// Verkstead of before wrote and this one is handed. See the store's
+/// `migrations`.
+#[tokio::test]
+async fn a_record_written_before_the_columns_opens_and_reads_as_the_briefs() {
+    let (_elsewhere, dir, app, pool, id) = drafting().await;
+
+    kept(attach(&app, id, "wireframe.png", b"the human's own").await);
+
+    for column in ["set_id", "label"] {
+        sqlx::query(&format!("ALTER TABLE attachments DROP COLUMN {column}"))
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    pool.close().await;
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+    let reopened = router_keeping(pool.clone(), dir.path().to_owned());
+
+    let files = attached(&reopened, id).await;
+
+    assert_eq!(
+        files.len(),
+        1,
+        "the file attached before the columns is still there"
+    );
+    assert_eq!(files[0].name, "wireframe.png");
+    assert_eq!(files[0].origin, AttachmentOrigin::Brief);
+    assert_eq!(files[0].label, None);
+
+    // And the columns are back, so an Answer of that Conversation takes files
+    // like any other.
+    let set = asked(&pool, id).await;
+    let put = on_the_answer(put_on(&reopened, set, "Q1", "counter.png", b"after").await);
+
+    assert_eq!(put.label.as_deref(), Some("Q1"));
+    assert_eq!(on_the_set(&reopened, set).await, vec![put]);
 }

@@ -279,6 +279,29 @@ impl Attachments {
     }
 }
 
+/// One row as the wire carries it.
+///
+/// Here rather than beside either of the two pages that draw pills, because
+/// both draw the same pill: the Brief's row under the composer, and an Answer's
+/// under the Question it was put on. What differs is the origin, which is on the
+/// row itself — see [`verkstead_render::AttachmentOrigin`].
+pub(crate) fn view(attachment: store::Attachment) -> verkstead_render::AttachmentView {
+    use verkstead_render::{AttachmentOrigin, AttachmentView};
+
+    let (origin, label) = match attachment.origin {
+        store::Origin::Brief => (AttachmentOrigin::Brief, None),
+        store::Origin::Answer { label, .. } => (AttachmentOrigin::Answer, Some(label)),
+    };
+
+    AttachmentView {
+        id: attachment.id,
+        name: attachment.name,
+        bytes: attachment.bytes,
+        origin,
+        label,
+    }
+}
+
 /// Whether a name is one a file may be attached under: a plain base name, and
 /// nothing else.
 ///

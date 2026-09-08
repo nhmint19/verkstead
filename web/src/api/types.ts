@@ -313,6 +313,24 @@ free_text?: string | null,
 unanswered?: boolean, };
 
 /**
+ * What became of putting a file on an Answer.
+ *
+ * [`Attached`]'s three refusals said again — a file too large, a name that is
+ * not a name, and nothing there to attach to — with the freeze in the other
+ * place: what fixes an Answer's files is the Set settling rather than the
+ * Brief, so each way that can have happened is named for the sheet to say.
+ */
+export type AnswerAttached = { "Attached": { attachment: AttachmentView, } } | "NoSuchSet" | "Answered" | "Locked" | "Closed" | "NoSuchLabel" | "TooLarge" | "NotAName";
+
+/**
+ * And of taking one off an Answer again.
+ *
+ * No *no such attachment*, for [`AttachmentRemoved`]'s reason: a file that is
+ * not there is the state the press asked for.
+ */
+export type AnswerAttachmentRemoved = "Removed" | "NoSuchSet" | "Answered" | "Locked" | "Closed";
+
+/**
  * A Set's Response as the page needs it: the Answers, and when they were sent.
  */
 export type Answered = { submitted_at: string, response: Response, };
@@ -375,12 +393,11 @@ export type Attached = { "Attached": { attachment: AttachmentView, } } | "NoSuch
 /**
  * What a file was attached to.
  *
- * Drawn nowhere yet, and on the wire all the same: the pills under a Brief are
- * the Brief's own files, and the page can only know that by being told. The
- * second value is an Answer to a Question Set, which is the same upload made
- * from a different page.
+ * The pills under a Brief are the Brief's own files and the pills under a
+ * Question are that Answer's, and a page can only know which it is holding by
+ * being told.
  */
-export type AttachmentOrigin = "Brief";
+export type AttachmentOrigin = "Brief" | "Answer";
 
 /**
  * And of taking one off again.
@@ -427,9 +444,24 @@ name: string,
  */
 bytes: number, 
 /**
- * What it was attached to. One value today — see [`AttachmentOrigin`].
+ * What it was attached to — see [`AttachmentOrigin`].
  */
-origin: AttachmentOrigin, };
+origin: AttachmentOrigin, 
+/**
+ * The label of the Question this file was put under, on a file put on an
+ * Answer — `Q7` for a Question, `Q7a` for a Sub-question — and `null` on
+ * every one of the Brief's.
+ *
+ * Beside the origin rather than inside it, because that is how the record
+ * holds it: the origin is a word, and this is what the word is read with.
+ * It is what the sheet groups a Set's files by, there being one list of
+ * them for a page that draws pills under every Question.
+ *
+ * Which Set it was put on is not here at all: the only page that draws
+ * these is that Set's own, and a Conversation's own row of pills is the
+ * Brief's.
+ */
+label: string | null, };
 
 /**
  * Who a session's commits are by.
@@ -3175,7 +3207,22 @@ proposal: ProposalView | null,
  * was asked changes — an ordinary Set is what a follow-up's rounds are made
  * of — and a Set stored before any of this stays exactly as it was.
  */
-follow_up: boolean, };
+follow_up: boolean, 
+/**
+ * The files the human put on this Set's Answers, oldest first — which is
+ * the order they were attached in, and the order the pills are drawn in.
+ *
+ * One list rather than a field on each Question, because that is how the
+ * record holds them: each carries the label it was put under, and the page
+ * draws every file naming a Question under that Question's field.
+ *
+ * Here whether or not the Set has settled. While it waits they are the
+ * pills beside the answers, with a × on each; once it has settled they are
+ * the record of what was sent, read-only — and a Share carries these rows
+ * and never the bytes, which is the whole of what a reader of one can know
+ * about the files.
+ */
+attachments: Array<AttachmentView>, };
 
 /**
  * The settings as the human has just written them.
