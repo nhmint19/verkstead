@@ -800,7 +800,11 @@ export function OpenRepo(props: {
         {/* Drawn as well as the ways out the modal already has: Escape and a
             press on the backdrop are for a keyboard and a cursor, and this is
             the one a thumb has. */}
-        <button type="button" class={styles.cancel} onClick={props.close}>
+        <button
+          type="button"
+          class={`${styles.cancel} secondary`}
+          onClick={props.close}
+        >
           Cancel
         </button>
       </RepoRegistration>
@@ -1132,7 +1136,11 @@ export function CreateRepo(props: {
             {/* Drawn as well as the ways out the modal already has, for the reason
               the Open modal draws one: Escape and a press on the backdrop are
               for a keyboard and a cursor, and this is the one a thumb has. */}
-            <button type="button" class={styles.cancel} onClick={leave}>
+            <button
+              type="button"
+              class={`${styles.cancel} secondary`}
+              onClick={leave}
+            >
               Cancel
             </button>
           </div>

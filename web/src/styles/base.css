@@ -284,6 +284,41 @@ textarea::placeholder {
   opacity: 1;
 }
 
+/* The secondary press: the quiet half of a pair, standing beside the one that
+   does the thing. Cancel on the Open repo, Create repo and Steer cards, the way
+   back from the field a token is pasted into, and **Save as draft** on the
+   composer, which is the one the rest are drawn from.
+
+   Written once here, and reached by a class rather than by a component, for the
+   reason the link above it is written once here: it is a piece of the app's
+   shared vocabulary rather than any one card's look, and five copies of it in
+   five modules were five things to drift — which they had, into three different
+   greys and two different hovers. What is *not* here is where one sits: the row
+   it stands in, the gap to the press beside it and whatever a caller has to say
+   about being pressable are still each module's own.
+
+   No accent in it anywhere. An outline in the accent reads as a second thing to
+   press rather than as the way back out of the first, so the paint is the card
+   it stands on, the app's own edge, and the ordinary ink for the label. The
+   outlines that *destroy* are not this and keep `--removed`: the Repo pane's
+   Remove, the profile pane's Remove and the token form's Clear all say in their
+   colour what they are for. */
+.secondary {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.secondary:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
 /* Hover, everywhere in the viewer, and nowhere outside a query like this one.
 
    A touch device reports `hover: none`, and what it does with a hover rule it
@@ -298,10 +333,12 @@ textarea::placeholder {
      its background one step. `--card` and `--paper` are the two shades the page
      is drawn in and a surface swaps to the other; a filled one takes
      `--accent-deep`, which is that same step taken in the accent.
-   - a **control** — a link, a button drawn as text, a small outline — takes the
-     accent, or deepens the accent it is already in.
+   - a **control** — a link, a button drawn as text, a small outline that says
+     what it is for in its colour — takes the accent, or deepens the accent it
+     is already in.
    - a **field** darkens its border, and takes an accent one while it holds the
-     focus.
+     focus. The secondary press below takes this one rather than the control's:
+     it carries no accent to deepen, and it is the quiet half of a pair.
 
    That focus border is the one focus treatment the sweep had to add: a field
    had none at all, and everything else here is a button or a link and wears the
@@ -323,6 +360,14 @@ textarea::placeholder {
 
   textarea:hover {
     border-color: var(--ink-soft);
+  }
+
+  /* The border darkens the whole way to the ink, rather than to the
+     `--ink-soft` a field stops at: a field under the pointer is being pointed
+     *into* and a press under it is about to be pressed. The label does not
+     move — it is the page's own ink already. */
+  .secondary:not(:disabled):hover {
+    border-color: var(--ink);
   }
 }
 
