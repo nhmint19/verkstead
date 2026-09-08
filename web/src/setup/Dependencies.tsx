@@ -19,7 +19,11 @@
 //! **And where a session looks is the server's list**, drawn above the rows on
 //! every platform: a session's `PATH` is composed out of the one Verkstead was
 //! started with, so no sentence written here could say which directories those
-//! are.
+//! are. **Read once, at startup** — which is the other half of that and the one
+//! thing somebody who has just installed something has to be told, so [`RESTART`]
+//! is under the list on every tab. It was Windows' own note when a session's
+//! `PATH` was a fixed list of system directories everywhere else; it holds on all
+//! three platforms now.
 //!
 //! **Which instruction is a tab rather than a fact.** The detected OS opens and
 //! the other seven are a press away — see
@@ -97,6 +101,18 @@ const MOOT = "Not applicable";
 /// could stand in for it.
 const LOOKS = "Where a session looks for a program, in order:";
 
+/// And that the list is one reading rather than a live one.
+///
+/// Verkstead reads its `PATH` when it starts and composes every session's out of
+/// it, so a directory put on a shell's `PATH` after that is a directory no
+/// session has — which is the whole of what somebody whose fresh install has not
+/// ticked needs to know. Said once here rather than eight times over: it is a
+/// fact about Verkstead rather than about any one machine.
+const RESTART =
+  "Verkstead reads that PATH once, when it starts. A directory added to it " +
+  "since — the one a new install landed in — is one no session has until " +
+  "Verkstead is started again from a shell whose PATH names it.";
+
 /// Which rows are a harness, so that the row wears the same mark the rest of the
 /// app draws that backend with.
 const HARNESSES: Partial<Record<Dependency, AgentType>> = {
@@ -166,6 +182,8 @@ export function Dependencies(props: {
           </ol>
         </div>
       </Show>
+
+      <Note class={styles.restart}>{RESTART}</Note>
 
       <ul class={styles.rows}>
         <For each={props.reading.dependencies}>
@@ -330,7 +348,17 @@ function Seen(props: { at: SeenSomewhere }): JSX.Element {
   );
 }
 
+/// The word over an instruction's alternative, which is the whole of what has
+/// to be said about it: the two are the same program, and which one a machine
+/// wants is the reader's to decide.
+const OR = "Or, from this machine's own package manager:";
+
 /// What to run, where to get it, and what neither says for itself.
+///
+/// Once more under itself where the instruction keeps an alternative, which goes
+/// one level deep and no further: the second install is a command with a note
+/// exactly as the first is, so it is drawn by the same function rather than by a
+/// smaller copy of it.
 function Instructed(props: { of: Instruction }): JSX.Element {
   return (
     <div class={styles.instruction}>
@@ -356,6 +384,18 @@ function Instructed(props: { of: Instruction }): JSX.Element {
       </Show>
 
       <Show when={props.of.note}>{(note) => <Note>{note()}</Note>}</Show>
+
+      {/* And the other way to get the same program, under the one that leads:
+          Claude Code's row is the vendor's installer with this machine's own
+          package kept beneath it. */}
+      <Show when={props.of.alternative}>
+        {(other) => (
+          <div class={styles.alternative}>
+            <p class={styles.or}>{OR}</p>
+            <Instructed of={other()} />
+          </div>
+        )}
+      </Show>
     </div>
   );
 }

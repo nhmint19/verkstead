@@ -463,7 +463,11 @@ machine nothing at all.
 human's to pick: an account is an account under a harness, and the harness has
 to be installed before there is one to log into; there is nothing to commit as
 until there is something to commit. The first names every dependency with this
-distro's own install command and where the binary has to land; the second offers
+distro's own install command and where the binary has to land — Claude Code's
+row leading with the vendor's own installer, a distribution's package being
+the one that can be too old to connect — and says once above the rows that the
+`PATH` was read at startup, so a directory an install has just made wants
+Verkstead started again from a shell that names it; the second offers
 the agent accounts already in the server's home as Profiles and holds its
 Continue until there is one, because a step that walked past a Profile would
 clear the mode onto the empty state a skip was rejected for; the third asks for

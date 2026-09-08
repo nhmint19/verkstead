@@ -316,8 +316,67 @@ describe("what each machine is told to run", () => {
     for (const distro of DISTROS) {
       // Where a session looks is the server's own list, drawn above the rows
       // from the wire — no tab says it. What a tab still says is where each
-      // installer puts its binary.
-      expect(GUIDES[distro].rows.Claude.note).toContain("~/.local/bin");
+      // installer puts its binary, which on Windows is the same directory
+      // under the name Windows gives it.
+      expect(GUIDES[distro].rows.Claude.note).toContain(
+        distro === "Windows" ? "%USERPROFILE%\\.local\\bin" : "~/.local/bin",
+      );
+    }
+  });
+
+  /// The whole of why this feature exists: a distribution's claude can be too
+  /// old to connect — Ubuntu's under WSL was — so the install that stays
+  /// current is what a row leads with, and the packaged one waits under it.
+  it("leads Claude Code with the native installer on every tab but the Mac's", () => {
+    for (const distro of DISTROS) {
+      if (distro === "MacOs") continue;
+
+      const claude = GUIDES[distro].rows.Claude;
+
+      expect(claude.command).toBe(
+        distro === "Windows"
+          ? "irm https://claude.ai/install.ps1 | iex"
+          : "curl -fsSL https://claude.ai/install.sh | bash",
+      );
+
+      // And says the one thing the command cannot: which PATH has to name
+      // where it landed, and that Verkstead reads that PATH once.
+      expect(claude.note).toContain("PATH of the shell Verkstead is started");
+      expect(claude.note).toContain("started again");
+
+      // With this machine's own package kept under it rather than instead of
+      // it: a line to paste, with a note of its own.
+      expect(claude.alternative?.command).toBeTruthy();
+      expect(claude.alternative?.note).toBeTruthy();
+    }
+  });
+
+  /// Homebrew's prefix is on the floor under every Mac session's PATH and
+  /// ~/.local/bin is on none of it, because an app started from the Dock has
+  /// launchd's PATH rather than a shell's.
+  it("leads the Mac with Homebrew, and says what the Dock does", () => {
+    const claude = GUIDES.MacOs.rows.Claude;
+
+    expect(claude.command).toBe("brew install --cask claude-code");
+    expect(claude.alternative).toBeUndefined();
+    expect(claude.note).toContain("Dock");
+    expect(claude.note).toContain("launchd");
+  });
+
+  /// The sentence this step used to carry on all eight tabs, which said the
+  /// vendor's installer put claude somewhere no session could look. A session
+  /// looks wherever the server's own PATH names now, so nothing may say it.
+  it("says on no tab that a session cannot look where the installer lands", () => {
+    for (const distro of DISTROS) {
+      for (const instruction of Object.values(GUIDES[distro].rows)) {
+        for (const note of [
+          instruction.note,
+          instruction.alternative?.note,
+        ]) {
+          expect(note ?? "").not.toContain("not on the PATH a session gets");
+          expect(note ?? "").not.toContain("which is not on the PATH");
+        }
+      }
     }
   });
 });
@@ -429,6 +488,30 @@ describe("where each program was found", () => {
 });
 
 describe("where a session looks", () => {
+  /// A PATH read at startup is a PATH that does not have the directory this
+  /// morning's install landed in — which was Windows' own note when a session's
+  /// PATH was a fixed list everywhere else, and holds on all three platforms
+  /// now. So it is said once, above the rows, whichever tab is showing.
+  it("says the PATH was read once at startup, once and on every tab", () => {
+    const { container } = mount(PART_WAY);
+    const said = () =>
+      [...container.querySelectorAll("p")].filter((line) =>
+        line.textContent!.includes("reads that PATH once"),
+      );
+
+    expect(said()).toHaveLength(1);
+    expect(said()[0]!.textContent).toContain("started again");
+
+    for (const distro of DISTROS) {
+      fireEvent.click(
+        tabs(container).find((tab) => tab.dataset.distro === distro)!,
+      );
+
+      expect(said()).toHaveLength(1);
+    }
+  });
+
+
   /// The list the server composed rather than a sentence about the fixed one a
   /// session's `PATH` used to be: it is a fact about this machine, so no tab
   /// could say it.
@@ -447,6 +530,39 @@ describe("where a session looks", () => {
     );
 
     expect(drawn()).toEqual(PART_WAY.path);
+  });
+});
+
+describe("the second way to get a program", () => {
+  /// Claude Code's row leads with the vendor's installer and keeps this
+  /// machine's package under it: two commands, each with the press that copies
+  /// it, because either is a line somebody is about to paste.
+  it("draws the packaged install under the one the row leads with", () => {
+    const { container } = mount(
+      stating(PART_WAY, "Claude", { state: "Absent", trouble: null, seen: null }),
+    );
+    const claude = row(container, "Claude");
+    const commands = [...claude.querySelectorAll("pre")].map(
+      (line) => line.textContent,
+    );
+
+    expect(commands).toEqual([
+      "curl -fsSL https://claude.ai/install.sh | bash",
+      "sudo npm install -g @anthropic-ai/claude-code",
+    ]);
+    expect(claude.textContent).toContain("own package manager");
+  });
+
+  /// And a row with one instruction draws one: the Mac's Claude row is
+  /// Homebrew and nothing under it.
+  it("draws nothing under a row that has only the one", () => {
+    const { container } = mount(
+      stating(A_MAC, "Codex", { state: "Absent", trouble: null, seen: null }),
+    );
+
+    expect(
+      row(container, "Codex").querySelectorAll("pre"),
+    ).toHaveLength(1);
   });
 });
 
