@@ -23,13 +23,15 @@
 //! closed workbench asks the machine nothing at all.
 //!
 //! **Present means a session would find it.** A session resolves its binaries
-//! on the `PATH` inside the Sandbox rather than on the server's, so every probe
-//! here resolves on that same list — [`crate::sandbox::machine_path`], walked
-//! by that module's own lookup. A harness found on the server's `PATH` and
-//! nowhere a session looks would be a row that ticked and a session that could
-//! not start, which is exactly the failure the wizard exists to move forward in
-//! time. The names are [`crate::sessions::binary`]'s, for the same reason:
-//! what a row is about is the program a session is launched as.
+//! on the `PATH` inside the Sandbox, so every probe here resolves on that same
+//! list — [`crate::sandbox::machine_path`], walked by that module's own lookup.
+//! That list is composed out of the `PATH` the server itself was started with,
+//! read once at startup and shared with the sandbox builder, so a row and a
+//! session cannot come to disagree: a harness found somewhere no session looks
+//! would be a row that ticked and a session that could not start, which is
+//! exactly the failure the wizard exists to move forward in time. The names are
+//! [`crate::sessions::binary`]'s, for the same reason: what a row is about is
+//! the program a session is launched as.
 //!
 //! **The accounts are found in the server's own home**, which is where an
 //! agent that has been logged into once wrote one. What a shape is made of is
@@ -1024,6 +1026,57 @@ echo {token}
             state(&machine, Dependency::Codex),
             DependencyState::Absent { trouble: None },
             "and the three that are not there say so, with nothing to say about it",
+        );
+    }
+
+    /// And a harness the human installed for themselves is one of them: the
+    /// vendor's own installer puts Claude Code in `~/.local/bin`, which a
+    /// session searches because the `PATH` the server was started with is what
+    /// a session's is composed out of — see [`sandbox::composed`].
+    ///
+    /// Ahead of the system directories, which is the whole point: a
+    /// distribution's package too old to connect is what a session would find
+    /// otherwise, and the row would tick on the wrong one.
+    #[cfg(unix)]
+    #[test]
+    fn a_harness_under_the_servers_own_home_is_present_and_leads_the_path() {
+        let servers_home = tempfile::tempdir().unwrap();
+        let local = servers_home.path().join(".local/bin");
+
+        std::fs::create_dir_all(&local).unwrap();
+        program(&local.join("claude"), "#!/bin/sh\n");
+
+        let path = sandbox::composed(
+            Platform::Linux,
+            &OsString::from(format!("{}:/usr/bin", local.display())),
+            Some(servers_home.path()),
+        );
+
+        let machine = Machine::stated(
+            Platform::Linux,
+            path.clone(),
+            None,
+            None,
+            &home(Platform::Linux, servers_home.path()),
+        );
+
+        assert_eq!(
+            state(&machine, Dependency::Claude),
+            DependencyState::Present,
+            "a session would find that install, so the row says so",
+        );
+
+        let path = path.to_string_lossy();
+        let entries: Vec<&str> = path.split(':').collect();
+
+        assert_eq!(
+            entries.first().copied(),
+            local.to_str(),
+            "and it is the first place a session looks: {entries:?}",
+        );
+        assert!(
+            entries.contains(&"/usr/bin"),
+            "with the machine's own still under it: {entries:?}",
         );
     }
 
