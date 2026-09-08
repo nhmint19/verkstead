@@ -609,10 +609,29 @@ fn compile_server(
     // Started in its own HOME, which is a directory of Verkstead's own holding
     // nothing: a compile server has no checkout of its own to stand in, and
     // every path it is handed is absolute.
+    // What this searches for a program in, said once: the same value the
+    // environment below is set to, and the same one the grants beneath it are
+    // read out of — see [`crate::sandbox::path`].
+    let searches = sandbox::path(Platform::HERE, &ours);
+
     let mut surface = sandbox::on_the_machine(Platform::HERE, home.clone());
 
+    surface.made(Access::Empty(home.clone()));
+
+    // And everything that `PATH` names which this has to be granted as well as
+    // told about — see [`crate::sandbox::reaching`], which is the same rule a
+    // session's own description goes through. That list leads with the `PATH`
+    // the server was started with, so without this a compile server would be
+    // told to look in directories of the human's own that are not inside it.
+    //
+    // After the empty HOME for that description's reason: on a machine whose
+    // Data Directory is under the server's home, a bind said before it is one
+    // the directory made over it takes away again.
+    if let Some(servers_home) = sandbox::servers_home() {
+        sandbox::reaching(Platform::HERE, &searches, servers_home, &mut surface);
+    }
+
     surface
-        .made(Access::Empty(home.clone()))
         // Every Conversation's checkout, writable: a compile writes its output
         // into the Worktree's own `target/`. One entry rather than one per
         // Conversation, because a Worktree made after this started would
@@ -628,8 +647,9 @@ fn compile_server(
         // The same `PATH` a session gets, off the same directory: the sccache
         // this runs is beside where a session's `verkstead` goes, and what is
         // in front of the machine's own paths is that directory either way —
-        // see [`crate::sandbox::path`].
-        .set("PATH", sandbox::path(Platform::HERE, &ours))
+        // see [`crate::sandbox::path`]. The value the grants above were read
+        // out of, so what this is told to search is what it can open.
+        .set("PATH", &searches)
         .set("SCCACHE_DIR", dir.join(SCCACHE_DIR))
         .set("SCCACHE_CACHE_SIZE", size)
         .set("SCCACHE_START_SERVER", "1")

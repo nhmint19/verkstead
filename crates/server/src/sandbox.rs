@@ -889,8 +889,9 @@ fn joined(entries: &[&OsStr]) -> OsString {
 /// what is not bound is not there at all; a Mac's policy denies by default, and
 /// what is not allowed is refused. So a harness installed the vendor's way into
 /// `~/.local/bin` is a name a session finds nothing at until this says
-/// otherwise — see [`Sandbox::surface`], which is the one caller and where each
-/// of these becomes a read-only grant like any other.
+/// otherwise — see [`reaching`], which is where each of these becomes a
+/// read-only grant like any other, and which both the sandboxes that hand out
+/// a composed `PATH` go through.
 ///
 /// **Read-only, and per-user directories the `PATH` itself named.** That is the
 /// whole of the hole: nothing outside the home becomes reachable, an entry
@@ -1441,6 +1442,51 @@ fn holding(landed: &Path, home: &Path) -> Option<PathBuf> {
     let directory = landed.parent()?;
 
     beneath(directory.as_os_str(), home.as_os_str()).then(|| directory.to_owned())
+}
+
+/// Everything `path` names that a sandbox has to be *told* about as well as
+/// hand out, put on `surface` read-only: the per-user entries of the list
+/// itself, and the installs the programs on it link into — see [`per_user`] and
+/// [`installs`], which are the two halves and where each one's rule and bounds
+/// are.
+///
+/// **Said once because two sandboxes hand out the same `PATH`.** A session's is
+/// one and the compile server outside every session is the other — see
+/// [`Sandbox::surface`] and [`crate::build_cache::BuildCache::compiling`] — and
+/// both are given [`path`]'s answer, which leads with the human's own
+/// directories. A list handed out without these is a sandbox told to look in
+/// directories that are not inside it, which is not what either of them means
+/// by a `PATH`.
+///
+/// **The `PATH` that was handed out rather than one composed again beside it.**
+/// Both callers read the one value into this and set the same one on the
+/// environment, because what a sandbox is granted has to be the directories it
+/// was told about: two composings would be two answers to the one question.
+///
+/// **Where in the description it goes is the caller's**, the order being what a
+/// description says — see [`Surface`]. Both put it after the empty HOME, that
+/// directory being one these sit under on a Linux machine, and ahead of
+/// whatever each of them says later.
+pub(crate) fn reaching(platform: Platform, path: &OsStr, home: &Path, surface: &mut Surface) {
+    for directory in per_user(platform, path, home) {
+        surface.own(directory, Reach::ReadOnly);
+    }
+
+    for directory in installs(platform, path, home) {
+        surface.own(directory, Reach::ReadOnly);
+    }
+}
+
+/// The home of whoever is running the server, as it was read at startup, or
+/// `None` on a machine that names none.
+///
+/// [`started_with`]'s other half, reachable for the one caller that has no
+/// Conversation to take a home off: the compile server is made once, outside
+/// every session, where a session's description carries the same value by way
+/// of [`Homes`] — see [`Sandbox::servers_home`]. One read either way, so the
+/// two cannot come to disagree about whose home a `PATH` entry is under.
+pub(crate) fn servers_home() -> Option<&'static Path> {
+    started_with().home.as_deref()
 }
 
 /// Where `program` is on `path`, read the way `platform` reads a name, or
@@ -3541,11 +3587,14 @@ impl Sandbox {
             }
         }
 
-        // And the per-user directories a session is told to look for a program
-        // in, read-only — see [`per_user`], which is where the rule and its
-        // bounds are. What is on this `PATH` is the human's own order, so what
-        // a session finds is the harness they actually installed rather than
-        // whichever one the machine's packages hold.
+        // And everything that `PATH` names which a session has to be granted as
+        // well as told about: the per-user directories it is to look for a
+        // program in, and the installs the programs in them link into — see
+        // [`reaching`], which is where the rule and its bounds are and which the
+        // compile server outside every session goes through too. What is on this
+        // `PATH` is the human's own order, so what a session finds is the
+        // harness they actually installed rather than whichever one the
+        // machine's packages hold.
         //
         // **The `PATH` a session gets rather than one composed again beside
         // it**, which is what makes this the entries a session really searches:
@@ -3556,23 +3605,12 @@ impl Sandbox {
         // one the directory made over it takes away again. And ahead of the
         // account and of what covers the account's own skills, so that what is
         // said later still stands over them.
-        for directory in per_user(self.platform, &session_path, &self.servers_home) {
-            surface.own(directory, Reach::ReadOnly);
-        }
-
-        // And where a program on that `PATH` is a link into an install of the
-        // human's own, the directory it lands in with them — see [`installs`],
-        // which is where that rule and its bounds are. Claude's native
-        // installer leaves `~/.local/bin/claude` linking into
-        // `~/.local/share/claude/versions/`, and the grant above alone would
-        // give a session a dangling link.
-        //
-        // Beside the entries rather than before or after them: both are the
-        // human's own directories read-only, and the same later word stands
-        // over the two.
-        for directory in installs(self.platform, &session_path, &self.servers_home) {
-            surface.own(directory, Reach::ReadOnly);
-        }
+        reaching(
+            self.platform,
+            &session_path,
+            &self.servers_home,
+            &mut surface,
+        );
 
         surface
             .own(&self.worktree, Reach::ReadWrite)
@@ -4542,6 +4580,54 @@ mod tests {
             installs(Platform::Linux, &path, home.path()).is_empty(),
             "and the directory it is in is the entry itself, which is \
              `per_user`'s to grant",
+        );
+    }
+
+    /// Both halves of the hole are put on a description by the one call, so a
+    /// sandbox that hands out a composed `PATH` cannot come to have one and not
+    /// the other.
+    ///
+    /// Which is what the compile server outside every session was given wrong:
+    /// it takes the same `PATH` a session does — see
+    /// [`crate::build_cache::BuildCache::compiling`] — and had neither grant, so
+    /// it was told to look in directories of the human's own that were not
+    /// inside it.
+    #[cfg(unix)]
+    #[test]
+    fn what_a_composed_path_names_is_granted_by_the_one_call() {
+        let home = tempfile::tempdir().unwrap();
+        let (local, version) = (
+            home.path().join(".local/bin"),
+            home.path().join(".local/share/claude/versions/0.0.0"),
+        );
+
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::create_dir_all(&version).unwrap();
+        std::fs::write(version.join("claude"), "#!/bin/sh\n").unwrap();
+        std::os::unix::fs::symlink(version.join("claude"), local.join("claude")).unwrap();
+
+        let path = joined(&[local.as_os_str(), OsStr::new("/usr/bin")]);
+        let mut surface = Surface::starting_in(home.path().to_owned());
+
+        reaching(Platform::Linux, &path, home.path(), &mut surface);
+
+        let granted: Vec<(&Path, Reach)> = surface
+            .reaches()
+            .iter()
+            .filter_map(|access| match access {
+                Access::Own { path, reach } => Some((path.as_path(), *reach)),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(
+            granted,
+            vec![
+                (local.as_path(), Reach::ReadOnly),
+                (version.as_path(), Reach::ReadOnly),
+            ],
+            "the entry the `PATH` named and the install its program links into, \
+             both read-only and neither of them without the other",
         );
     }
 
