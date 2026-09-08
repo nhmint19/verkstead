@@ -100,6 +100,15 @@ import styles from "./picking.module.css";
 /// on [`Choosing`], which is that prop arriving.
 const NOTHING = "Not chosen";
 
+/// The room the rows keep off the window's own edge where they have to be pulled
+/// back onto it, in pixels.
+///
+/// Small, because it is not a margin anybody is meant to read: it is there so
+/// that a list pushed against the edge still has its shadow to sit on rather
+/// than being sheared off by it. See [`dropping`]'s measure, which is the one
+/// thing that uses it.
+const GUTTER = 8;
+
 /// What either control is given: the caller's rows, and the two functions that
 /// read them.
 ///
@@ -660,8 +669,8 @@ export function dropping(props: {
   /// hang off.
   const [above, setAbove] = createSignal(false);
 
-  /// And where they are put: the left edge and the width of the anchor, and one
-  /// of `top` and `bottom` depending on which way they hang.
+  /// And where they are put: a left edge and a width off the anchor, and one of
+  /// `top` and `bottom` depending on which way they hang.
   ///
   /// Written as a style rather than in the stylesheet because it is measured: a
   /// fixed box is positioned against the window, and where the anchor is in the
@@ -779,7 +788,7 @@ export function dropping(props: {
     if (!rows) return;
 
     const anchor = props.anchor().getBoundingClientRect();
-    const wanted = rows.getBoundingClientRect().height;
+    const drop = rows.getBoundingClientRect();
 
     // Over the anchor only where the rows do not fit under it, and then only
     // where there is more room over it: the ordinary way round is the one to be
@@ -788,12 +797,30 @@ export function dropping(props: {
     // nothing about *which* rows — the list is capped and scrolls from its top
     // either way.
     const over =
-      anchor.bottom + wanted > window.innerHeight &&
+      anchor.bottom + drop.height > window.innerHeight &&
       anchor.top > window.innerHeight - anchor.bottom;
+
+    // How wide the rows will stand: the anchor's width, which is what they are
+    // handed, or their own where a caller has asked for more of them than that.
+    // The compose page's pairing lists are 30rem against a trigger a third of
+    // that — `min-width` in `Setup.module.css`, a reading being "Claude Code
+    // Fable 5 — Work" and a quarter of a box being nothing like that — and a
+    // width handed to a box with a `min-width` over it is a width that loses.
+    const width = Math.max(anchor.width, drop.width);
+
+    // And where the left edge goes: the anchor's, pulled back onto the window
+    // where a list wider than its anchor would otherwise run off the right of
+    // it. Nothing scrolls to reach what falls past a fixed box's edge — the
+    // window is the last word rather than a box that could be scrolled — so a
+    // list left running off it would be rows nobody could get to at all.
+    const left = Math.max(
+      GUTTER,
+      Math.min(anchor.left, window.innerWidth - width - GUTTER),
+    );
 
     setAbove(over);
     setPlacing({
-      left: `${anchor.left}px`,
+      left: `${left}px`,
       width: `${anchor.width}px`,
       ...(over
         ? { bottom: `${window.innerHeight - anchor.top}px` }

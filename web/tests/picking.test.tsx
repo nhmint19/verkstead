@@ -528,19 +528,32 @@ describe("which way the rows come down", () => {
   /// these stand inside. It decided which way the rows hung until the rows were
   /// made fixed, and it is still laid here so that the one test about it is
   /// asking something real.
+  ///
+  /// `across` is where the control's left edge is and `wide` how wide the rows
+  /// stand, which is the control's own width unless a caller has asked for more
+  /// — the compose page's pairing lists do, in `Setup.module.css`.
   function laid(at: {
     control: number;
     rows: number;
+    across?: number;
+    wide?: number;
     clip?: { top: number; bottom: number };
   }): void {
     const clip = at.clip ?? { top: 0, bottom: 1000 };
+    const across = at.across ?? 24;
 
     window.innerHeight = 1000;
+    window.innerWidth = 1000;
 
     vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
       function (this: Element): DOMRect {
         if (this.classList.contains(styles.drop!)) {
-          return { top: 0, bottom: at.rows, height: at.rows } as DOMRect;
+          return {
+            top: 0,
+            bottom: at.rows,
+            height: at.rows,
+            width: at.wide ?? 300,
+          } as DOMRect;
         }
 
         if (this.tagName === "BUTTON") {
@@ -548,7 +561,7 @@ describe("which way the rows come down", () => {
             top: at.control,
             bottom: at.control + 40,
             height: 40,
-            left: 24,
+            left: across,
             width: 300,
           } as DOMRect;
         }
@@ -616,6 +629,29 @@ describe("which way the rows come down", () => {
 
     expect(rows.style.bottom).toBe("200px");
     expect(rows.style.top).toBe("");
+  });
+
+  /// And pulled back onto the window where a list wider than its control would
+  /// otherwise run off the right of it. The pairing pickers on the compose page
+  /// are the ones this is for: their rows ask for 30rem against a trigger a
+  /// third of that, and the last picker of a row stands near the far edge. A
+  /// fixed box that fell past the window would be rows nothing could scroll to.
+  it("pulls a list wider than its control back onto the window", () => {
+    laid({ control: 100, rows: 250, across: 800, wide: 480 });
+    picking();
+
+    // Eight off the far edge: 1000 less the 480 the rows stand at, less the gap
+    // they keep so the shadow under them has somewhere to sit.
+    expect(opened(UNDER).style.left).toBe("512px");
+  });
+
+  /// And left where it is where it fits, which is every list the width of the
+  /// control it came out of.
+  it("leaves a list that fits at its control's left edge", () => {
+    laid({ control: 100, rows: 250, across: 600 });
+    picking();
+
+    expect(opened(UNDER).style.left).toBe("600px");
   });
 
   /// Measured again while they are down, because a fixed box does not move with
