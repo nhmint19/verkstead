@@ -312,11 +312,13 @@ describe("a shared conversation", () => {
     expect(row.querySelector("button")).toBeNull();
 
     // And the file itself carries a record of each and not a byte of any: the
-    // id it is known by, the name it stands under and how large it was.
+    // id it is known by, the name it stands under, how large it was, and what
+    // it was attached to.
     for (const attachment of attached) {
       expect(Object.keys(attachment).sort()).toEqual([
         "bytes",
         "id",
+        "label",
         "name",
         "origin",
       ]);
@@ -515,6 +517,60 @@ describe("a question set in a share", () => {
     expect(details.querySelector('[role="menuitem"]')).toBeNull();
     expect(screen.queryByRole("button", { name: /submit/i })).toBeNull();
     expect(screen.queryByText("Lock unanswered")).toBeNull();
+  });
+
+  /// And the files the human put on its Answers, drawn under the questions they
+  /// were put on as the same read-only pills the record draws anywhere else:
+  /// the name, how large the file was, and nothing to press.
+  ///
+  /// Over the share's own Set rather than a stand-in, because these rows are
+  /// what the server put in the file. The bytes are what never travel — a share
+  /// carries the record of a file and none of the file, exactly as it does for
+  /// the ones handed over with the Brief.
+  it("draws the files put on its answers, and carries none of them", async () => {
+    const carried = SHARED.sets[0]!;
+    expect(
+      carried.attachments.length,
+      "the fixture's set should carry files",
+    ).toBeGreaterThan(0);
+
+    const details = await opened(showing(carried));
+
+    for (const file of carried.attachments) {
+      // Found inside the pane rather than through the role, the way every other
+      // reading of this pane is: the details pane of a share is drawn beside
+      // the Timeline rather than as the page.
+      const row = details.querySelector<HTMLElement>(
+        `[aria-label="Files attached to ${file.label}"]`,
+      )!;
+      expect(row, `expected the row under ${file.label}`).toBeTruthy();
+
+      expect(
+        [...row.querySelectorAll(`.${pill.attachmentName}`)].map(
+          (name) => name.textContent,
+        ),
+      ).toEqual([file.name]);
+      expect(
+        [...row.querySelectorAll(`.${pill.attachmentSize}`)].map(
+          (size) => size.textContent,
+        ),
+      ).toEqual([sized(file.bytes)]);
+
+      // Nothing to press on it, on a page there is nobody behind.
+      expect(row.querySelector("button")).toBeNull();
+
+      // And a record of the file rather than the file: the id it is known by,
+      // the name it stood under, how large it was, and what it was put on.
+      expect(Object.keys(file).sort()).toEqual([
+        "bytes",
+        "id",
+        "label",
+        "name",
+        "origin",
+      ]);
+    }
+
+    expect(details.querySelector(`.${pill.attachments}`)).toBeTruthy();
   });
 
   /// A Set nobody had got to yet says so, rather than reading as a decision

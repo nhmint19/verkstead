@@ -980,20 +980,37 @@ async fn the_attached_files_are_read_at_the_path_the_prompt_names_and_written_no
     );
 }
 
-/// And a Conversation nothing was attached to has no such directory at all: a
-/// path an agent is told about and finds empty is worse than one that is not
-/// there.
+/// And a Conversation nothing was attached to is bound over an empty directory
+/// all the same, so a session that blocked on an ask can read a file put on an
+/// Answer while it waited.
+///
+/// The sandbox is composed before the file exists, which is the whole of what
+/// this asserts: the bind is decided as a session is started, and a session
+/// blocked on an ask was started hours before the human answered it. Nothing
+/// says the path is there — the prompt lists the files there are, and a
+/// Conversation with none is told nothing at all.
 #[tokio::test]
-async fn a_conversation_with_nothing_attached_has_nothing_at_that_path() {
+async fn a_file_attached_after_a_session_started_is_read_at_that_path_too() {
     let fixture = grilling().await;
     let sandbox = fixture.sandbox(vec![]);
 
-    let reported = probe(&sandbox, "dir /verkstead/attachments attachments\n");
+    fixture.attach("rates.csv", b"1,2,3");
+
+    let reported = probe(
+        &sandbox,
+        r#"
+        dir /verkstead/attachments attachments
+        file /verkstead/attachments/rates.csv attached
+        "#,
+    );
 
     assert_eq!(
-        reported["attachments"], "absent",
-        "no bind is made, so the directory of Verkstead's own holds only `bin` and \
-         the skills"
+        reported["attachments"], "read",
+        "the directory was bound though it was empty when the session started"
+    );
+    assert_eq!(
+        reported["attached"], "read",
+        "and the file the Response names is there to be read"
     );
 }
 
@@ -1978,8 +1995,10 @@ async fn the_skills_inside_are_the_bundled_ones_and_only_those() {
         "and the whole of what this binary ships is there, at a path no backend owns"
     );
     assert_eq!(
-        reported["verkstead"], "bin skills ",
-        "in a directory the binds made, holding what the server put there and nothing else"
+        reported["verkstead"], "attachments bin skills ",
+        "in a directory the binds made, holding what the server put there and nothing \
+         else — the attachments directory among them, which every session has whether \
+         or not anything is in it"
     );
     assert_eq!(
         reported["tobico-skills"], "absent",

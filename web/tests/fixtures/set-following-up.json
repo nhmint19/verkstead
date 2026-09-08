@@ -1,5 +1,6 @@
 {
   "Set": {
+    "attachments": [],
     "branch": "rate-limiting",
     "conversation": 1,
     "diagrams": false,

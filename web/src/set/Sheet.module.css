@@ -604,6 +604,17 @@
   color: var(--ink-soft);
 }
 
+/* The files put on this Answer, under everything else the question came back
+   with — where the row stood on the sheet, which is under the field. The pills
+   themselves are drawn the same wherever they are and the list's own indent
+   comes off there; what is here is where the row stands. See
+   `Attaching.module.css`, and `.attachments` in `Answering.module.css`, which
+   is this same row with a × still on it. */
+.ask.decided .attachments {
+  margin: 0.75rem 0 0;
+  padding: 0;
+}
+
 /* The two confirm sheets — the warning before a Response goes out with
    questions left open, and the one before a Set is locked. Both are drawn
    through the same `Modal` the settings page's form is, so what is left here

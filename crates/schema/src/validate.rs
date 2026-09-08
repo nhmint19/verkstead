@@ -144,7 +144,33 @@ impl QuestionSet {
 
 impl Response {
     /// Check the Response against the Set it answers.
+    ///
+    /// The Set alone, for a Response answered in words and Options and nothing
+    /// else — which is every Response that reaches this from outside a browser.
+    /// [`Response::validate_attached`] is the same check told what was handed
+    /// over beside the words.
     pub fn validate(&self, set: &QuestionSet) -> Result<(), ValidationError> {
+        self.validate_attached(set, &[])
+    }
+
+    /// The same check, told which Questions the record says a file was put on.
+    ///
+    /// A file alone is an Answer — see [`Answer::is_answer`] — and the sheet
+    /// submits a question with one on it as answered. What it does not send is
+    /// the file: the rows on the Set are the truth about which Answer each is
+    /// on, so whoever holds those rows hands the labels in here and an entry
+    /// carrying neither an Option nor words is an Answer to one of them rather
+    /// than a question left open without saying so.
+    ///
+    /// Nothing else moves. A label named here that the Set does not ask is
+    /// still no question, an entry marked `unanswered: true` is still taken at
+    /// its word — the human may leave a question open and hand a file over with
+    /// it — and every question still appears one way or the other.
+    pub fn validate_attached(
+        &self,
+        set: &QuestionSet,
+        attached: &[String],
+    ) -> Result<(), ValidationError> {
         let mut violations = Vec::new();
 
         // Every question the Response has to account for, in the order the
@@ -201,7 +227,13 @@ impl Response {
                 continue;
             }
 
-            check_answer(answer, label, options, &mut violations);
+            check_answer(
+                answer,
+                label,
+                options,
+                attached.iter().any(|on| on == label),
+                &mut violations,
+            );
         }
 
         for (name, _) in &expected {
@@ -257,10 +289,18 @@ fn check_proposal(set: &QuestionSet, violations: &mut Vec<Violation>) {
     }
 }
 
+/// One entry, against the question it names.
+///
+/// `attached` is whether the record says a file was put on this label, which is
+/// an Answer to it on its own — see [`Response::validate_attached`]. It counts
+/// for the entry that carries nothing else and for nothing beyond that: a
+/// question the human left open on purpose is left open, file or no file, since
+/// saying so out loud is the whole of what the marker is for.
 fn check_answer(
     answer: &Answer,
     label: &str,
     options: &[QuestionOption],
+    attached: bool,
     violations: &mut Vec<Violation>,
 ) {
     if answer.unanswered {
@@ -273,7 +313,7 @@ fn check_answer(
         return;
     }
 
-    if !answer.is_answer() {
+    if !answer.is_answer() && !attached {
         violations.push(Violation::at(
             label,
             "neither answered nor marked `unanswered: true`; leaving a question open \

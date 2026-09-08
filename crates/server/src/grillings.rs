@@ -32,6 +32,7 @@
 //! true of it.
 
 use crate::AppState;
+use crate::answer_files::OnAnswers;
 use crate::drivers::Driving;
 use crate::exchanges::exchange;
 use crate::skills;
@@ -101,8 +102,17 @@ pub(crate) async fn again(state: AppState, conversation_id: i64, driving: Drivin
 
     // The round's own Brief either way — the newest on the Timeline, which is
     // the one the round this session belongs to was opened with.
+    //
+    // And, where the digest is carried, the files the human put on those
+    // Answers: a relaunch is primed with what was settled, and what came with a
+    // decision is part of it. Read only where there is a digest to name them
+    // under — a steer into Grilling carries none, and neither does the reading.
     let prompt = match digest {
-        Digest::Prime => skills::grilling_again(skills, &brief(&timeline), &settled(&timeline)),
+        Digest::Prime => skills::grilling_again(
+            skills,
+            &brief(&timeline),
+            &settled(&timeline, &OnAnswers::of(&state, conversation_id).await),
+        ),
         Digest::Skip => skills::grilling(skills, &brief(&timeline)),
     };
 
@@ -226,7 +236,11 @@ fn brief(timeline: &[store::TimelineEvent]) -> String {
 /// under its own steer rather than every Set the Conversation has ever answered
 /// — see [`crate::follow_ups`]. A grilling hands in the whole of it, that being
 /// the whole of what it settled.
-pub(crate) fn settled(timeline: &[store::TimelineEvent]) -> String {
+///
+/// `files` is what the human put on those Answers, told apart by the Set each
+/// exchange is of: the session this primes never saw a file handed over, so what
+/// came with a decision is named under it. See [`crate::exchanges::exchange`].
+pub(crate) fn settled(timeline: &[store::TimelineEvent], files: &OnAnswers) -> String {
     let mut digest = String::new();
 
     for event in timeline {
@@ -246,7 +260,7 @@ pub(crate) fn settled(timeline: &[store::TimelineEvent]) -> String {
             continue;
         };
 
-        digest.push_str(&exchange(set, &answered.response));
+        digest.push_str(&exchange(set, &answered.response, files.on(asked.set_id)));
     }
 
     digest
@@ -254,6 +268,8 @@ pub(crate) fn settled(timeline: &[store::TimelineEvent]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use verkstead_schema::{QuestionSet, Response};
 
     use super::*;
@@ -333,6 +349,27 @@ comment: none of this is settled about the burst allowance
         }
     }
 
+    /// Nothing was put on any of these Answers, which is nearly every Set: the
+    /// digest is of what was decided, and most decisions come with no file.
+    fn nothing_attached() -> OnAnswers {
+        OnAnswers::holding(Vec::new(), PathBuf::from(crate::attachments::INSIDE))
+    }
+
+    /// A file the human put on one Set's Answer to one Question, as the record
+    /// holds it.
+    fn attached(set: i64, label: &str, name: &str) -> store::Attachment {
+        store::Attachment {
+            id: 7,
+            origin: store::Origin::Answer {
+                set,
+                label: label.to_owned(),
+            },
+            name: name.to_owned(),
+            bytes: 512,
+            added_at: "2026-08-23T12:04:00.000Z".to_owned(),
+        }
+    }
+
     /// Answered, which is the settlement a digest is made of.
     fn answered(set_id: i64) -> store::Settlement {
         store::Settlement::Answered(store::StoredResponse {
@@ -349,7 +386,7 @@ comment: none of this is settled about the burst allowance
         let set = QuestionSet::from_yaml(ASKED).unwrap();
         let response = Response::from_yaml(ANSWERED).unwrap();
 
-        let digest = exchange(&set, &response);
+        let digest = exchange(&set, &response, nothing_attached().on(11));
 
         assert!(
             digest.contains("## How the limiter counts"),
@@ -373,6 +410,115 @@ comment: none of this is settled about the burst allowance
         );
     }
 
+    /// And what the human handed over with an Answer is named under it, at the
+    /// path the session reading the digest opens it at.
+    ///
+    /// The session being primed never saw the file arrive — that is what being
+    /// primed on an exchange means — so a decision that came with one says so
+    /// where the decision is.
+    #[test]
+    fn the_files_put_on_an_answer_are_named_under_the_decision() {
+        let set = QuestionSet::from_yaml(ASKED).unwrap();
+        let response = Response::from_yaml(ANSWERED).unwrap();
+
+        let files = OnAnswers::holding(
+            vec![
+                attached(11, "Q2", "trace.txt"),
+                attached(11, "Q2", "graph.png"),
+                attached(11, "Q4a", "window.md"),
+                attached(12, "Q1", "another-sets.csv"),
+            ],
+            PathBuf::from(crate::attachments::INSIDE),
+        );
+
+        let digest = exchange(&set, &response, files.on(11));
+
+        assert!(
+            digest.contains(
+                "In process — until it needs to survive a restart\n\n\
+                 _Attached:_ `/verkstead/attachments/trace.txt`, \
+                 `/verkstead/attachments/graph.png`\n"
+            ),
+            "the files are named under the decision they came with, in the order \
+             they were attached: {digest}"
+        );
+        assert!(
+            digest.contains(
+                "**Q4a** How long is it?\n\nwhatever the client's plan says\n\n\
+                 _Attached:_ `/verkstead/attachments/window.md`\n"
+            ),
+            "a Sub-question's Answer carries its own the same way: {digest}"
+        );
+        assert!(
+            !digest.contains("another-sets.csv"),
+            "and another Set's files are not this exchange's to draw: {digest}"
+        );
+        assert!(
+            !digest.contains("**Q1** Per key or per address?\n\nPer key\n\n_Attached:_"),
+            "an Answer nothing was put on says nothing about files: {digest}"
+        );
+    }
+
+    /// And a question the file *is* the Answer to says so, rather than reading
+    /// as one the human passed over.
+    ///
+    /// A file alone is an Answer everywhere else the branch reads one — the
+    /// check a submission goes through, what the sheet submits, and the record
+    /// of a settled Set — so the digest a later session is primed with cannot be
+    /// the one place it says the opposite. `_Left open._` invites that session
+    /// to ask the question again, and there is nothing here to ask.
+    ///
+    /// The marker is still the human's to mean, though: a question they left
+    /// open on purpose is open whatever came with it.
+    #[test]
+    fn a_question_answered_with_a_file_alone_does_not_read_as_left_open() {
+        let set = QuestionSet::from_yaml(ASKED).unwrap();
+        let response = Response::from_yaml(
+            "
+answers:
+  - label: Q1
+  - label: Q2
+    selected: 1
+  - label: Q3
+    unanswered: true
+  - label: Q4a
+    free_text: whatever the client's plan says
+",
+        )
+        .unwrap();
+
+        let files = OnAnswers::holding(
+            vec![
+                attached(11, "Q1", "the-keys-we-see.csv"),
+                attached(11, "Q3", "what-we-log.txt"),
+            ],
+            PathBuf::from(crate::attachments::INSIDE),
+        );
+
+        let digest = exchange(&set, &response, files.on(11));
+
+        assert!(
+            digest.contains(
+                "**Q1** Per key or per address?\n\n\
+                 _Answered with what was attached._\n\n\
+                 _Attached:_ `/verkstead/attachments/the-keys-we-see.csv`\n"
+            ),
+            "the file is the whole of this Answer, and the line under it is what \
+             was handed over: {digest}"
+        );
+        assert!(
+            digest.contains(
+                "**Q3** What happens when it trips?\n\n_Left open._\n\n\
+                 _Attached:_ `/verkstead/attachments/what-we-log.txt`\n"
+            ),
+            "and one left open on purpose is open, file or no file: {digest}"
+        );
+        assert!(
+            !digest.contains("**Q1** Per key or per address?\n\n_Left open._"),
+            "which is the reading this is here to keep out: {digest}"
+        );
+    }
+
     /// A question the human deliberately left open is worth more than a blank:
     /// the new grilling may ask it again, and this is what says it may.
     #[test]
@@ -380,7 +526,7 @@ comment: none of this is settled about the burst allowance
         let set = QuestionSet::from_yaml(ASKED).unwrap();
         let response = Response::from_yaml(ANSWERED).unwrap();
 
-        let digest = exchange(&set, &response);
+        let digest = exchange(&set, &response, nothing_attached().on(11));
 
         assert!(
             digest.contains("**Q3** What happens when it trips?\n\n_Left open._"),
@@ -411,7 +557,7 @@ comment: none of this is settled about the burst allowance
         ];
 
         assert_eq!(
-            settled(&timeline)
+            settled(&timeline, &nothing_attached())
                 .matches("## How the limiter counts")
                 .count(),
             1,
@@ -435,7 +581,7 @@ comment: none of this is settled about the burst allowance
             event: store::Event::Brief("# Rate limiting\n".to_owned()),
         }];
 
-        assert_eq!(settled(&timeline), "");
+        assert_eq!(settled(&timeline, &nothing_attached()), "");
         assert_eq!(brief(&timeline), "# Rate limiting\n");
         assert!(crate::sets::open(&timeline, crate::sets::Open::Idled).is_empty());
     }

@@ -273,6 +273,112 @@ answers:
     assert!(error.names("Q1"), "got: {error}");
 }
 
+/// And a file on it is: the human handed something over, which is answering.
+///
+/// The Response says nothing about it — a file goes on the Set as it is chosen,
+/// and the rows on the record are what say which Answer it is on — so the check
+/// is told the labels rather than reading them off what was sent.
+#[test]
+fn a_question_with_a_file_on_it_and_nothing_else_is_answered() {
+    Response::from_yaml(
+        "
+answers:
+  - label: Q1
+  - label: Q2a
+    selected: 1
+  - label: Q2b
+    unanswered: true
+",
+    )
+    .unwrap()
+    .validate_attached(&set(), &["Q1".to_owned()])
+    .expect("a file put on Q1 is an Answer to it");
+}
+
+/// And a file on one question answers that one alone: the entry beside it is
+/// as open as it was.
+#[test]
+fn a_file_answers_the_question_it_was_put_on_and_no_other() {
+    let error = Response::from_yaml(
+        "
+answers:
+  - label: Q1
+  - label: Q2a
+  - label: Q2b
+    unanswered: true
+",
+    )
+    .unwrap()
+    .validate_attached(&set(), &["Q1".to_owned()])
+    .expect_err("nothing was put on Q2a");
+
+    assert!(error.names("Q2a"), "got: {error}");
+    assert!(!error.names("Q1"), "got: {error}");
+}
+
+/// A file is what the record holds, and a question the human left open on
+/// purpose is still open: the marker is said out loud, and nothing about a file
+/// argues with it.
+#[test]
+fn a_file_does_not_contradict_a_question_left_open() {
+    Response::from_yaml(
+        "
+answers:
+  - label: Q1
+    unanswered: true
+  - label: Q2a
+    selected: 1
+  - label: Q2b
+    unanswered: true
+",
+    )
+    .unwrap()
+    .validate_attached(&set(), &["Q1".to_owned()])
+    .expect("leaving a question open is the human's to say");
+}
+
+/// The list the record fills in on the way out, which is what a session reads:
+/// an entry carrying files and nothing else is an Answer, and one carrying none
+/// writes no field at all.
+#[test]
+fn the_files_filled_in_on_the_way_out_are_an_answer() {
+    let mut response = Response::from_yaml(
+        "
+answers:
+  - label: Q1
+  - label: Q2a
+    selected: 1
+  - label: Q2b
+    unanswered: true
+",
+    )
+    .unwrap();
+
+    assert!(!response.answers[0].is_answer());
+
+    response.answers[0]
+        .attachments
+        .push("/verkstead/attachments/counter.png".to_owned());
+
+    assert!(response.answers[0].is_answer());
+
+    let written = response.to_yaml().unwrap();
+    assert!(
+        written.contains("/verkstead/attachments/counter.png"),
+        "the paths are what a session reads them at, got: {written}"
+    );
+    assert_eq!(
+        written.matches("attachments:").count(),
+        1,
+        "an Answer with no files carries no list, got: {written}"
+    );
+    assert_eq!(
+        Response::from_yaml(&written).unwrap(),
+        response,
+        "and what was written reads back as what it was"
+    );
+}
+
 #[test]
 fn blank_free_text_is_not_an_answer() {
     let error = Response::from_yaml(

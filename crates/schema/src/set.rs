@@ -321,6 +321,29 @@ impl QuestionSet {
     pub fn to_yaml(&self) -> Result<String, serde_saphyr::SerializeError> {
         serde_saphyr::to_string(self)
     }
+
+    /// Whether this Set asks a question by that label.
+    ///
+    /// The same reading a Response is checked against — see
+    /// [`crate::response::Response::validate`]: every Question that is not a
+    /// Heading, and every Sub-question under any of them. A Heading heads its
+    /// Sub-questions rather than asking anything, so nothing is answered under
+    /// it and nothing is put on it either.
+    ///
+    /// What asks for it is the answer sheet's paperclip: a file put on an
+    /// Answer names the Question it answers, and one naming a Question the Set
+    /// does not ask is a file nothing could ever draw.
+    pub fn asks(&self, label: &str) -> bool {
+        let label = label.trim();
+
+        self.questions.iter().any(|question| {
+            (!question.heading() && question.name() == label)
+                || question
+                    .subquestions
+                    .iter()
+                    .any(|subquestion| subquestion.name(question) == label)
+        })
+    }
 }
 
 impl Question {

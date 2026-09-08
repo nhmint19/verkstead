@@ -152,11 +152,6 @@ const CONVERSATION_KEYED: &[&str] = &[
     // share: the file itself was put somewhere on purpose and stays there.
     "shares",
     "share_comments",
-    // And the files the human put on it, whose bytes go with the directory the
-    // delete gives back — see the server's own `attachments`. Unlike a share,
-    // those were only ever this Conversation's, so nothing is left standing
-    // once the record naming them is gone.
-    "attachments",
     // And where it sat, what it was doing, and how it was set up to do it.
     "placements",
     "unseen_conversations",
@@ -190,6 +185,7 @@ pub fn deleted_tables() -> Vec<&'static str> {
         .chain(super::stops::CARRIED)
         .copied()
         .chain([
+            "attachments",
             "set_events",
             "question_sets",
             "timeline_events",
@@ -427,9 +423,23 @@ pub async fn delete_conversation(pool: &SqlitePool, id: i64) -> Result<Deletion>
         .await?;
     }
 
-    // Read before anything is taken, because the pairing that says which Sets
-    // are this Conversation's is itself one of the rows going: a Set found after
-    // `set_events` had been emptied would be a Set nothing could find at all.
+    // The files the human put on it, whose bytes go with the directory the
+    // delete gives back — see the server's own `attachments`. Unlike a share,
+    // those were only ever this Conversation's, so nothing is left standing
+    // once the record naming them is gone.
+    //
+    // **Before the Sets below rather than with the other conversation-keyed
+    // tables**, because a file put on an Answer names the Set it was put on and
+    // that column is a key: a `question_sets` row deleted while one of these
+    // still points at it is a delete SQLite refuses, and it would take the whole
+    // Conversation's with it. The Brief's own rows name no Set and would not
+    // have minded either way.
+    erase(&mut tx, id, "attachments", "conversation_id = ?").await?;
+
+    // Read before anything else is taken, because the pairing that says which
+    // Sets are this Conversation's is itself one of the rows going: a Set found
+    // after `set_events` had been emptied would be a Set nothing could find at
+    // all.
     let sets: Vec<(i64,)> = sqlx::query_as(
         "SELECT set_id FROM set_events
          WHERE event_id IN (SELECT id FROM timeline_events WHERE conversation_id = ?)",

@@ -17,13 +17,13 @@
 //! session ran under, so each table is rebuilt beside itself with the rows
 //! copied across.
 //!
-//! Six of them are a column arriving rather than rows moving between tables —
+//! Seven of them are a column arriving rather than rows moving between tables —
 //! the Review role's Profile, the branch name somebody settled on, whether a
 //! branch is still waiting to be named, whether a session is idling on a stored
-//! ask, the branch a Conversation's base was resolved through, and whether a
-//! commit is a merge — which is the same kind of one-time rewrite: the rows
-//! already there are given the value that says what was true of them before the
-//! column existed.
+//! ask, the branch a Conversation's base was resolved through, whether a commit
+//! is a merge, and which Answer an attached file was put on — which is the same
+//! kind of one-time rewrite: the rows already there are given the value that
+//! says what was true of them before the column existed.
 //!
 //! Each is written to be safe against a database that has already had it, and
 //! what says whether there is anything to do is the presence of what it
@@ -51,6 +51,7 @@ pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
     stored_asks_nobody_was_idling_on(pool).await?;
     conversations_that_recorded_no_base_branch(pool).await?;
     commits_that_never_said_they_were_merges(pool).await?;
+    attached_files_that_named_no_answer(pool).await?;
     profiles_that_had_to_be_named(pool).await?;
     sessions_that_had_to_name_a_profile(pool).await
 }
@@ -303,6 +304,46 @@ async fn commits_that_never_said_they_were_merges(pool: &SqlitePool) -> Result<(
         .execute(pool)
         .await
         .context("giving the commits recorded before this something to say they are not merges")?;
+
+    Ok(())
+}
+
+/// Give every attached file written before there were two origins the two
+/// columns that say which Answer it was put on.
+///
+/// None of them was put on one: every row this reaches is the Brief's, because
+/// the answer sheet's paperclip arrives with the columns. So the columns' own
+/// emptiness is the whole of the rewrite, and there is no `UPDATE` under it —
+/// an `answer` row is the only kind that names a Set and a label, and there are
+/// none — see [`super::attachments::Origin`].
+///
+/// Two `ALTER`s in one rewrite, because they are one arrival: an Answer's file
+/// names the Set *and* the Question, and a database holding one column without
+/// the other would be a row nothing could read as either origin.
+///
+/// Safe to run twice: what says whether there is anything to do is the first
+/// column being absent, and after the first run both are there.
+async fn attached_files_that_named_no_answer(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('attachments') WHERE name = ?")
+            .bind("set_id")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the Set an attached file was put on")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    sqlx::query("ALTER TABLE attachments ADD COLUMN set_id INTEGER REFERENCES question_sets(id)")
+        .execute(pool)
+        .await
+        .context("giving the files attached before this a Set to have been put on")?;
+
+    sqlx::query("ALTER TABLE attachments ADD COLUMN label TEXT")
+        .execute(pool)
+        .await
+        .context("giving the files attached before this a Question to have been put under")?;
 
     Ok(())
 }

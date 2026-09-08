@@ -392,6 +392,60 @@ pub(crate) async fn unsettle(
     Ok(())
 }
 
+/// Record that the review is over, and put every pull request's checks back to
+/// waiting with it.
+///
+/// **One transaction, because the two are one fact.** A review lands whatever
+/// the human accepted and pushes it as it ends, so a suite that was green is
+/// green about the commit before that push and every one of them has to run
+/// again. A settle written without the unsettle beside it — or a poll of
+/// [`finish_wrap_up`] reading between the two — is a Conversation reaching Done
+/// on a green nobody re-earned, which is the same failure
+/// [`super::follow_up_over`] takes a `pushed` for.
+///
+/// Every pull request rather than one: a review reads the work whole and pushes
+/// into whichever worktree it fixed something in, and none of the suites it may
+/// have replaced is this Conversation's to keep.
+///
+/// A review that pushed nothing — one that found nothing worth raising, or one
+/// the human turned off — costs a poll of the checks and nothing else. The next
+/// look settles the suite again, and nothing could have finished in the
+/// meantime: the review is what the wrap-up was waiting on.
+pub async fn review_over(pool: &SqlitePool, conversation_id: i64) -> Result<()> {
+    let mut tx = super::writing(pool, "recording that a review is over").await?;
+
+    let opened: Vec<(i64,)> =
+        sqlx::query_as("SELECT repo_id FROM pull_requests WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .fetch_all(&mut *tx)
+            .await
+            .with_context(|| {
+                format!("reading which pull requests Conversation {conversation_id} is on")
+            })?;
+
+    for (repo_id,) in opened {
+        unsettle(&mut tx, conversation_id, WaitingOn::Checks(repo_id)).await?;
+    }
+
+    sqlx::query(
+        "INSERT INTO wrap_up_settled (conversation_id, repo_id, waiting_on, at)
+         VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         ON CONFLICT (conversation_id, repo_id, waiting_on) DO NOTHING",
+    )
+    .bind(conversation_id)
+    .bind(WaitingOn::Review.repo())
+    .bind(WaitingOn::Review.stored())
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("settling the review of Conversation {conversation_id}"))?;
+
+    tx.commit()
+        .await
+        .context("recording that a review is over")?;
+
+    Ok(())
+}
+
 /// What a Conversation's wrap-up has settled so far.
 ///
 /// The whole set rather than one asked about at a time, because what it is for

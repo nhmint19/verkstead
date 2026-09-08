@@ -826,21 +826,38 @@ pub struct AttachmentView {
     /// reader will ever know about how big the file was.
     pub bytes: i64,
 
-    /// What it was attached to. One value today — see [`AttachmentOrigin`].
+    /// What it was attached to — see [`AttachmentOrigin`].
     pub origin: AttachmentOrigin,
+
+    /// The label of the Question this file was put under, on a file put on an
+    /// Answer — `Q7` for a Question, `Q7a` for a Sub-question — and `null` on
+    /// every one of the Brief's.
+    ///
+    /// Beside the origin rather than inside it, because that is how the record
+    /// holds it: the origin is a word, and this is what the word is read with.
+    /// It is what the sheet groups a Set's files by, there being one list of
+    /// them for a page that draws pills under every Question.
+    ///
+    /// Which Set it was put on is not here at all: the only page that draws
+    /// these is that Set's own, and a Conversation's own row of pills is the
+    /// Brief's.
+    pub label: Option<String>,
 }
 
 /// What a file was attached to.
 ///
-/// Drawn nowhere yet, and on the wire all the same: the pills under a Brief are
-/// the Brief's own files, and the page can only know that by being told. The
-/// second value is an Answer to a Question Set, which is the same upload made
-/// from a different page.
+/// The pills under a Brief are the Brief's own files and the pills under a
+/// Question are that Answer's, and a page can only know which it is holding by
+/// being told.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum AttachmentOrigin {
     /// Put on the composer, beside the Brief being written.
     Brief,
+
+    /// Put on the answer sheet, under one Question of one Question Set —
+    /// [`AttachmentView::label`] says which.
+    Answer,
 }
 
 /// One companion repo of a Conversation: which Repo, how far into it a session
@@ -3012,6 +3029,66 @@ pub enum AttachmentRemoved {
     /// The Conversation is past drafting, for [`Attached::NotDrafting`]'s
     /// reason: what freezes with the Brief cannot be taken off it either.
     NotDrafting,
+}
+
+/// What became of putting a file on an Answer.
+///
+/// [`Attached`]'s three refusals said again — a file too large, a name that is
+/// not a name, and nothing there to attach to — with the freeze in the other
+/// place: what fixes an Answer's files is the Set settling rather than the
+/// Brief, so each way that can have happened is named for the sheet to say.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum AnswerAttached {
+    /// Kept, and this is the record it made — the name as it stands on disk,
+    /// and the label it was put under.
+    Attached {
+        attachment: AttachmentView,
+    },
+
+    NoSuchSet,
+
+    /// The Set has been answered, so what was put on it is the record of what
+    /// the human sent and no longer theirs to change.
+    Answered,
+
+    /// The Set was locked unanswered, which fixes it the same way: nothing more
+    /// is going to the agent, so nothing more goes on the sheet.
+    Locked,
+
+    /// The Set's Conversation is Closed. Its files are kept — a Steer can bring
+    /// a Closed Conversation back — and nothing is added to them while it is.
+    Closed,
+
+    /// Not a Question this Set asks: a Heading, which asks nothing of its own, a
+    /// label the Set does not carry, or a Set nobody here can read at all. All
+    /// three are one refusal, because all three are a file put where no Answer
+    /// would ever draw it.
+    NoSuchLabel,
+
+    /// Larger than a file may be — see [`Attached::TooLarge`], the same cap.
+    TooLarge,
+
+    /// Not a plain base name — see [`Attached::NotAName`], the same rule.
+    NotAName,
+}
+
+/// And of taking one off an Answer again.
+///
+/// No *no such attachment*, for [`AttachmentRemoved`]'s reason: a file that is
+/// not there is the state the press asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum AnswerAttachmentRemoved {
+    Removed,
+    NoSuchSet,
+
+    /// The three freezes [`AnswerAttached`] is refused by, for the same reason
+    /// the Brief's removal shares its own: what cannot be put on an Answer
+    /// cannot be taken off it either.
+    Answered,
+    Locked,
+    Closed,
 }
 
 /// What became of moving a Conversation onto another Repo.

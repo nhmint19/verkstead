@@ -118,6 +118,17 @@
 //! a `gh` that answered without a head and a checkout with no origin to ask are
 //! the third thing again, and the rollup stands on its own.
 //!
+//! **And a review that has just ended is a push.** The head above tells a stale
+//! rollup by what origin is holding, which works from the moment the push lands
+//! and not before it: while the review is still in the Worktree, what it has
+//! agreed to land is a commit in hand, both sides name the same head, and a
+//! green read there is one written down before a push it knew nothing about. So
+//! the review puts every pull request's checks back to waiting as it settles,
+//! the two in one act — see [`store::review_over`] — and this watcher earns the
+//! green again against the run that push started. A review that pushed nothing
+//! costs a poll and nothing else: nothing could have finished in the meantime,
+//! the review being what the wrap-up was waiting on.
+//!
 //! **All of this stops at Done**, which is where [`crate::merges`] takes over:
 //! a base goes on moving under a branch waiting to be merged, and there is
 //! nothing here left watching for it. What that sweep does with a conflict is

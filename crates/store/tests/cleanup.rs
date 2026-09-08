@@ -661,6 +661,25 @@ async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
     attach(pool, id, Origin::Brief, "burst.csv", 48_112)
         .await
         .unwrap();
+
+    // One of each origin, because the second names a Set and the first names
+    // none: a row pointing at `question_sets` is one a delete has to take before
+    // the Set it points at, and a fixture carrying only the Brief's would not
+    // notice a delete that took them the other way round. The label is the
+    // server's to check against what the Set asks — the record takes the row as
+    // it stands.
+    attach(
+        pool,
+        id,
+        Origin::Answer {
+            set,
+            label: "Q1".to_owned(),
+        },
+        "the-counter-we-have.rs",
+        2_184,
+    )
+    .await
+    .unwrap();
     place_conversations(pool, &[id]).await.unwrap();
     stamp_unseen(pool, id).await.unwrap();
 
