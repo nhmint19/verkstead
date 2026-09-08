@@ -60,7 +60,7 @@ pub use archives::{
     showing_archived, unarchive_conversation,
 };
 pub use attachments::{
-    Attachment, Origin, attach, attachment, attached_sets, attachments, detach, detach_from_set,
+    Attachment, Origin, attach, attached_sets, attachment, attachments, detach, detach_from_set,
     set_attachment, set_attachments,
 };
 pub use banners::{dismiss_remote_banner, remote_banner_dismissed};

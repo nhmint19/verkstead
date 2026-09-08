@@ -459,6 +459,66 @@ comment: none of this is settled about the burst allowance
         );
     }
 
+    /// And a question the file *is* the Answer to says so, rather than reading
+    /// as one the human passed over.
+    ///
+    /// A file alone is an Answer everywhere else the branch reads one — the
+    /// check a submission goes through, what the sheet submits, and the record
+    /// of a settled Set — so the digest a later session is primed with cannot be
+    /// the one place it says the opposite. `_Left open._` invites that session
+    /// to ask the question again, and there is nothing here to ask.
+    ///
+    /// The marker is still the human's to mean, though: a question they left
+    /// open on purpose is open whatever came with it.
+    #[test]
+    fn a_question_answered_with_a_file_alone_does_not_read_as_left_open() {
+        let set = QuestionSet::from_yaml(ASKED).unwrap();
+        let response = Response::from_yaml(
+            "
+answers:
+  - label: Q1
+  - label: Q2
+    selected: 1
+  - label: Q3
+    unanswered: true
+  - label: Q4a
+    free_text: whatever the client's plan says
+",
+        )
+        .unwrap();
+
+        let files = OnAnswers::holding(
+            vec![
+                attached(11, "Q1", "the-keys-we-see.csv"),
+                attached(11, "Q3", "what-we-log.txt"),
+            ],
+            PathBuf::from(crate::attachments::INSIDE),
+        );
+
+        let digest = exchange(&set, &response, files.on(11));
+
+        assert!(
+            digest.contains(
+                "**Q1** Per key or per address?\n\n\
+                 _Answered with what was attached._\n\n\
+                 _Attached:_ `/verkstead/attachments/the-keys-we-see.csv`\n"
+            ),
+            "the file is the whole of this Answer, and the line under it is what \
+             was handed over: {digest}"
+        );
+        assert!(
+            digest.contains(
+                "**Q3** What happens when it trips?\n\n_Left open._\n\n\
+                 _Attached:_ `/verkstead/attachments/what-we-log.txt`\n"
+            ),
+            "and one left open on purpose is open, file or no file: {digest}"
+        );
+        assert!(
+            !digest.contains("**Q1** Per key or per address?\n\n_Left open._"),
+            "which is the reading this is here to keep out: {digest}"
+        );
+    }
+
     /// A question the human deliberately left open is worth more than a blank:
     /// the new grilling may ask it again, and this is what says it may.
     #[test]
