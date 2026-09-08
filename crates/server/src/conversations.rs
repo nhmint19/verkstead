@@ -87,6 +87,27 @@ pub(crate) async fn start(state: &AppState, repo_id: i64) -> Result<Started> {
 /// default branch would draw *nothing to adopt at this base commit* about the
 /// very roadmap that was just clicked. `None` is the default branch, which is
 /// what a Conversation with no base fixed already reads.
+pub(crate) async fn start_adopting(
+    state: &AppState,
+    repo_id: i64,
+    roadmap: &str,
+    base: Option<&str>,
+) -> Result<Started> {
+    Ok(
+        match store::start_adoption(&state.pool, repo_id, &branch_name(), roadmap).await? {
+            Some(id) => {
+                if let Some(base) = base {
+                    fix(state, id, base).await;
+                }
+
+                prefill(state, id, repo_id).await;
+                Started::Started { id }
+            }
+            None => Started::NoSuchRepo,
+        },
+    )
+}
+
 /// Start a Conversation to wrap `pull_request` up in a registered Repo with.
 ///
 /// [`start_adopting`]'s sibling over the other kind of thing that can be taken
@@ -115,27 +136,6 @@ pub(crate) async fn start_wrapping_up(
             .await?
         {
             Some(id) => {
-                prefill(state, id, repo_id).await;
-                Started::Started { id }
-            }
-            None => Started::NoSuchRepo,
-        },
-    )
-}
-
-pub(crate) async fn start_adopting(
-    state: &AppState,
-    repo_id: i64,
-    roadmap: &str,
-    base: Option<&str>,
-) -> Result<Started> {
-    Ok(
-        match store::start_adoption(&state.pool, repo_id, &branch_name(), roadmap).await? {
-            Some(id) => {
-                if let Some(base) = base {
-                    fix(state, id, base).await;
-                }
-
                 prefill(state, id, repo_id).await;
                 Started::Started { id }
             }
