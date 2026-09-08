@@ -54,6 +54,7 @@ import type {
   StageListEvent,
   SteerOpened,
   Submitted,
+  TakenUp,
   TaskListEvent,
   TerminalOpened,
   TerminalsView,
@@ -209,7 +210,8 @@ import setup from "../src/workbench/Setup.module.css";
 import setupCss from "../src/workbench/Setup.module.css?raw";
 import steerModal from "../src/workbench/Steer.module.css";
 // The band naming the pull request a draft is holding, over the box it writes
-// its Brief in.
+// its Brief in — and the press under it that takes the pull request up.
+import { TAKE_UP_REFUSAL } from "../src/workbench/TakeUp";
 import takeUp from "../src/workbench/TakeUp.module.css";
 // The status button at the foot of the sticky block over the Conversation pane,
 // both ways: the hashed names its line is queried by, and the source of the
@@ -2470,17 +2472,113 @@ describe("the page of a draft holding a pull request", () => {
     expect(said.HoldingPullRequest).toContain("pull request");
   });
 
-  /// No grilling start on it either. The work on a pull request is built, and
-  /// what it is waiting for is the wrap-up — so the press that opens a round
-  /// would be the wrong act offered plainly.
-  it("offers no start grilling and no continue press", async () => {
+  /// The take-up stands where `Start grilling` does on every other draft, and
+  /// never beside it. The work on a pull request is built, and what it is
+  /// waiting for is the wrap-up — so the press that opens a round would be the
+  /// wrong act offered plainly.
+  it("offers the take-up in place of a start grilling or a continue", async () => {
     theHolding();
     const { container } = mount(`/conversations/${HOLDING.id}`);
 
-    await drawn(container, `.${takeUp.held}`);
+    await drawn(container, `.${takeUp.takingUp}`);
 
     expect(container.querySelector(`.${composer.startGrilling}`)).toBeNull();
     expect(container.querySelector(`.${adoption.adoption}`)).toBeNull();
+  });
+
+  /// The press posts to the conversation's own take-up route with nothing in the
+  /// body, for the reason the adoption's own sends nothing: which conversation
+  /// is in the path, and what the branch is now is the repository's own answer —
+  /// read by the server when the button is pressed.
+  it("posts to the conversation's own take-up route, with nothing in the body", async () => {
+    const fetching = theHolding(
+      whenever(
+        `/api/ui/conversations/${HOLDING.id}/take-up`,
+        json("TakenUp" satisfies TakenUp),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${HOLDING.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${takeUp.takingUp} .${takeUp.press}`),
+    );
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${HOLDING.id}/take-up`),
+      ).toEqual({}),
+    );
+
+    // And what a press leaves behind is a conversation that has moved and a
+    // level with one row fewer free in it, so both are read again.
+    await waitFor(() =>
+      expect(
+        askedFor(fetching, `/api/ui/conversations/${HOLDING.id}`),
+      ).toBeGreaterThan(1),
+    );
+  });
+
+  /// A press that was refused says which refusal it was. Every one of them is
+  /// something different to go and do — a profile to choose, a branch somebody
+  /// has pushed to, a branch somebody is standing on — so a single "cannot take
+  /// up" would leave the human guessing which.
+  it("says which refusal a press came back with", async () => {
+    for (const outcome of [
+      "NoImplementationProfile",
+      "NoHeadBranch",
+      "BranchAhead",
+      "BranchDiverged",
+    ] satisfies TakenUp[]) {
+      theHolding(
+        whenever(
+          `/api/ui/conversations/${HOLDING.id}/take-up`,
+          json(outcome satisfies TakenUp),
+          "POST",
+        ),
+      );
+      const { container, unmount } = mount(`/conversations/${HOLDING.id}`);
+
+      fireEvent.click(
+        await drawn(container, `.${takeUp.takingUp} .${takeUp.press}`),
+      );
+
+      await waitFor(() =>
+        expect(
+          container.querySelector(`.${takeUp.takingUp} .${notices.error}`)!
+            .textContent,
+        ).toBe(TAKE_UP_REFUSAL[outcome]),
+      );
+
+      unmount();
+    }
+  });
+
+  /// And the one refusal that carries something with it says the thing it
+  /// carries: git holds one checkout per branch, so *where* the head branch is
+  /// already checked out is the whole of what makes it actionable.
+  it("names the place where the head branch is already checked out", async () => {
+    theHolding(
+      whenever(
+        `/api/ui/conversations/${HOLDING.id}/take-up`,
+        json({
+          CheckedOutElsewhere: { at: "/home/tobi/src/verkstead" },
+        } satisfies TakenUp),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${HOLDING.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${takeUp.takingUp} .${takeUp.press}`),
+    );
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${takeUp.takingUp} .${notices.error}`)!
+          .textContent,
+      ).toContain("/home/tobi/src/verkstead"),
+    );
   });
 });
 

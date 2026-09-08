@@ -51,7 +51,7 @@ pub use conversations::{
     RepoChoice, RepoSwitched, ResolveConflictsEvent, Resolved, Resumed, RoadmapPane, Screen,
     SetRow, ShareView, ShowArchived, ShowingArchived, Shown, Size, StageDocument, StageEntry,
     StageListEvent, StageListReached, StageSource, Started, SteerCompanionRefusal, SteerEvent,
-    SteerOpened, SteerSubmission, SteerTarget, TaskDocument, TaskEntry, TaskListEvent,
+    SteerOpened, SteerSubmission, SteerTarget, TakenUp, TaskDocument, TaskEntry, TaskListEvent,
     TaskListReached, TaskSource, TerminalOpened, TerminalsView, TimelineEvent, UnreadableSetEvent,
     Watching, Worktree, agent_output_event, agent_output_pinned, backlog_pane, brief_event,
     commit_event, commit_pane, handoff_event, manual_task_event, moved_event, notice_event,

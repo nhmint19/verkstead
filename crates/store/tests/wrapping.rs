@@ -16,13 +16,13 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Event, Finished, Lifecycle, Merging, PullRequest, Rebuilding, Resolving, Rollup, Standing,
-    WAITED_ON, WaitingOn, Wrapping, check_rollup, close_conversation, finish_wrap_up,
-    implement_again, load_conversation, merges, merging, open_database, pick_direction,
-    pull_request, pull_request_repo, pull_requests, record_another_pull_request,
+    AdoptedPullRequest, Event, Finished, Lifecycle, Merging, PullRequest, Rebuilding, Resolving,
+    Rollup, Standing, Taking, WAITED_ON, WaitingOn, Wrapping, check_rollup, close_conversation,
+    finish_wrap_up, implement_again, load_conversation, merges, merging, open_database,
+    pick_direction, pull_request, pull_request_repo, pull_requests, record_another_pull_request,
     record_check_rollup, record_merging, record_pull_request, record_standing, register_repo,
     resolve_conflicts, save_brief, settle_wrap_up, standing, start_conversation, start_grilling,
-    timeline, unfinished_pull_requests, wrap_up_settled,
+    start_pull_request_adoption, take_up, timeline, unfinished_pull_requests, wrap_up_settled,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -251,6 +251,102 @@ async fn a_closed_conversation_is_not_moved_on_by_a_pull_request() {
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
     assert_eq!(conversation.state, Lifecycle::Closed);
+}
+
+/// An ordinary Draft is not one to move into Wrapping, whatever recorded a pull
+/// request against it: what makes a Draft wrappable is the pull request it is
+/// holding, and this one is holding none.
+#[tokio::test]
+async fn a_draft_holding_no_pull_request_is_not_moved_on_by_one() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let repo = register_repo(&pool, Path::new("/srv/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .expect("nothing is registered at that path yet");
+
+    let id = start_conversation(&pool, repo.id, "rate-limiting")
+        .await
+        .unwrap()
+        .expect("the Repo was just registered");
+
+    assert_eq!(
+        record_pull_request(&pool, id, repo.id, &opened())
+            .await
+            .unwrap(),
+        Wrapping::NothingToWrap,
+    );
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(conversation.state, Lifecycle::Draft);
+}
+
+/// And one that *is* holding a pull request is: the take-up has put it on that
+/// pull request's branch, and this record is the move — the same move the finish
+/// step makes, reached by the other door.
+#[tokio::test]
+async fn a_draft_holding_a_pull_request_is_moved_on_by_recording_it() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let repo = register_repo(&pool, Path::new("/srv/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .expect("nothing is registered at that path yet");
+
+    let id = start_pull_request_adoption(
+        &pool,
+        repo.id,
+        "verkstead-1",
+        &AdoptedPullRequest {
+            number: 41,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            head: "rate-limiting".to_owned(),
+            base: "main".to_owned(),
+        },
+    )
+    .await
+    .unwrap()
+    .expect("the Repo was just registered");
+
+    assert_eq!(
+        take_up(
+            &pool,
+            id,
+            "rate-limiting",
+            "c0ffee",
+            Path::new("/state/worktrees/rate-limiting"),
+            &[],
+        )
+        .await
+        .unwrap(),
+        Taking::Recorded,
+    );
+
+    assert_eq!(
+        record_pull_request(&pool, id, repo.id, &opened())
+            .await
+            .unwrap(),
+        Wrapping::Started,
+    );
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(conversation.state, Lifecycle::Wrapping);
+    assert_eq!(conversation.branch, "rate-limiting");
+    assert_eq!(conversation.base_commit.as_deref(), Some("c0ffee"));
+
+    assert_eq!(
+        events(&pool, id)
+            .await
+            .into_iter()
+            .filter_map(|event| match event {
+                Event::Moved(state) => Some(state),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        [Lifecycle::Wrapping],
+        "one move, from the Draft it was straight into the wrap-up",
+    );
 }
 
 #[tokio::test]

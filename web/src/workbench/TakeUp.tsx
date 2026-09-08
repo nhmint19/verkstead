@@ -18,9 +18,22 @@
 //! own — a title and a description — and it is the one thing taken up that the
 //! human is likeliest to have something to add to. So the box stays a box, and
 //! what is left in it is the Brief.
+//!
+//! **The press is here too**, under the box where `Start grilling` stands on
+//! every other draft and never beside it. What it does is the whole of taking
+//! one up: the head branch checked out — cut off origin's where this checkout
+//! has none, moved on to origin's where it has an older copy — the pull request
+//! recorded, and the ordinary wrap-up running from there. Every way it can be
+//! refused is a different thing to go and do about it, which is why they are
+//! named one at a time.
 
-import { Show, type JSX } from "solid-js";
+import { useMutation, useQueryClient } from "@tanstack/solid-query";
+import { createSignal, Show, type JSX } from "solid-js";
 
+import { takeUpPullRequest } from "../api/client";
+import type { ConversationView, TakenUp } from "../api/types";
+import { ErrorLine, Note } from "../notices";
+import { COMPANION_REFUSAL } from "./Timeline";
 import styles from "./TakeUp.module.css";
 
 /// The pull request being held, as either composer names it.
@@ -80,5 +93,129 @@ export function HeldPullRequest(props: {
         <code>{props.head}</code> into <code>{props.base}</code>
       </p>
     </div>
+  );
+}
+
+/// Each way of being refused a take-up, in the words of what to go and do about
+/// it — for the conversation's own repo.
+///
+/// One line each rather than a single "cannot take up", for the reason the
+/// adoption's own list is one line each: a profile to choose, a branch somebody
+/// has pushed to and a branch somebody is standing on are three different jobs,
+/// and only the human can tell which they are looking at.
+export const TAKE_UP_REFUSAL: Record<
+  Exclude<TakenUp, { Companion: unknown } | { CheckedOutElsewhere: unknown }>,
+  string
+> = {
+  TakenUp: "",
+  NoSuchConversation: "This conversation is gone.",
+  NotDrafting: "This conversation has already been started.",
+  NotHoldingOne:
+    "This conversation is holding no pull request, so there is nothing for it to wrap up.",
+  NoImplementationProfile:
+    "Choose an implementation profile and model first, on the brief.",
+  NoReviewProfile: "Choose a review profile and model first, on the brief.",
+  ProfileBroken:
+    "A chosen profile's claude pair is not where it was left, so there is no account to run under.",
+  FetchFailed:
+    "Git could not fetch from the repo's remote, so nothing was started. The server log says why.",
+  NoHeadBranch:
+    "Origin has no branch by the name GitHub gave for this pull request's head.",
+  BranchAhead:
+    "The local branch of that name holds commits origin does not. Push them, or take them off, and try again.",
+  BranchDiverged:
+    "The local branch of that name and origin's have gone different ways. Reconcile them and try again.",
+  FastForwardFailed:
+    "Git would not move the local branch on to origin's. The server log says why.",
+  WorktreeRefused: "Git would not make the worktree. The server log says why.",
+};
+
+/// What to say about a take-up that was refused.
+///
+/// The two that carry something with them say it, because in each the thing
+/// carried is the whole of what makes it actionable: which repository a
+/// companion's failing was in, and *where* the head branch is already checked
+/// out.
+export function takeUpRefusal(outcome: TakenUp): string {
+  if (typeof outcome === "object") {
+    if ("Companion" in outcome) {
+      return `${outcome.Companion.repo}: ${COMPANION_REFUSAL[outcome.Companion.why]}`;
+    }
+
+    return `That branch is already checked out at ${outcome.CheckedOutElsewhere.at}, and git holds one checkout per branch.`;
+  }
+
+  return TAKE_UP_REFUSAL[outcome];
+}
+
+/// The press that takes the held pull request up, where `Start grilling` stands
+/// on every other draft.
+///
+/// Never both: a draft holding a pull request has no round to open. The work on
+/// it is built and what it is waiting for is the wrap-up, so the one act this
+/// page offers is the one that starts one.
+export function TakingUp(props: {
+  conversation: ConversationView;
+  held: NonNullable<ConversationView["adopting_pull_request"]>;
+}): JSX.Element {
+  const queries = useQueryClient();
+
+  const [refused, setRefused] = createSignal<TakenUp | null>(null);
+
+  const take = useMutation(() => ({
+    mutationFn: () => takeUpPullRequest(props.conversation.id),
+    onSuccess: (outcome: TakenUp) => {
+      // Whatever it came back with, the page is read again: what the take-up
+      // did is a conversation that has moved, and what refused it is a
+      // repository that has moved — and reading it again is the correction
+      // either way.
+      setRefused(outcome === "TakenUp" ? null : outcome);
+
+      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({ queryKey: ["conversations"] });
+      void queries.invalidateQueries({ queryKey: ["open-pull-requests"] });
+      void queries.invalidateQueries({ queryKey: ["profiles"] });
+    },
+  }));
+
+  return (
+    <section class={styles.takingUp} aria-label="Wrapping up a pull request">
+      <h2>Wrap up a pull request</h2>
+
+      <button
+        type="button"
+        class={styles.press}
+        disabled={take.isPending}
+        onClick={() => take.mutate()}
+      >
+        {take.isPending ? "Wrapping up…" : "Wrap up"}
+      </button>
+      <Note>
+        This checks <code>{props.held.head}</code> out, fetching it from origin
+        and moving a local copy on to it, and starts the wrap-up over the pull
+        request: the branch is reviewed, red checks are fixed and what has been
+        said on it is answered. Both agent profiles have to be chosen first.
+        {/* And the companions, where any were configured while it drafted: the
+            press checks them out beside the head branch, so it is worth saying
+            that it is this press that makes them. */}
+        <Show when={props.conversation.companions.length}>
+          {" "}
+          The repos alongside are checked out with it.
+        </Show>
+      </Note>
+
+      <Show when={refused()}>
+        {(outcome) => (
+          <ErrorLine class={styles.failure}>
+            {takeUpRefusal(outcome())}
+          </ErrorLine>
+        )}
+      </Show>
+      <Show when={take.isError}>
+        <ErrorLine class={styles.failure}>
+          The pull request could not be taken up: {take.error?.message}
+        </ErrorLine>
+      </Show>
+    </section>
   );
 }

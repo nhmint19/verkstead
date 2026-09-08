@@ -27,7 +27,7 @@ use verkstead_render::{
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationUnarchived,
     ConversationView, GrillingStarted, Lifecycle, Merging, PickedView, PinnedEvent, ProfileChosen,
     ProfileSaved, Registered, RepoEntry, RepoSwitched, Resolved, RoadmapPane, ShowingArchived,
-    Standing, Started, SteerCompanionRefusal, SteerOpened, TimelineEvent,
+    Standing, Started, SteerCompanionRefusal, SteerOpened, TakenUp, TimelineEvent,
 };
 use verkstead_server::{open_database, router_keeping, store};
 
@@ -7816,6 +7816,385 @@ async fn the_cheap_refusals_are_answered_before_the_ones_git_is_paid_for() {
         Lifecycle::Draft,
         "and nothing about the roadmap was read to find that out",
     );
+}
+
+/// The press on a Draft holding a pull request, sent as its page sends it.
+async fn press_take_up(app: &Router, id: i64) -> TakenUp {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/take-up"),
+        &serde_json::json!({}),
+    )
+    .await
+}
+
+/// Everything a take-up needs before the press: the two Profiles the wrap-up
+/// runs under, which is the whole of what a Conversation holding a pull request
+/// has to settle — its Brief was written on the compose page, and its branch and
+/// its base are the pull request's.
+///
+/// Two rather than three, and no grilling among them: the work on a pull request
+/// is built, so there is no round for one to open and the picker is drawn
+/// nowhere.
+async fn ready_to_take_up(app: &Router, elsewhere: &Path, repo_id: i64, number: i64) -> i64 {
+    let id = wrapping_up(app, repo_id, number).await;
+
+    let implementation = profile(app, elsewhere, "opus").await;
+    let review = profile(app, elsewhere, "haiku").await;
+    choose(app, id, "implementation", implementation).await;
+    choose(app, id, "review", review).await;
+
+    id
+}
+
+/// Put the pull request's head branch on the upstream, which is where a pull
+/// request's branch lives: this checkout has heard nothing about it until it
+/// fetches.
+///
+/// Hands back what it stands at.
+fn head_on_origin(upstream: &Path, branch: &str) -> String {
+    git(upstream, &["checkout", "-b", branch]);
+    let head = commit(upstream, "limits.md");
+    git(upstream, &["checkout", "main"]);
+
+    head
+}
+
+/// What a refused press has to leave behind: a Conversation that has not moved,
+/// nothing checked out, and no pull request on its record.
+async fn nothing_taken_up(app: &Router, id: i64, repo: &Path) {
+    let view = opened(app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(view.worktree, None);
+    assert!(
+        worktrees(repo).len() == 1,
+        "only the repository itself is checked out anywhere",
+    );
+    assert!(
+        !view
+            .timeline
+            .iter()
+            .any(|event| matches!(event, TimelineEvent::PullRequest(_))),
+        "and nothing was pinned on the Timeline",
+    );
+}
+
+/// The whole of what the press does where nothing local stands in the way: the
+/// head branch cut off origin's and tracking it, a worktree on it, the pull
+/// request pinned, and a Conversation that says it is wrapping up.
+#[tokio::test]
+async fn taking_a_pull_request_up_checks_its_head_branch_out_and_wraps_it_up() {
+    let (elsewhere, dir, app, repo, upstream, repo_id) = workbench_with_origin().await;
+    let head = head_on_origin(&upstream, "rate-limiting");
+
+    let id = ready_to_take_up(&app, elsewhere.path(), repo_id, 41).await;
+
+    assert_eq!(press_take_up(&app, id).await, TakenUp::TakenUp);
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(moves(&view), [Lifecycle::Wrapping]);
+    assert_eq!(
+        view.branch, "rate-limiting",
+        "the Conversation is named for the pull request's branch, settled rather than invented",
+    );
+
+    // The branch is in the Repo's own git directory, cut off origin's copy of it
+    // — and tracking that copy, so a push from the wrap-up goes where the pull
+    // request is.
+    assert_eq!(
+        git(&repo, &["rev-parse", "refs/heads/rate-limiting"]).trim(),
+        head,
+    );
+    assert_eq!(
+        git(
+            &repo,
+            &["rev-parse", "--abbrev-ref", "rate-limiting@{upstream}"]
+        )
+        .trim(),
+        "origin/rate-limiting",
+    );
+
+    // And a worktree on it, under the data directory where every other one goes.
+    let worktree = view
+        .worktree
+        .clone()
+        .expect("a taken-up Conversation has a worktree");
+    let path = PathBuf::from(&worktree.path);
+    assert!(!worktree.missing);
+    assert_eq!(path.parent(), Some(dir.path().join("worktrees").as_path()));
+    assert_eq!(
+        git(&path, &["symbolic-ref", "--short", "HEAD"]).trim(),
+        "rate-limiting",
+    );
+    assert!(path.join("limits.md").is_file(), "the branch's own work");
+
+    // The pull request is pinned, and the two Pairings the wrap-up runs under
+    // are on the record.
+    let pinned = view
+        .pinned
+        .iter()
+        .find_map(|event| match event {
+            PinnedEvent::PullRequest(opened) => Some(opened),
+            _ => None,
+        })
+        .expect("a wrapping Conversation pins its pull request");
+
+    assert_eq!(pinned.number, 41);
+    assert_eq!(pinned.title, "Rate limiting for the public API");
+    assert_eq!(pinned.url, "https://github.com/tobico/verkstead/pull/41");
+
+    assert!(view.implementation_pairing.is_some());
+    assert!(matches!(view.review_pairing, PickedView::Under(_)));
+}
+
+/// The base recorded is the head *at take-up*, with GitHub's base branch beside
+/// it — which is what leaves the pull request's own commits off this Timeline
+/// and keeps them off it when the base branch moves.
+///
+/// The reading asserted here is the commit sweep's own: everything on the branch
+/// that is not on the base commit and not on the base branch. See the server's
+/// `commits` module, where that list is built.
+#[tokio::test]
+async fn a_taken_up_conversation_draws_none_of_the_pull_requests_own_commits() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_with_origin().await;
+    let head = head_on_origin(&upstream, "rate-limiting");
+
+    let id = ready_to_take_up(&app, elsewhere.path(), repo_id, 41).await;
+    assert_eq!(press_take_up(&app, id).await, TakenUp::TakenUp);
+
+    let view = opened(&app, id).await;
+    assert_eq!(
+        view.base_commit.as_deref(),
+        Some(head.as_str()),
+        "the pull request's head at take-up",
+    );
+
+    assert!(
+        view.timeline
+            .iter()
+            .all(|event| !matches!(event, TimelineEvent::Commit(_))),
+        "and nothing already on the pull request is drawn as this Conversation's",
+    );
+
+    // The base branch gains a commit, which is the ordinary thing for it to do
+    // while a wrap-up runs.
+    commit(&upstream, "unrelated.md");
+    git(&repo, &["fetch", "origin"]);
+
+    assert!(
+        git(
+            &repo,
+            &[
+                "rev-list",
+                "rate-limiting",
+                &format!("^{head}"),
+                "^main",
+                "^origin/main",
+            ],
+        )
+        .trim()
+        .is_empty(),
+        "and the sweep's own reading still finds nothing to draw",
+    );
+}
+
+/// A local branch of that name standing behind origin's is caught up and taken:
+/// the pull request's work is on the remote, and this checkout's copy is a copy.
+#[tokio::test]
+async fn a_head_branch_behind_origin_is_fast_forwarded_and_taken() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_with_origin().await;
+    let head = head_on_origin(&upstream, "rate-limiting");
+
+    // The checkout has an older copy of it: the branch as it was before the last
+    // commit landed on origin.
+    git(&repo, &["fetch", "origin"]);
+    let behind = git(&repo, &["rev-parse", "origin/rate-limiting~1"])
+        .trim()
+        .to_owned();
+    git(&repo, &["branch", "rate-limiting", &behind]);
+
+    let id = ready_to_take_up(&app, elsewhere.path(), repo_id, 41).await;
+
+    assert_eq!(press_take_up(&app, id).await, TakenUp::TakenUp);
+
+    assert_eq!(
+        git(&repo, &["rev-parse", "refs/heads/rate-limiting"]).trim(),
+        head,
+        "the branch was moved on to origin's rather than worked at where it was",
+    );
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.base_commit.as_deref(), Some(head.as_str()));
+}
+
+/// And one that is ahead of origin is refused by name. Those commits are
+/// somebody's and unpushed, and moving the branch under them would be Verkstead
+/// throwing work away.
+#[tokio::test]
+async fn a_head_branch_ahead_of_origin_refuses_the_press_by_name() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_with_origin().await;
+    head_on_origin(&upstream, "rate-limiting");
+
+    git(&repo, &["fetch", "origin"]);
+    git(
+        &repo,
+        &["checkout", "-b", "rate-limiting", "origin/rate-limiting"],
+    );
+    let ahead = commit(&repo, "unpushed.md");
+    git(&repo, &["checkout", "main"]);
+
+    let id = ready_to_take_up(&app, elsewhere.path(), repo_id, 41).await;
+
+    assert_eq!(press_take_up(&app, id).await, TakenUp::BranchAhead);
+    nothing_taken_up(&app, id, &repo).await;
+    assert_eq!(
+        git(&repo, &["rev-parse", "refs/heads/rate-limiting"]).trim(),
+        ahead,
+        "and the branch is exactly where it was",
+    );
+}
+
+/// A branch somebody is standing on is refused naming the place: git holds one
+/// checkout per branch, and *which one* is the whole of what the human needs.
+#[tokio::test]
+async fn a_head_branch_checked_out_elsewhere_refuses_naming_the_place() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_with_origin().await;
+    head_on_origin(&upstream, "rate-limiting");
+
+    git(&repo, &["fetch", "origin"]);
+    git(&repo, &["branch", "rate-limiting", "origin/rate-limiting"]);
+
+    // A worktree of the human's own, beside the checkout Verkstead knows about.
+    let theirs = elsewhere.path().join("their-worktree");
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            &theirs.to_string_lossy(),
+            "rate-limiting",
+        ],
+    );
+
+    let id = ready_to_take_up(&app, elsewhere.path(), repo_id, 41).await;
+
+    let refused = press_take_up(&app, id).await;
+    let TakenUp::CheckedOutElsewhere { at } = &refused else {
+        panic!("expected the place to be named, got {refused:?}");
+    };
+
+    assert_eq!(
+        PathBuf::from(at).canonicalize().unwrap(),
+        theirs.canonicalize().unwrap(),
+    );
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(view.worktree, None);
+}
+
+/// The two Profiles the wrap-up runs under are fixed before the press, and no
+/// third: a pull request has no round for a grilling to open.
+#[tokio::test]
+async fn taking_up_is_refused_by_name_when_a_profile_is_unchosen() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_with_origin().await;
+    head_on_origin(&upstream, "rate-limiting");
+
+    let id = wrapping_up(&app, repo_id, 41).await;
+
+    assert_eq!(
+        press_take_up(&app, id).await,
+        TakenUp::NoImplementationProfile
+    );
+    nothing_taken_up(&app, id, &repo).await;
+
+    choose(
+        &app,
+        id,
+        "implementation",
+        profile(&app, elsewhere.path(), "opus").await,
+    )
+    .await;
+
+    assert_eq!(press_take_up(&app, id).await, TakenUp::NoReviewProfile);
+    nothing_taken_up(&app, id, &repo).await;
+
+    choose(
+        &app,
+        id,
+        "review",
+        profile(&app, elsewhere.path(), "haiku").await,
+    )
+    .await;
+
+    assert_eq!(
+        press_take_up(&app, id).await,
+        TakenUp::TakenUp,
+        "and never a word about the grilling, which this page never asked for",
+    );
+}
+
+/// A Conversation that began with a Brief and a grilling is holding no pull
+/// request, and one that has been taken up already has been started once.
+#[tokio::test]
+async fn only_a_drafting_conversation_holding_one_can_be_taken_up() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_with_origin().await;
+    head_on_origin(&upstream, "rate-limiting");
+
+    let ordinary = started(&app, repo_id).await;
+
+    assert_eq!(
+        press_take_up(&app, ordinary).await,
+        TakenUp::NotHoldingOne,
+        "and it is answered before the Profiles are, which it has none of",
+    );
+
+    let id = ready_to_take_up(&app, elsewhere.path(), repo_id, 41).await;
+
+    assert_eq!(press_take_up(&app, id).await, TakenUp::TakenUp);
+    assert_eq!(
+        press_take_up(&app, id).await,
+        TakenUp::NotDrafting,
+        "two worktrees on one branch is what taking it up twice would mean",
+    );
+
+    assert_eq!(worktrees(&repo).len(), 2, "the repository and one worktree");
+}
+
+/// Origin having no branch by the name GitHub gave is its own refusal: the
+/// branch was deleted, or was never pushed to this remote, and either way there
+/// is nothing here to check out.
+#[tokio::test]
+async fn taking_up_is_refused_when_origin_has_no_such_branch() {
+    let (elsewhere, _dir, app, repo, _upstream, repo_id) = workbench_with_origin().await;
+
+    let id = ready_to_take_up(&app, elsewhere.path(), repo_id, 41).await;
+
+    assert_eq!(press_take_up(&app, id).await, TakenUp::NoHeadBranch);
+    nothing_taken_up(&app, id, &repo).await;
+}
+
+/// There is a human at this button, so a fetch git would not make refuses the
+/// press by name rather than taking a branch up against refs nobody can vouch
+/// for.
+#[tokio::test]
+async fn taking_up_is_refused_by_name_when_the_fetch_fails() {
+    let (elsewhere, dir, app, repo, upstream, repo_id) = workbench_with_origin().await;
+    head_on_origin(&upstream, "rate-limiting");
+
+    let id = ready_to_take_up(&app, elsewhere.path(), repo_id, 41).await;
+
+    let nowhere = dir.path().join("no-such-remote");
+    git(
+        &repo,
+        &["remote", "set-url", "origin", &nowhere.to_string_lossy()],
+    );
+
+    assert_eq!(press_take_up(&app, id).await, TakenUp::FetchFailed);
+    nothing_taken_up(&app, id, &repo).await;
 }
 
 /// How a pull request's checks are is carried to both copies of its card: the

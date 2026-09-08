@@ -84,7 +84,7 @@ import { refusedOnCreate } from "./composing";
 import { PaneHead } from "./PaneHead";
 import { DRAFT, chosen } from "./naming";
 import { Setup, SetupNotes } from "./Setup";
-import { HeldPullRequest } from "./TakeUp";
+import { HeldPullRequest, TakingUp } from "./TakeUp";
 import { keeping } from "./settling";
 import { BRIEF_REFUSAL, grillRefusal } from "./Timeline";
 
@@ -228,28 +228,35 @@ export function Composer(props: {
           {(said) => <ErrorLine class={styles.failure}>{said}</ErrorLine>}
         </For>
 
-        {/* And the press the whole pane is arranged for. Only one is ever drawn
-            — each is for a different kind of draft — so they read as the one
-            thing there is to do from here.
+        {/* And the press the whole pane is arranged for. Only one of the three
+            is ever drawn — each is for a different kind of draft — so they read
+            as the one thing there is to do from here.
 
-            A draft holding a pull request draws neither yet. Its own press is
-            the take-up, which is not built, and a grilling start over it would
-            be the wrong act offered plainly: the work on a pull request is
-            built already, and what it is waiting for is the wrap-up. */}
-        <Show when={props.conversation.adopting_pull_request === null}>
-          <Show
-            when={props.conversation.adopting}
-            fallback={
-              <StartGrilling conversation={props.conversation} files={files} />
-            }
-          >
-            {(adopting) => (
-              <Adoption
-                conversation={props.conversation}
-                adopting={adopting()}
-              />
-            )}
-          </Show>
+            A draft holding a pull request draws the take-up rather than a
+            grilling start: the work on a pull request is built already, and
+            what it is waiting for is the wrap-up, so the press that opens a
+            round would be the wrong act offered plainly. */}
+        <Show
+          when={props.conversation.adopting_pull_request}
+          fallback={
+            <Show
+              when={props.conversation.adopting}
+              fallback={
+                <StartGrilling conversation={props.conversation} files={files} />
+              }
+            >
+              {(adopting) => (
+                <Adoption
+                  conversation={props.conversation}
+                  adopting={adopting()}
+                />
+              )}
+            </Show>
+          }
+        >
+          {(held) => (
+            <TakingUp conversation={props.conversation} held={held()} />
+          )}
         </Show>
       </div>
     </>

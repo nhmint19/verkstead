@@ -62,6 +62,7 @@ import {
   startConversation,
   startGrilling,
   startPullRequestAdoption,
+  takeUpPullRequest,
 } from "../api/client";
 import type { CompanionMode, Started } from "../api/types";
 import { forget, read, write } from "../device";
@@ -79,6 +80,7 @@ import {
   CHOICE_REFUSAL,
   RULE,
 } from "./Setup";
+import { takeUpRefusal } from "./TakeUp";
 import { BRIEF_REFUSAL, grillRefusal } from "./Timeline";
 
 /// One repo the work would run alongside, as the compose page holds it: which
@@ -323,6 +325,12 @@ export type Created =
 /// is left to put on is the companions and the pairings. What the press does at
 /// the end of it is adopt rather than grill, which is the same act — the work
 /// beginning — under the other name.
+///
+/// **And a page loaded with a pull request creates the third**, which keeps the
+/// Brief and loses the same branch and base: what it is worked on is the head
+/// branch. What the press does at the end of *it* is the take-up, which is that
+/// act again at the far end of the pipeline — the work is built, so what begins
+/// is its wrap-up.
 export async function create(
   state: Composed,
   work: boolean,
@@ -444,18 +452,22 @@ export async function create(
         outcome === "Adopted",
         `The stage could not be started: ${adoptRefusal(outcome)}`,
       );
-    } else if (pull === null) {
+    } else if (pull !== null) {
+      // The third kickoff, and the one that starts no session: the take-up puts
+      // the Conversation on the pull request's head branch and moves it into
+      // Wrapping, and what runs from there is the wrap-up's own watchers.
+      const outcome = await takeUpPullRequest(id);
+      said(
+        outcome === "TakenUp",
+        `The pull request could not be taken up: ${takeUpRefusal(outcome)}`,
+      );
+    } else {
       const outcome = await startGrilling(id);
       said(
         outcome === "Started",
         `The work could not be started: ${grillRefusal(outcome)}`,
       );
     }
-
-    // And nothing at all yet for a pull request: the take-up is what puts the
-    // Conversation on its branch and moves it into Wrapping, and until that
-    // press exists *Start work* stops where *Save as draft* stops — on the
-    // Draft it just made, which is where the take-up will be.
   }
 
   return { conversation: id, refused };

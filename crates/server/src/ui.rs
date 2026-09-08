@@ -42,8 +42,8 @@ use verkstead_render::{
     ServeEdit, ServePress, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
     ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
     ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription,
-    TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice,
-    Verified,
+    TakenUp, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe,
+    UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -300,6 +300,7 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // grilling start's sibling: what the human presses on an adopting
         // Conversation, there being no Brief to write and no grilling to run.
         .route("/api/ui/conversations/{id}/adopt", post(adopt))
+        .route("/api/ui/conversations/{id}/take-up", post(take_up))
         .route("/api/ui/conversations/{id}/close", post(close))
         // And the two of those joined, which is one row of the menu rather than
         // two pressed in turn: the close and the archive are one intention often
@@ -3263,6 +3264,27 @@ async fn adopt(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "adopting a roadmap stage failed");
             unavailable("the stage could not be started")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/take-up` — put the Conversation on the
+/// branch of the pull request it is holding and start wrapping it up.
+///
+/// The adoption's sibling over the other kind of thing a Draft holds, and
+/// checked the same way: what the page named was read off GitHub a moment ago,
+/// and a branch somebody has pushed to, taken or checked out since is answered
+/// here rather than there.
+async fn take_up(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(TakenUp::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::take_up(&state, id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "taking a pull request up failed");
+            unavailable("the pull request could not be taken up")
         }
     }
 }

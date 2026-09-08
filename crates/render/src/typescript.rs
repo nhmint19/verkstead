@@ -30,7 +30,7 @@ use crate::{
     RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress,
     SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
     SharedConversation, ShowArchived, ShowingArchived, Shown, Started, SteerOpened,
-    SteerSubmission, Submitted, Subscribed, Subscription, TerminalOpened, TerminalsView,
+    SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalOpened, TerminalsView,
     TranscriptView, Unsubscribe, UpdateNotice, Watching,
 };
 
@@ -178,6 +178,12 @@ fn the_viewers_types_are_written_from_these() {
     // sibling: one Conversation, one branch, and every way of being refused
     // named separately. It takes no request shape either.
     Adopted::export_all(&config).unwrap();
+
+    // And the press beside it that takes up a pull request, which is the same
+    // press over the other kind of thing a Draft holds — and refused for
+    // reasons of its own, a branch that is already there being the point rather
+    // than the trouble.
+    TakenUp::export_all(&config).unwrap();
 
     // Nothing here for how the work gets built: the recommendation and its
     // reasoning ride on the `SetView` above, the pick goes back as a field of

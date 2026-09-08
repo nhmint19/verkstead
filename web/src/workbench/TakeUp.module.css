@@ -65,3 +65,47 @@
     color: var(--ink);
   }
 }
+
+/* And the press under the box, in the place `Start grilling` stands on every
+   other draft and never at the same time: what a draft holding a pull request
+   does from here is the wrap-up, and there is no round to grill. Drawn as the
+   adoption's own press is — the same act at the other door — see
+   `TakeUp.tsx`. */
+.takingUp {
+  margin-top: 1rem;
+}
+
+.takingUp h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.press {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.press:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.failure {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+/* Under the pointer, the accent it is filled with taken one step deeper — the
+   same step every filled button in the app takes. */
+@media (hover: hover) {
+  .press:not(:disabled):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}

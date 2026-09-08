@@ -95,9 +95,10 @@
 //! What the two presses do with a roadmap loaded is what they always do, under
 //! the other name: *Start work* creates the adopting Conversation and adopts the
 //! stage, and *Save as draft* creates it and leaves the stage to be adopted on
-//! its own page. With a pull request loaded they do the same thing as each
-//! other for now — the Conversation is created holding it, and the take-up that
-//! *Start work* would press afterwards is not built yet.
+//! its own page. With a pull request loaded they hold that shape once more:
+//! *Start work* creates the Conversation and takes the pull request up, which
+//! puts it on the head branch and starts the wrap-up, and *Save as draft*
+//! creates it and leaves the take-up on that draft's own page.
 //!
 //! What it does *not* do is decide anything the composer decides. Every control
 //! here is the composer's own component drawn over the compose state instead of

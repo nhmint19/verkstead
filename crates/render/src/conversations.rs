@@ -3870,6 +3870,101 @@ pub enum Adopted {
     },
 }
 
+/// What became of pressing the take-up on a Draft holding a pull request.
+///
+/// [`Adopted`]'s sibling over the other kind of thing a Draft takes up, and
+/// named the same way for the same reason: a human is at the workbench pressing
+/// the button, and each of these is something different for them to go and do.
+///
+/// The refusals it does not share with [`Adopted`] are the ones about a branch
+/// that is already there. A stage's branch is a name nothing has yet, so what
+/// refuses an adoption is a name being *taken*; a pull request's head branch is
+/// the whole point, so what refuses a take-up is that branch holding something
+/// origin does not, or somebody else standing on it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum TakenUp {
+    /// The worktree is on the pull request's head branch, the pull request is
+    /// recorded, and the Conversation is wrapping it up.
+    TakenUp,
+
+    NoSuchConversation,
+
+    /// It is past drafting, so it has been taken up once already — or closed.
+    NotDrafting,
+
+    /// It is holding no pull request, which is every Conversation that began
+    /// with a Brief and a grilling. There is nothing here to wrap up.
+    NotHoldingOne,
+
+    /// No Agent Profile is chosen for the implementation, which is what a red
+    /// check and a conflict are fixed under.
+    ///
+    /// The grilling is not among these, unlike an adoption's: the work on a
+    /// pull request is built, there is no round for a grilling to open, and the
+    /// picker is not drawn.
+    NoImplementationProfile,
+
+    /// Nor for the review, which is what reads the branch and what has been
+    /// said on it.
+    NoReviewProfile,
+
+    /// A chosen Profile's pair is not where it was left, so there is no account
+    /// to run the session under.
+    ProfileBroken,
+
+    /// Git would not fetch from the Repo's remote, so what origin holds on the
+    /// head branch cannot be known. Refused rather than taken up against refs
+    /// that may be a week old.
+    FetchFailed,
+
+    /// Origin has no branch by the name GitHub gave as the pull request's head
+    /// — deleted since it was listed, or never pushed to this remote.
+    NoHeadBranch,
+
+    /// There is a local branch by that name, and it holds commits origin does
+    /// not. Pushing them is the human's, and Verkstead moving the branch under
+    /// them would be Verkstead throwing work away.
+    BranchAhead,
+
+    /// There is a local branch by that name and it has gone its own way: each
+    /// of the two holds commits the other does not. Reconciling them is the
+    /// human's, for the reason above — and a git that would not say how the two
+    /// stand reads as this, which is the reading that never takes a branch it
+    /// should not.
+    BranchDiverged,
+
+    /// Git would not move the local branch on to origin's, though it stands
+    /// behind it. The reason is in the server's log.
+    FastForwardFailed,
+
+    /// The head branch is checked out somewhere already — the human's own
+    /// checkout, or another worktree — and git holds one checkout per branch.
+    /// Which place it is, is the whole of what the human needs.
+    CheckedOutElsewhere {
+        /// Where it is checked out, as git named it.
+        at: String,
+    },
+
+    /// Git would not make the worktree. The reason is in the server's log —
+    /// this is the one refusal with nothing for the human to correct.
+    WorktreeRefused,
+
+    /// A companion repo could not be checked out beside the head branch, and
+    /// this is which one and why.
+    ///
+    /// A Conversation holding a pull request drafts like any other, so its
+    /// setup card configures companions like any other — and the take-up is the
+    /// press that takes this Draft past drafting, so it checks them out exactly
+    /// as a grill start does.
+    Companion {
+        /// The Repo's registered name.
+        repo: String,
+
+        why: CompanionRefusal,
+    },
+}
+
 /// What became of pressing Stop or Force stop.
 ///
 /// One answer for both presses, because they ask for the same thing and differ

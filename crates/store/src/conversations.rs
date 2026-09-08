@@ -826,6 +826,24 @@ pub enum Staged {
     NotDrafting,
 }
 
+/// And what became of putting a Draft on the branch of the pull request it is
+/// holding.
+///
+/// [`Staged`]'s two refusals, one door along and for their reason: everything
+/// else a take-up is refused for is settled against git before the record is
+/// written, and the move that follows this is the pull request being recorded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Taking {
+    /// Recorded: the branch, the base commit, the base branch and the worktree.
+    Recorded,
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+
+    /// It is past drafting, so something has taken it up already.
+    NotDrafting,
+}
+
 /// What became of a direction picked on a wrap-up proposal.
 ///
 /// Driven by a Response arriving rather than by anything the human pressed, so
@@ -1354,10 +1372,10 @@ pub async fn start_pull_request_adoption(
 ///
 /// GitHub's own five facts and nothing of Verkstead's: this is what a row off
 /// the *Wrap up a pull request* level said, carried through the create and kept
-/// until the take-up records the pull request properly. Nothing here is
-/// authoritative about GitHub a moment after it was read — a title is edited, a
-/// base is retargeted — which is why the take-up asks again rather than
-/// trusting it.
+/// until the take-up records the pull request properly — see
+/// [`super::take_up`], which reads the head branch out of git rather than out
+/// of here. What the take-up does take from this is the two facts git cannot
+/// answer: what the pull request is called and where it is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdoptedPullRequest {
     /// The number GitHub gave it, which is what everybody calls it by — in this
@@ -4654,6 +4672,87 @@ pub async fn start_stage<'a>(
     tx.commit().await.context("starting a stage")?;
 
     Ok(Staged::Started)
+}
+
+/// Put a Draft holding a pull request on that pull request's branch: the branch
+/// it is on, the head it was taken up at, the branch GitHub says it goes into,
+/// and where the whole of it is checked out.
+///
+/// [`start_stage`]'s sibling over the other kind of thing a Draft takes up, and
+/// it stops one step short of it: the state is left alone here, because
+/// recording the pull request is what moves this Conversation — see
+/// [`super::record_pull_request`], which is the very next thing the take-up
+/// does. A Conversation that arrived in Wrapping by its own finish step was
+/// moved by that same record, and a take-up is that ending reached by the other
+/// door rather than a second kind of move.
+///
+/// `base` is the pull request's head at take-up with GitHub's base branch beside
+/// it, which is deliberately not the pair every other start writes. The commit
+/// is the branch's own tip rather than what it came off, so that the sweep draws
+/// only what Verkstead adds from here — the pull request's own commits are the
+/// pull request's record. The name beside it is the branch the pull request
+/// merges into, which is what a conflict is measured against.
+///
+/// No direction is written, unlike a stage's. There is no backlog and no inline
+/// run here: the work is built, and what follows this is a wrap-up.
+///
+/// `companions` is where the companion repos the human configured while this
+/// drafted were checked out, in this transaction for [`start_stage`]'s reason.
+pub async fn take_up<'a>(
+    pool: &SqlitePool,
+    id: i64,
+    branch: &str,
+    base: impl Into<Base<'a>>,
+    worktree: &Path,
+    companions: &[super::CompanionWorktree],
+) -> Result<Taking> {
+    let base = base.into();
+    let worktree = super::repos::text(worktree)?;
+
+    let mut tx = super::writing(pool, "taking up a pull request").await?;
+
+    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("reading the state of Conversation {id}"))?;
+
+    let Some((state,)) = row else {
+        return Ok(Taking::NoSuchConversation);
+    };
+
+    if Lifecycle::read(&state)? != Lifecycle::Draft {
+        return Ok(Taking::NotDrafting);
+    }
+
+    // The branch is settled rather than invented, which is the one thing this
+    // writes that a stage's start does not have to: a stage is worked on a name
+    // read out of a roadmap, and this one is worked on the branch the pull
+    // request is already on. So `naming` stays where it is — nobody is waiting
+    // for a better name for a branch that has a review on it.
+    sqlx::query(
+        "UPDATE conversations SET named_branch = ?, base_commit = ?, base_ref = ? WHERE id = ?",
+    )
+    .bind(branch)
+    .bind(base.commit)
+    .bind(base.named)
+    .bind(id)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("putting Conversation {id} on the pull request's branch"))?;
+
+    sqlx::query("INSERT INTO worktrees (conversation_id, path) VALUES (?, ?)")
+        .bind(id)
+        .bind(worktree)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("recording the worktree of Conversation {id}"))?;
+
+    super::companions::record_worktrees(&mut tx, id, companions).await?;
+
+    tx.commit().await.context("taking up a pull request")?;
+
+    Ok(Taking::Recorded)
 }
 
 /// What a stage Conversation's branch was made on top of, where it is a stage

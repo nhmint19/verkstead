@@ -75,6 +75,7 @@ import type {
   Submitted,
   Subscribed,
   Subscription,
+  TakenUp,
   TerminalOpened,
   TerminalsView,
   TranscriptView,
@@ -797,6 +798,17 @@ export function startGrilling(id: number): Promise<GrillingStarted> {
 /// the base commit — read again by the server when the button is pressed.
 export function adoptRoadmap(id: number): Promise<Adopted> {
   return post<Adopted>(`/api/ui/conversations/${id}/adopt`, {});
+}
+
+/// And take up the pull request a conversation is holding: its head branch
+/// checked out, the pull request recorded, and the wrap-up running over it.
+///
+/// Nothing is sent here either, for the reason nothing is sent to adopt: which
+/// conversation is in the path, and what the branch is now is the repository's
+/// own answer — read when the button is pressed rather than taken from a page
+/// that read it a moment ago.
+export function takeUpPullRequest(id: number): Promise<TakenUp> {
+  return post<TakenUp>(`/api/ui/conversations/${id}/take-up`, {});
 }
 
 /// Stop a Conversation wherever it has got to: its worktree removed, its branch

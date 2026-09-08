@@ -4063,6 +4063,29 @@ export type Subscribed = "Stored" | "Incomplete";
 export type Subscription = { endpoint: string, p256dh: string, auth: string, };
 
 /**
+ * What became of pressing the take-up on a Draft holding a pull request.
+ *
+ * [`Adopted`]'s sibling over the other kind of thing a Draft takes up, and
+ * named the same way for the same reason: a human is at the workbench pressing
+ * the button, and each of these is something different for them to go and do.
+ *
+ * The refusals it does not share with [`Adopted`] are the ones about a branch
+ * that is already there. A stage's branch is a name nothing has yet, so what
+ * refuses an adoption is a name being *taken*; a pull request's head branch is
+ * the whole point, so what refuses a take-up is that branch holding something
+ * origin does not, or somebody else standing on it.
+ */
+export type TakenUp = "TakenUp" | "NoSuchConversation" | "NotDrafting" | "NotHoldingOne" | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "FetchFailed" | "NoHeadBranch" | "BranchAhead" | "BranchDiverged" | "FastForwardFailed" | { "CheckedOutElsewhere": { 
+/**
+ * Where it is checked out, as git named it.
+ */
+at: string, } } | "WorktreeRefused" | { "Companion": { 
+/**
+ * The Repo's registered name.
+ */
+repo: string, why: CompanionRefusal, } };
+
+/**
  * One task's document as the pane draws it: the entry it belongs to, and the
  * markdown of its file.
  */

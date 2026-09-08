@@ -513,6 +513,101 @@ pub(crate) fn merged(repo: &Path, commit: &str, into: &str) -> Option<bool> {
     Some(base.trim() == commit)
 }
 
+/// Where `branch` is checked out in `repo`, or `None` where nothing holds it.
+///
+/// Git allows one checkout per branch, and *one* includes the human's own
+/// working tree beside every worktree Verkstead ever made: `git worktree list`
+/// lists the lot, the main checkout first. So this is what a take-up asks before
+/// it tries to check the pull request's head branch out — a branch somebody is
+/// standing on is a refusal naming where they are standing, rather than a git
+/// error with a path buried in it.
+///
+/// The porcelain form because it is the parseable one: a paragraph per checkout,
+/// `worktree <path>` first and `branch <ref>` among the lines under it — absent
+/// where that checkout is detached, which holds no branch to collide with.
+///
+/// `None` for a repository git would not read, which is the same answer as one
+/// with nothing checked out. Nothing turns on the difference: what follows a
+/// `None` here is a `git worktree add` that would refuse for itself, in the words
+/// the refusal above it already has.
+pub(crate) fn checked_out_at(repo: &Path, branch: &str) -> Option<PathBuf> {
+    let listed = git(repo, &["worktree", "list", "--porcelain"])?;
+    let held = format!("branch refs/heads/{branch}");
+
+    let mut at: Option<PathBuf> = None;
+
+    for line in listed.lines() {
+        if let Some(path) = line.strip_prefix("worktree ") {
+            at = Some(PathBuf::from(path));
+        }
+
+        if line.trim_end() == held {
+            return at;
+        }
+    }
+
+    None
+}
+
+/// Move `branch` on to `to` in `repo`, and say whether it went.
+///
+/// What a take-up does to a local head branch that stands behind origin's: the
+/// pull request's work is on the remote, this checkout's copy is older, and the
+/// worktree is about to be made on it. A fetch cannot do it — the branch is not
+/// checked out anywhere, which is exactly why it is safe to move — so the ref is
+/// written directly.
+///
+/// `from` is where it stands now, and it is passed to git rather than assumed:
+/// `update-ref` takes an old value and refuses the write where the ref has
+/// moved since, which is what makes this safe against anything that touched the
+/// branch between the reading and here.
+///
+/// Only ever called where the caller has established that `to` contains `from`,
+/// so this is a fast-forward in fact as well as in name. Git has no opinion
+/// about that — `update-ref` writes whatever it is given — and the deciding is
+/// the caller's, where the refusals for a branch that is ahead or has diverged
+/// are.
+pub(crate) fn fast_forward(repo: &Path, branch: &str, from: &str, to: &str) -> bool {
+    git(
+        repo,
+        &[
+            "update-ref",
+            "--end-of-options",
+            &format!("refs/heads/{branch}"),
+            to,
+            from,
+        ],
+    )
+    .is_some()
+}
+
+/// Check the branch `branch` — which is already there — out at `path` as a
+/// worktree of `repo`.
+///
+/// [`add`]'s other half, and the one thing that separates them is who made the
+/// branch. Every worktree Verkstead makes for work of its own cuts its branch as
+/// it goes; a take-up is handed a branch that is somebody's already, with a pull
+/// request open on it, so what it wants is git checking that branch out where it
+/// stands — and never `-b`, which would refuse over a name that is the whole
+/// point.
+pub(crate) fn check_out(repo: &Path, path: &Path, branch: &str) -> bool {
+    if !room(path) {
+        return false;
+    }
+
+    git(
+        repo,
+        &[
+            "worktree",
+            "add",
+            "--end-of-options",
+            &path.to_string_lossy(),
+            branch,
+        ],
+    )
+    .is_some()
+}
+
 /// Make the directory a worktree goes under, and say whether it is there.
 ///
 /// Git creates the worktree directory but not the `worktrees/` above it, which
@@ -531,12 +626,20 @@ fn room(path: &Path) -> bool {
     true
 }
 
-/// Make `branch` off `commit` in `repo`, checked out at `path`.
+/// Make `branch` off `from` in `repo`, checked out at `path`.
 ///
 /// One git call, because it is one thing: a worktree registered with the branch
 /// it holds. Doing it in two would leave a branch behind whenever the checkout
 /// failed.
-pub(crate) fn add(repo: &Path, path: &Path, branch: &str, commit: &str) -> bool {
+///
+/// `from` is a commit for every branch a start cuts, that being what a base
+/// resolves to. It is a *name* for the one a take-up cuts — origin's copy of the
+/// pull request's head branch — and the difference is what git makes of it:
+/// cutting a branch off a remote-tracking one sets the new branch's upstream to
+/// it, so a push from the worktree goes where the pull request is. Passed
+/// through as it comes rather than resolved here, because resolving it is
+/// exactly what would throw that away.
+pub(crate) fn add(repo: &Path, path: &Path, branch: &str, from: &str) -> bool {
     if !room(path) {
         return false;
     }
@@ -550,7 +653,7 @@ pub(crate) fn add(repo: &Path, path: &Path, branch: &str, commit: &str) -> bool 
             branch,
             "--end-of-options",
             &path.to_string_lossy(),
-            commit,
+            from,
         ],
     )
     .is_some()

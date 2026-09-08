@@ -27,6 +27,7 @@ import type {
   RepoPairingsView,
   RepoView,
   SettingsView,
+  TakenUp,
 } from "../src/api/types";
 import menu from "../src/Menu.module.css";
 import pill from "../src/Attaching.module.css";
@@ -1996,15 +1997,27 @@ describe("wrapping up a pull request from the compose page", () => {
     await waitFor(() => expect(localStorage.getItem(COMPOSING)).toBeNull());
   });
 
-  /// *Start work* creates the same Conversation and stops where the quieter
-  /// press stops: the take-up it would press afterwards is not built yet.
-  it("starts no work beyond the draft it makes", async () => {
+  /// *Start work* creates the same Conversation and takes the pull request up,
+  /// which is the kickoff under the third of its three names: a roadmap is
+  /// adopted, work of the human's own is grilled, and a pull request is taken
+  /// up — the work on it being built already.
+  it("takes the pull request up once the draft is made", async () => {
     const fetching = withOpen(
       json(OPEN_PULLS),
       ...REMEMBERED,
       whenever(
         "/api/ui/pull-request-adoptions",
         json({ Started: { id: OPEN.id } }),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/brief`,
+        json("Saved"),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/take-up`,
+        json("TakenUp" satisfies TakenUp),
         "POST",
       ),
     );
@@ -2026,8 +2039,44 @@ describe("wrapping up a pull request from the compose page", () => {
     await waitFor(() =>
       expect(writes(fetching, "/api/ui/pull-request-adoptions")).toBe(1),
     );
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/take-up`),
+      ).toEqual({}),
+    );
+
+    // And neither of the other two kickoffs, each of which is for a different
+    // kind of draft.
     expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(0);
     expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/adopt`)).toBe(0);
+  });
+
+  /// And the quieter press still stops at the draft: *Save as draft* creates the
+  /// Conversation holding the pull request and leaves the take-up on its own
+  /// page.
+  it("leaves the take-up alone when it is only saved as a draft", async () => {
+    const fetching = withOpen(
+      json(OPEN_PULLS),
+      ...REMEMBERED,
+      whenever(
+        "/api/ui/pull-request-adoptions",
+        json({ Started: { id: OPEN.id } }),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const free = await freeRow(container);
+    fireEvent.click(free.row);
+    await drawn(container, `.${takeUp.held}`);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save as draft" }));
+
+    await waitFor(() =>
+      expect(writes(fetching, "/api/ui/pull-request-adoptions")).toBe(1),
+    );
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/take-up`)).toBe(0);
   });
 
   /// The first free row of the fixture, with everything a test needs to say
