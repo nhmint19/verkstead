@@ -1007,16 +1007,43 @@ fn read<T: DeserializeOwned>(body: &str) -> T {
 /// names for one file are the ordinary case rather than the corner. What is no
 /// longer among the reasons is the short name a temporary directory is reached
 /// through — see [`SOMEWHERE`], which is why this suite's are spelled in full.
+///
+/// **And where the filesystem will not say, compared the way Windows compares
+/// a name.** An App Execution Alias — which is how a PowerShell 7 from the
+/// Store arrives on the `PATH`, and so how the machine that runs this suite may
+/// well have one — is a reparse point that cannot be resolved at all: the
+/// answer is `ERROR_CANT_ACCESS_FILE`, and it is that for every spelling of the
+/// name alike. Two paths the filesystem will not resolve are compared as they
+/// are written instead, without regard for case, which is the comparison
+/// Windows itself makes of a path and is enough for the one difference this is
+/// ever asked about — an extension `where.exe` prints as the directory holds it
+/// against the one `PATHEXT` appends in capitals.
+///
+/// One of the two resolving and the other not is neither case, and is a
+/// genuinely different file: it fails saying which was which.
 fn the_same_file(one: &Path, another: &Path) {
-    assert_eq!(
-        std::fs::canonicalize(one)
-            .unwrap_or_else(|error| panic!("resolving {}: {error}", one.display())),
-        std::fs::canonicalize(another)
-            .unwrap_or_else(|error| panic!("resolving {}: {error}", another.display())),
-        "{} and {} should be the one file",
-        one.display(),
-        another.display(),
-    );
+    match (std::fs::canonicalize(one), std::fs::canonicalize(another)) {
+        (Ok(settled), Ok(settled_too)) => assert_eq!(
+            settled,
+            settled_too,
+            "{} and {} should be the one file",
+            one.display(),
+            another.display(),
+        ),
+
+        (Err(_), Err(_)) => assert!(
+            one.as_os_str().eq_ignore_ascii_case(another.as_os_str()),
+            "{} and {} are both names the filesystem will not resolve — an alias is — so              they should be the one name, and they are not",
+            one.display(),
+            another.display(),
+        ),
+
+        (settled, settled_too) => panic!(
+            "{} resolved to {settled:?} and {} to {settled_too:?}, so one of them is a file              this machine has and the other is not",
+            one.display(),
+            another.display(),
+        ),
+    }
 }
 
 /// A file a session writes somewhere other than its evidence directory, waited

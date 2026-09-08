@@ -51,6 +51,13 @@ const PATIENCE: Duration = Duration::from_secs(60);
 /// [`a_session_on_a_console_runs_inside_its_container`].
 const POWERSHELL: &str = "powershell.exe";
 
+/// The internet client, as a token carries it.
+///
+/// The capability ADR-0014 grants a session, spelled the way a group reads out
+/// of a token — see [`a_container_carries_the_internet_client_on_its_token`],
+/// which is the whole of why this file knows the number.
+const INTERNET_CLIENT: &str = "S-1-15-3-1";
+
 /// And the one that sorts what it is given, which is how the start with nothing
 /// watching it is asked both of its directions at once: what went in at the
 /// standard input, and what came back out.
@@ -252,6 +259,60 @@ async fn a_container_that_will_not_resolve_refuses_the_process() {
         refused.to_string().contains("this is not a SID"),
         "which should say the same thing, and it said: {refused}"
     );
+}
+
+/// The capability is on the token, which is the half of granting it that a
+/// profile does not do.
+///
+/// **A profile registered for the internet client is not a process holding
+/// it.** `CreateAppContainerProfile` says what a container may be given;
+/// `CreateProcessW` says what the process is actually built with, and a
+/// session started with an empty capability list reaches no network at all —
+/// no route out, and no DNS to find one by, which a session meets as a name
+/// that will not resolve rather than as a refusal. Both calls looked right
+/// while that was true, and the process really was inside its container, so
+/// what tells the two apart is the token and only the token.
+///
+/// Asked of the operating system rather than by dialling something, for the
+/// reason [`container::around`] is asked that way — and because a machine with
+/// no internet would fail a dialling test for reasons of its own.
+#[tokio::test]
+async fn a_container_carries_the_internet_client_on_its_token() {
+    let held = tempfile::tempdir().expect("a directory to keep a Data Directory in");
+    let container =
+        Container::for_conversation(held.path(), 5).expect("this machine to make an AppContainer");
+
+    let mut terminal = Terminal::open().expect("this machine has pseudoconsoles");
+
+    // The same waiting probe the test above uses, for its reason: a token is
+    // asked about while the process holding it is still there.
+    let mut probe = probing(POWERSHELL);
+    probe
+        .arg("-NoProfile")
+        .arg("-NonInteractive")
+        .arg("-Command")
+        .arg("[Console]::Out.WriteLine('inside'); [System.Threading.Thread]::Sleep(600000)")
+        .inside(container.sid());
+
+    let child = terminal
+        .spawn(&probe)
+        .expect("a shell to run inside the container");
+
+    let session = child.id().expect("a started session has a process id");
+
+    let said = until(&terminal, |said| said.contains("inside")).await;
+
+    let capabilities =
+        container::held_by(session).expect("the machine to say what a token carries");
+
+    assert!(
+        capabilities.iter().any(|held| held == INTERNET_CLIENT),
+        "the session's token should carry the internet client {INTERNET_CLIENT}, and it          carried {capabilities:?} — it said: {said:?}"
+    );
+
+    drop(child);
+
+    container::taken_back(held.path(), 5);
 }
 
 /// What every probe here has in common: `program`, and the environment it takes

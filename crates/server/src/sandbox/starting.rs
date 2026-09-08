@@ -33,7 +33,9 @@ use windows_sys::Win32::Foundation::{
     CloseHandle, HANDLE, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, SetHandleInformation,
     WAIT_FAILED,
 };
-use windows_sys::Win32::Security::{SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES};
+use windows_sys::Win32::Security::{
+    SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES, SID_AND_ATTRIBUTES,
+};
 use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
     CREATE_UNICODE_ENVIRONMENT, CreateProcessW, DeleteProcThreadAttributeList,
@@ -42,7 +44,7 @@ use windows_sys::Win32::System::Threading::{
     STARTF_USESTDHANDLES, STARTUPINFOEXW, UpdateProcThreadAttribute, WaitForSingleObject,
 };
 
-use super::container::Sid;
+use super::container::{INTERNET_CLIENT, SE_GROUP_ENABLED, Sid};
 use super::rendering::Rendering;
 
 /// `rendering` run to its end with nothing watching it, and everything it
@@ -280,13 +282,33 @@ pub(crate) struct Capabilities {
     #[allow(dead_code)]
     sid: Sid,
 
-    /// And what the attribute is: that SID, and no capabilities beside it.
+    /// The internet client's own SID, held for the reason the container's is:
+    /// [`Capabilities::capability`] points at the block this owns.
+    #[allow(dead_code)]
+    internet: Sid,
+
+    /// The capability list itself, one entry long, **boxed so that its address
+    /// outlives the move** this structure makes on its way out of
+    /// [`Capabilities::of`]. What goes on the attribute list is a pointer to
+    /// this entry, and one held inline would sit at one address while it was
+    /// written and another by the time `CreateProcessW` read it.
+    #[allow(dead_code)]
+    capability: Box<SID_AND_ATTRIBUTES>,
+
+    /// And what the attribute is: that SID, and the one capability a session is
+    /// allowed.
     ///
-    /// **The capability list is empty, and that is the decision.** What a
-    /// container may reach of the network is granted by the profile it was
-    /// created with — the internet client and nothing else, see
-    /// [`super::container`] — and a capability said again here would be one
-    /// this call could widen the identity with.
+    /// **A capability is carried by the token, not by the profile.** The list
+    /// `CreateAppContainerProfile` is given says what the container is
+    /// registered for; what a running process actually holds is what is handed
+    /// to `CreateProcessW` here. Started with none, a session reaches no
+    /// network at all — not the internet ADR-0014 grants it, and not the DNS it
+    /// would find anything by, which it meets as a name that will not resolve.
+    ///
+    /// So the profile's capability is said again here, off the same constant
+    /// rather than a second spelling of it: one decision read twice, which is
+    /// not a widening — a token cannot hold what its profile was never
+    /// registered for.
     capabilities: SECURITY_CAPABILITIES,
 }
 
@@ -299,16 +321,27 @@ impl Capabilities {
     /// asking for a boundary is not one to start without it (ADR-0014).
     pub(crate) fn of(sid: &str) -> io::Result<Capabilities> {
         let held = Sid::of(sid)?;
+        let internet = Sid::of(INTERNET_CLIENT)?;
+
+        // Boxed before the pointer to it is taken, so that what the attribute
+        // list reads is the address it will still be at: a `Box` keeps its
+        // contents where they are however often the structure around it moves.
+        let capability = Box::new(SID_AND_ATTRIBUTES {
+            Sid: internet.as_psid(),
+            Attributes: SE_GROUP_ENABLED,
+        });
 
         let capabilities = SECURITY_CAPABILITIES {
             AppContainerSid: held.as_psid(),
-            Capabilities: ptr::null_mut(),
-            CapabilityCount: 0,
+            Capabilities: ptr::from_ref(capability.as_ref()).cast_mut(),
+            CapabilityCount: 1,
             Reserved: 0,
         };
 
         Ok(Capabilities {
             sid: held,
+            internet,
+            capability,
             capabilities,
         })
     }
