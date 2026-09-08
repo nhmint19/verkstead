@@ -1602,6 +1602,59 @@ shared: ShareView | null,
 attachments: Array<AttachmentView>, };
 
 /**
+ * What became of a create.
+ *
+ * Every refusal is a named outcome for the reason [`Registered`]'s are, and one
+ * more of its own: a create that got half way is a directory on somebody's
+ * disk, so what comes back has to be a sentence about their machine rather
+ * than a status code.
+ *
+ * A refusal registers nothing. The two outcomes that leave a Repo both carry
+ * the whole opened Repo rather than the row: the modal that asked for it is
+ * about to put a draft on it, and a page that had to go and read the Repo it
+ * just made would be asking for something the server was already holding.
+ */
+export type Created = { "Made": RepoView } | { "MadeWithoutRemote": { repo: RepoView, why: string, } } | "ParentMissing" | "AlreadyThere" | "BadName" | "NoAuthor" | { "Refused": string };
+
+/**
+ * A repository the human is asking Verkstead to *make*, said as where it is to
+ * go and what it is to be called.
+ *
+ * Two fields rather than the one path a [`Registration`] carries, because the
+ * two halves are answered differently: the parent is browsed for, and the name
+ * is typed. Joining them in the browser would be the one place a path is built
+ * out of a separator the server never agreed to.
+ */
+export type Creation = { 
+/**
+ * The directory the new repository goes in. Absolute, and somewhere the
+ * server can write.
+ */
+parent: string, 
+/**
+ * And what to call it, which is the directory's name and so the Repo's:
+ * what a Repo is called is read off the directory rather than claimed, and
+ * a create is the one moment the human chooses the directory.
+ */
+name: string, 
+/**
+ * And whether the same repository is to be made on GitHub, pushed to, and
+ * left as this one's `origin`.
+ *
+ * Asked because the pipeline ends in a push and a pull request: a
+ * repository with nowhere to push is one that will stop halfway through
+ * the first Conversation. What is made there is private — a repository
+ * made from here is somebody's work before it is anybody else's business,
+ * and public is a decision to take deliberately rather than by leaving a
+ * box alone.
+ *
+ * False where no token is configured, there being nothing to make it as:
+ * the modal draws no tick at all then, and says a remote is needed before
+ * the work is finished.
+ */
+github: boolean, };
+
+/**
  * What a row is about.
  *
  * Flat rather than a harness variant carrying an [`crate::AgentType`]: the
@@ -2529,8 +2582,15 @@ id: number, html: string, };
  * The refusals are the server's and not the form's: a check the browser made
  * is a courtesy, and every request reaching this endpoint is decided here
  * whether or not a form was involved.
+ *
+ * The two outcomes that leave a Repo registered carry it, because whoever
+ * asked is usually about to put something *on* it — the Repo dropdown's **Open
+ * repo** row registers one and lands the draft on it — and the path that was
+ * typed is not the resolved path the Repo is recorded under. A caller left to
+ * match its own spelling against the list afterwards would be guessing at an
+ * answer this endpoint is already holding.
  */
-export type Registered = "Added" | "NotAbsolute" | "Missing" | "NotARepository" | "NoDefaultBranch" | "AlreadyRegistered";
+export type Registered = { "Added": RepoEntry } | "NotAbsolute" | "Missing" | "NotARepository" | "NoDefaultBranch" | { "AlreadyRegistered": RepoEntry };
 
 /**
  * A repository the human is asking Verkstead to take on, named by its absolute
@@ -3410,19 +3470,49 @@ commits: Array<SharedCommit>,
 exported_at: string, };
 
 /**
- * Whether the sidebar is drawing what the human has archived.
+ * And putting that switch where the human has just put it.
+ *
+ * The position rather than a flip, so what is sent is what they are looking
+ * at — a switch says where it stands, and saying it twice says the same thing.
+ *
+ * Its own type rather than [`ShowingArchived`] said in the other direction:
+ * what comes back carries whether there is anything archived as well, and that
+ * is the server's fact about the record rather than anything a device could be
+ * telling it.
+ */
+export type ShowArchived = { 
+/**
+ * Where the switch has been put.
+ */
+showing: boolean, };
+
+/**
+ * Whether the sidebar is drawing what the human has archived, and whether
+ * there is anything of theirs to draw.
  *
  * Their standing choice rather than this device's: it is read back off the
- * server on every load, and what is sent when the toggle is flipped is the
- * position it has been put in rather than the flip itself — a switch says
- * where it stands, and saying it twice says the same thing.
+ * server on every load. What is *sent* when the switch is flipped is
+ * [`ShowArchived`] rather than this — a position, and nothing about what is
+ * behind it, that half being the server's own fact.
+ *
+ * Two answers in one payload because the page has one question. The sidebar's
+ * list is filtered by the switch in SQL, so an empty list says nothing about
+ * which of the two empties it is — nothing archived, or everything archived
+ * and hidden — and that is precisely what decides whether a page with no
+ * sidebar draws the switch at all.
  */
 export type ShowingArchived = { 
 /**
  * On: the archived Conversations are on the list, in their ordinary
  * places. Off: they are not drawn at all.
  */
-showing: boolean, };
+showing: boolean, 
+/**
+ * And whether there is anything archived at all, whichever position the
+ * switch is in. False is a switch with nothing behind it, which is a
+ * switch not worth drawing.
+ */
+any: boolean, };
 
 /**
  * What the server says down a live Screen's socket.

@@ -6,10 +6,10 @@ use std::path::{Path, PathBuf};
 use sqlx::SqlitePool;
 use verkstead_store::{
     Account, Archiving, Closing, Edited, Event, Grilling, Lifecycle, Picked, ProfileFacts,
-    RowState, Switched, Unarchiving, add_companion, adopting, archive_conversation, archived,
-    close_conversation, conversation_branch, conversations, create_profile, follow_branch,
-    load_conversation, open_database, register_repo, reinvent_branch, rename_branch, save_brief,
-    set_base_commit, set_grilling_pairing, set_state, settle_naming, show_archived,
+    RowState, Switched, Unarchiving, add_companion, adopting, any_archived, archive_conversation,
+    archived, close_conversation, conversation_branch, conversations, create_profile,
+    follow_branch, load_conversation, open_database, register_repo, reinvent_branch, rename_branch,
+    save_brief, set_base_commit, set_grilling_pairing, set_state, settle_naming, show_archived,
     showing_archived, start_adoption, start_building, start_conversation, start_grilling,
     start_unnamed_conversation, switch_repo, timeline, unarchive_conversation,
 };
@@ -1366,6 +1366,33 @@ async fn showing_the_archived_puts_them_back_in_the_list() {
 
     assert!(!showing_archived(&pool).await.unwrap());
     assert!(conversations(&pool).await.unwrap().is_empty());
+}
+
+/// And whether there is anything behind that switch at all, which is what the
+/// filtered list cannot say: an empty list is the same empty list either way,
+/// and the page that has no sidebar to hang the switch under has to know which
+/// of the two it is looking at.
+///
+/// It is about the archiving rather than about the switch, so it answers the
+/// same whichever position the switch is in.
+#[tokio::test]
+async fn whether_anything_is_archived_is_read_apart_from_the_switch() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafted(&pool).await;
+
+    assert!(!any_archived(&pool).await.unwrap());
+
+    close_conversation(&pool, id).await.unwrap();
+    archive_conversation(&pool, id).await.unwrap();
+
+    assert!(any_archived(&pool).await.unwrap());
+    assert!(conversations(&pool).await.unwrap().is_empty());
+
+    show_archived(&pool, true).await.unwrap();
+    assert!(any_archived(&pool).await.unwrap());
+
+    unarchive_conversation(&pool, id).await.unwrap();
+    assert!(!any_archived(&pool).await.unwrap());
 }
 
 /// A switch rather than a press: asking for the position it is already in is

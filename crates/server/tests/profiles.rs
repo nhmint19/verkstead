@@ -221,7 +221,7 @@ async fn conversation(app: &Router, root: &Path) -> i64 {
 
     let registered: Registered =
         post(app, "/api/ui/repos", &serde_json::json!({ "path": repo })).await;
-    assert_eq!(registered, Registered::Added);
+    assert!(matches!(registered, Registered::Added(_)));
 
     let repos: Vec<verkstead_render::RepoEntry> = get(app, "/api/ui/repos").await;
 

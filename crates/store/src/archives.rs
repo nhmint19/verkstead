@@ -191,6 +191,28 @@ pub async fn archived(pool: &SqlitePool, id: i64) -> Result<bool> {
     Ok(row.is_some())
 }
 
+/// Whether anything has been put away at all.
+///
+/// The one thing the sidebar's list cannot say for itself. That query is
+/// filtered by the switch below, so an empty list is the same empty list
+/// whether nothing has ever been worked on or a hundred Conversations are
+/// standing behind a switch that is off — and which of the two it is is exactly
+/// what decides whether the switch is worth drawing where there is no list to
+/// draw it under. So the endpoint that answers where the switch stands answers
+/// this beside it, and the page reads one fact rather than two.
+///
+/// One row is the whole of the answer, which is what the `LIMIT` is for: how
+/// many there are is nothing anybody asks.
+pub async fn any_archived(pool: &SqlitePool) -> Result<bool> {
+    let row: Option<(i64,)> =
+        sqlx::query_as("SELECT conversation_id FROM archived_conversations LIMIT 1")
+            .fetch_optional(pool)
+            .await
+            .context("reading whether anything has been archived")?;
+
+    Ok(row.is_some())
+}
+
 /// Whether the sidebar is drawing what has been archived.
 pub async fn showing_archived(pool: &SqlitePool) -> Result<bool> {
     let row: Option<(i64,)> = sqlx::query_as("SELECT only_row FROM shown_archives")

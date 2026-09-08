@@ -226,7 +226,11 @@ fn git(dir: &Path, token: &str, args: &[&str]) -> Result<(), String> {
 /// The first line it wrote that says anything, which is where git puts the
 /// reason — everything after it is the advice, and a refusal on a page is not
 /// the place for a paragraph of it.
-fn said(stderr: &str) -> String {
+///
+/// Shared with [`crate::repos`], which reads a git that would not make a
+/// repository the same way: one sentence about what went wrong, for a modal
+/// that has one line to say it on.
+pub(crate) fn said(stderr: &str) -> String {
     stderr
         .lines()
         .map(str::trim)

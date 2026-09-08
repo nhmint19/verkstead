@@ -19,8 +19,13 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type {
   AbandonedRepo,
   Adopted,
+  Created,
+  DirectoryListing,
   ProfileEntry,
+  RepoEntry,
   RepoPairingsView,
+  RepoView,
+  SettingsView,
 } from "../src/api/types";
 import menu from "../src/Menu.module.css";
 import pill from "../src/Attaching.module.css";
@@ -31,6 +36,11 @@ import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
 import { ATTACH_REFUSAL } from "../src/workbench/Composer";
 import { BRANCH_REFUSAL } from "../src/workbench/Setup";
 import {
+  CREATE_REFUSAL,
+  REFUSAL as REPO_REFUSAL,
+} from "../src/repos/RepoList";
+import { repoParent, setRepoParent } from "../src/device";
+import {
   COMPOSING,
   blank,
   keep,
@@ -38,11 +48,23 @@ import {
   stored,
   type Composed,
 } from "../src/workbench/composing";
-import { OPEN, PROFILES, REPOS, drawn, mount, theWorkbench } from "./bench";
+import {
+  NO_PAIRINGS,
+  OPEN,
+  PROFILES,
+  REPOS,
+  drawn,
+  mount,
+  theWorkbench,
+} from "./bench";
 import { carrying, drag, dropOn } from "./dragging";
-import { offered, pick, picker, showing } from "./pickers";
-import { json, serving, whenever } from "./serving";
+import { browse, held, listingAt } from "./fields";
+import { actionRows, offered, opened, pick, press, rows, showing } from "./pickers";
+import { askedFor, hangs, json, serving, whenever } from "./serving";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
+import listing from "./fixtures/directories.json" with { type: "json" };
+import made from "./fixtures/repo.json" with { type: "json" };
+import told from "./fixtures/settings.json" with { type: "json" };
 
 /// The roadmaps nothing is driving, as the server answers for them: three of
 /// them in one repo, the last found on a branch that has not merged.
@@ -195,35 +217,22 @@ async function openRepo(container: ParentNode): Promise<HTMLElement> {
 /// Pick a repo, which is the one thing a create cannot do without.
 ///
 /// Two controls wear that name, and which of them is standing is the whole of
-/// what this page does about a repo: a listbox in the row until one is picked,
-/// and the panel's own `<select>` — behind the trigger the listbox became —
-/// every time after. So the first pick walks the rows and the rest change the
-/// field, which is what the human does too.
+/// what this page does about a repo: the dropdown in the row until one is
+/// picked, and the same control behind the trigger it became every time after.
+/// Both are the app's own listbox — the two rows at their foot press rather than
+/// pick, which is nothing a native option can do — so the walk is the same
+/// either way and only the panel has to be opened first.
 async function pickRepo(container: ParentNode, id: number): Promise<void> {
   const listed = container.querySelector(`.${setup.repoSelect}`) !== null;
 
-  if (listed) {
-    // Waited for the rows to have landed, the control being drawn before the
-    // list it offers has arrived.
-    await waitFor(() => expect(offered("Repo").length).toBe(REPOS.length));
-    pick("Repo", REPOS.find((repo) => repo.id === id)!.name);
-    return;
+  if (!listed) {
+    await openRepo(container);
   }
 
-  await openRepo(container);
-
-  const picker = (await waitFor(() =>
-    screen.getByLabelText("Repo"),
-  )) as HTMLSelectElement;
-
-  // Waited for the list to have landed: a repo apiece, plus the placeholder
-  // while nothing is picked — which is gone the second time this is called, a
-  // placeholder being a state there is no way back to.
-  await waitFor(() =>
-    expect(picker.options.length).toBeGreaterThanOrEqual(REPOS.length),
-  );
-
-  fireEvent.change(picker, { target: { value: String(id) } });
+  // Waited for the rows to have landed, the control being drawn before the list
+  // it offers has arrived.
+  await waitFor(() => expect(offered("Repo").length).toBe(REPOS.length));
+  pick("Repo", REPOS.find((repo) => repo.id === id)!.name);
 }
 
 describe("the compose page", () => {
@@ -315,12 +324,7 @@ describe("the compose page", () => {
     // And still saying it once the repos have landed and none of them answers
     // to the id — the panel's own picker being where that is put right.
     await openRepo(container);
-    const choice = (await waitFor(() =>
-      picker("Repo"),
-    )) as unknown as HTMLSelectElement;
-    await waitFor(() =>
-      expect(choice.options.length).toBeGreaterThanOrEqual(REPOS.length),
-    );
+    await waitFor(() => expect(offered("Repo").length).toBe(REPOS.length));
     expect(trigger.textContent).toBe("Select");
   });
 
@@ -737,6 +741,482 @@ describe("the compose page", () => {
     expect(screen.getByLabelText("Implementation")).toBeTruthy();
     expect(screen.getByLabelText("Review")).toBeTruthy();
     expect(PROFILES.length).toBeGreaterThan(0);
+  });
+});
+
+/// The two rows at the foot of the Repo dropdown, and the one this stage wires:
+/// **Open repo**, which registers a repository that already exists and lands the
+/// draft on it.
+///
+/// The rows are the one control's, so the panel behind a picked repo has them
+/// too — that half is `workbench.test.tsx`'s, over a draft where a pick is a
+/// move. What is asked here is the half a compose page owns: the pick lands in
+/// the state this device is holding, and a refusal is answered inside the modal.
+describe("registering a repo from the Repo dropdown", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    leaveRefusals(0, []);
+  });
+
+  /// A repository nothing has registered yet — not one of the fixture's, so
+  /// landing on it is unmistakably the answer's doing rather than the list's.
+  const OPENED: RepoEntry = {
+    id: 4242,
+    name: "widgets",
+    path: "/srv/repos/widgets",
+    default_branch: "main",
+  };
+
+  /// The workbench with the registration answered however the test says.
+  const registering = (answer: () => Promise<Response>) =>
+    theWorkbench(whenever("/api/ui/repos", answer, "POST"));
+
+  /// Open the modal off the dropdown's foot, and hand back the field inside it.
+  async function openRepoModal(): Promise<HTMLInputElement> {
+    await waitFor(() => expect(offered("Repo").length).toBe(REPOS.length));
+    press("Repo", "Open repo");
+
+    return (await waitFor(() =>
+      screen.getByLabelText(/absolute path/i),
+    )) as HTMLInputElement;
+  }
+
+  /// Type a path into it and send it.
+  function register(field: HTMLInputElement, path: string): void {
+    fireEvent.input(field, { target: { value: path } });
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+  }
+
+  it("draws both rows behind a rule, and neither is a repo to pick", async () => {
+    theWorkbench();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await waitFor(() => expect(offered("Repo").length).toBe(REPOS.length));
+
+    expect(actionRows("Repo")).toEqual(["Create repo", "Open repo"]);
+    // Every repo and nothing else: what the control offers is the rows above
+    // the rule, and the two under it are not repositories.
+    expect(rows("Repo")).toEqual(REPOS.map((repo) => repo.name));
+    expect(opened("Repo").querySelector('[role="separator"]')).toBeTruthy();
+  });
+
+  it("puts the draft on the repo it registered", async () => {
+    const fetching = registering(json({ Added: OPENED }));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    register(await openRepoModal(), OPENED.path);
+
+    // The path went out as the settings pane's own registration does.
+    await waitFor(() =>
+      expect(fetching).toHaveBeenCalledWith(
+        "/api/ui/repos",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ path: OPENED.path }),
+        }),
+      ),
+    );
+
+    // And the draft is on it: the id the answer carried is what this device is
+    // holding now, which is the same thing picking a registered one writes.
+    await waitFor(() =>
+      expect(stored().repo).toBe(OPENED.id),
+    );
+    // The modal is spent, and the row it was opened from has become the panel.
+    await waitFor(() =>
+      expect(screen.queryByLabelText(/absolute path/i)).toBeNull(),
+    );
+  });
+
+  /// A path already registered is not a dead end here: this row is a way *onto*
+  /// a repository, and the outcome carries the one it found.
+  it("lands on the repo a path already registered names", async () => {
+    registering(json({ AlreadyRegistered: REPOS[1]! }));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    register(await openRepoModal(), REPOS[1]!.path);
+
+    await waitFor(() => expect(stored().repo).toBe(REPOS[1]!.id));
+  });
+
+  /// And a refusal keeps the modal up with the reason under the field, because a
+  /// refusal is answered by correcting the path — the same rule the settings
+  /// pane draws by, in the same words.
+  it("says why a path was refused, and stays up to say it", async () => {
+    registering(json("NotARepository"));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const field = await openRepoModal();
+    register(field, "/srv/repos/notes");
+
+    await waitFor(() => screen.getByText(REPO_REFUSAL.NotARepository));
+    expect(screen.getByLabelText(/absolute path/i)).toBeTruthy();
+    expect(field.value).toBe("/srv/repos/notes");
+    expect(stored().repo).toBeNull();
+  });
+});
+
+/// The other row at that foot: **Create repo**, which *makes* a repository
+/// rather than taking on one that is already there.
+///
+/// The pick lands the same way the registration's does — that half is asked
+/// above — so what is asked here is what a create has of its own: the two fields
+/// going out as two, the parent this device remembers, the tick that puts the
+/// same repository on GitHub, and a refusal that keeps the card up.
+describe("making a repo from the Repo dropdown", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    leaveRefusals(0, []);
+  });
+
+  /// The repository the create made, as the server answers for it: not one of
+  /// the fixture's, so a draft landing on it is unmistakably the answer's doing.
+  /// Under the directory the browse fixture lists, so the parent it comes home
+  /// with is one a browse could have reached.
+  const MADE: RepoView = {
+    ...(made as RepoView),
+    id: 4343,
+    name: "widgets",
+    path: "/home/ada/src/widgets",
+  };
+
+  /// The one directory there is to browse, which is the fixture's own.
+  const LISTING = listing as DirectoryListing;
+
+  /// What Verkstead has been told, which this card asks exactly one thing of:
+  /// whether a GitHub token is saved. The fixture's has one.
+  const TOKENED = told as SettingsView;
+
+  /// And the same with none, which is what a Verkstead nobody has told anything
+  /// looks like — and what every test here that is not about the tick reads.
+  const UNTOKENED: SettingsView = { ...TOKENED, github_token: null };
+
+  /// The workbench with the create answered however the test says, that
+  /// directory served both by name and as the server's home, and the settings
+  /// saying whether there is a token.
+  ///
+  /// The settings as an answer rather than as a view, because one of the states
+  /// this card has is the read not having landed — see the test that holds it
+  /// with [`hangs`].
+  const creating = (
+    answer: () => Promise<Response>,
+    settings: () => Promise<Response> = json(UNTOKENED),
+  ) =>
+    theWorkbench(
+      whenever("/api/ui/repos/new", answer, "POST"),
+      whenever("/api/ui/settings", settings),
+      // What the repo it made was last grilled with, which the page asks for the
+      // moment the draft lands on it — the fixture's repos are served this
+      // already, and the one this create makes is not one of them.
+      whenever(`/api/ui/repos/${MADE.id}/pairings`, json(NO_PAIRINGS)),
+      whenever(listingAt("/home/ada/src"), json(LISTING)),
+      whenever(listingAt(null), json(LISTING)),
+      json(null),
+    );
+
+  /// Open the modal off the dropdown's foot, and wait for it to have settled
+  /// what it is going to say about GitHub.
+  ///
+  /// The card asks the settings one thing — whether a token is saved — and says
+  /// neither the tick nor the note until they answer, taking no create in the
+  /// meantime. So a test that is about to fill it in waits for that answer, the
+  /// way the human filling it in does.
+  ///
+  /// `settled` off for the one test that is about the wait itself.
+  async function createRepoModal(settled = true): Promise<void> {
+    await waitFor(() => expect(offered("Repo").length).toBe(REPOS.length));
+    press("Repo", "Create repo");
+
+    await waitFor(() => expect(screen.getByLabelText(WHERE)).toBeTruthy());
+
+    if (settled) {
+      await waitFor(() => expect(tick() ?? noRemote()).toBeTruthy());
+    }
+  }
+
+  /// What the two fields are labelled, which is how they are found.
+  const WHERE = "Where it goes";
+  const CALLED = "What it is called";
+
+  /// And the tick beside them, where a token is saved for it to be drawn by.
+  const ON_GITHUB = "Create it on GitHub too, privately";
+
+  /// The tick as the card is drawing it, or `null` where it is not drawn at all.
+  function tick(): HTMLInputElement | null {
+    return screen.queryByLabelText(ON_GITHUB) as HTMLInputElement | null;
+  }
+
+  /// And what stands where it would have on a Verkstead with no token saved.
+  function noRemote(): HTMLElement | null {
+    return screen.queryByText(/needs a remote/i);
+  }
+
+  /// Fill them in and send them.
+  function make(parent: string, name: string): void {
+    fireEvent.input(screen.getByLabelText(WHERE), {
+      target: { value: parent },
+    });
+    fireEvent.input(screen.getByLabelText(CALLED), {
+      target: { value: name },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+  }
+
+  it("puts the draft on the repo it made", async () => {
+    const fetching = creating(json({ Made: MADE }));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await createRepoModal();
+    make("/home/ada/src", "widgets");
+
+    // The two halves went out as two: joining them into a path here would be
+    // the browser building one out of a separator the server never agreed to.
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/repos/new")).toEqual({
+        parent: "/home/ada/src",
+        name: "widgets",
+        // Nothing is asked of GitHub on a Verkstead with no token saved: there
+        // is nothing to make the repository as.
+        github: false,
+      }),
+    );
+
+    // And the draft is on what it made, which is what picking a registered one
+    // writes.
+    await waitFor(() => expect(stored().repo).toBe(MADE.id));
+    // The modal is spent, and the row it was opened from has become the panel.
+    await waitFor(() => expect(screen.queryByLabelText(WHERE)).toBeNull());
+  });
+
+  /// Where this device keeps its code is a fact about the machine in front of
+  /// you, so the parent is remembered here and the browse opens *inside* it —
+  /// among what is in it rather than among its siblings, which is what the same
+  /// text typed by hand would mean.
+  it("opens the browse in the parent the last repo on this device went in", async () => {
+    setRepoParent("/home/ada/src");
+    const fetching = creating(json({ Made: MADE }));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await createRepoModal();
+
+    expect(held(WHERE)).toBe("/home/ada/src");
+    // The memory alone says nothing to the server: what is read is the browse
+    // the human asked for.
+    expect(askedFor(fetching, listingAt("/home/ada/src"))).toBe(0);
+
+    browse(WHERE);
+    await waitFor(() =>
+      expect(askedFor(fetching, listingAt("/home/ada/src"))).toBe(1),
+    );
+    expect(askedFor(fetching, listingAt("/home/ada"))).toBe(0);
+  });
+
+  /// And where there is none — which a first run always is — the field stands
+  /// empty and the browse opens at the server's own home, which is where an
+  /// unbounded browse already opens.
+  it("opens at the server's home where this device has made none", async () => {
+    const fetching = creating(json({ Made: MADE }));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await createRepoModal();
+
+    expect(held(WHERE)).toBe("");
+    browse(WHERE);
+
+    await waitFor(() => expect(askedFor(fetching, listingAt(null))).toBe(1));
+  });
+
+  /// What it comes home with is the parent the server resolved rather than the
+  /// text that was typed: that is the directory the repository is actually in,
+  /// and so the one the next create should open in.
+  it("remembers where it put one, for the next one", async () => {
+    creating(json({ Made: MADE }));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await createRepoModal();
+    make("/home/ada/src/", "widgets");
+
+    await waitFor(() => expect(stored().repo).toBe(MADE.id));
+    expect(repoParent()).toBe("/home/ada/src");
+  });
+
+  /// A refusal keeps the modal up with the reason under the fields, for the
+  /// registration's reason: what answers one is correcting what was typed, and a
+  /// modal that closed on one would take the correction away with it.
+  it("says why a create was refused, and stays up to say it", async () => {
+    creating(json("AlreadyThere" satisfies Created));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await createRepoModal();
+    make("/home/ada/src", "widgets");
+
+    await waitFor(() => screen.getByText(CREATE_REFUSAL.AlreadyThere));
+    expect(held(WHERE)).toBe("/home/ada/src");
+    expect(
+      (screen.getByLabelText(CALLED) as HTMLInputElement).value,
+    ).toBe("widgets");
+    expect(stored().repo).toBeNull();
+    expect(repoParent()).toBe("");
+  });
+
+  /// And the one refusal that is not a word this app has: what git would not do,
+  /// in git's own words, because nothing here could put it better.
+  it("says what git would not do, in git's words", async () => {
+    creating(json({ Refused: "git init: permission denied" } satisfies Created));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await createRepoModal();
+    make("/home/ada/src", "widgets");
+
+    await waitFor(() => screen.getByText("git init: permission denied"));
+    expect(stored().repo).toBeNull();
+  });
+
+  /// Where a token is saved the tick is drawn and starts on: somebody who has
+  /// saved one has said what they mean to do with it, and the pipeline this
+  /// repository is about to go through ends in a push.
+  it("asks for it on GitHub too where a token is saved", async () => {
+    const fetching = creating(json({ Made: MADE }), json(TOKENED));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await createRepoModal();
+
+    await waitFor(() => expect(tick()?.checked).toBe(true));
+    make("/home/ada/src", "widgets");
+
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/repos/new")).toEqual({
+        parent: "/home/ada/src",
+        name: "widgets",
+        github: true,
+      }),
+    );
+    await waitFor(() => expect(stored().repo).toBe(MADE.id));
+  });
+
+  /// And taking it off is a repository made here only, which is a thing somebody
+  /// may well mean: the tick is on by default rather than compulsory.
+  it("leaves GitHub alone where the tick is taken off", async () => {
+    const fetching = creating(json({ Made: MADE }), json(TOKENED));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await createRepoModal();
+
+    await waitFor(() => expect(tick()).toBeTruthy());
+    fireEvent.click(tick()!);
+    make("/home/ada/src", "widgets");
+
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/repos/new")).toMatchObject({
+        github: false,
+      }),
+    );
+  });
+
+  /// With no token there is nothing to draw a tick for, and a sentence stands
+  /// where it would have: the local repository is still worth making, and the
+  /// token can be saved afterwards — but the work on it cannot be finished
+  /// without a remote, which is worth knowing now rather than halfway through
+  /// the first conversation.
+  it("says a remote is needed where no token is saved", async () => {
+    creating(json({ Made: MADE }));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await createRepoModal();
+
+    await waitFor(() => screen.getByText(/needs a remote/i));
+    expect(tick()).toBeNull();
+  });
+
+  /// And says neither of those things until it has been told which it is.
+  ///
+  /// Nothing else on this page reads the settings, so the read this card starts
+  /// is always in flight when it opens. A card that took *not answered yet* for
+  /// *no token* would put the sentence above in front of everybody who has one,
+  /// every time, and replace it with the tick a moment later.
+  it("says nothing about GitHub until the settings have answered", async () => {
+    const fetching = creating(json({ Made: MADE }), hangs());
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await createRepoModal(false);
+
+    // The fields are there, so this is the card drawn rather than the card
+    // still coming.
+    expect(screen.getByLabelText(CALLED)).toBeTruthy();
+    expect(tick()).toBeNull();
+    expect(screen.queryByText(/needs a remote/i)).toBeNull();
+
+    // And it takes no create either: one sent now would ask nothing of GitHub
+    // without the card ever having said so, which is the sentence going missing
+    // rather than being wrong.
+    fireEvent.input(screen.getByLabelText(WHERE), {
+      target: { value: "/home/ada/src" },
+    });
+    fireEvent.input(screen.getByLabelText(CALLED), {
+      target: { value: "widgets" },
+    });
+
+    const press = screen.getByRole("button", {
+      name: "Create",
+    }) as HTMLButtonElement;
+    expect(press.disabled).toBe(true);
+
+    fireEvent.click(press);
+    expect(askedFor(fetching, "/api/ui/repos/new")).toBe(0);
+  });
+
+  /// A GitHub failure after the local repository exists is not a failed create:
+  /// the directory, the commit and the registration all stand. So the card stops
+  /// being a form and says what failed, and the Repo goes onto the draft on the
+  /// way out — landing one takes this card away with the dropdown it was opened
+  /// from, so a card that landed it at once would vanish with the reason unread.
+  it("says what GitHub would not do, and lands the repo it made", async () => {
+    creating(
+      json({
+        MadeWithoutRemote: {
+          repo: MADE,
+          why: "`gh` said: Name already exists on this account",
+        },
+      } satisfies Created),
+      json(TOKENED),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await createRepoModal();
+    await waitFor(() => expect(tick()).toBeTruthy());
+    make("/home/ada/src", "widgets");
+
+    // `gh`'s own words, the way git's are for a git that would not commit — and
+    // the fields are gone, there being nothing left to fill in.
+    await waitFor(() =>
+      screen.getByText("`gh` said: Name already exists on this account"),
+    );
+    expect(screen.queryByLabelText(WHERE)).toBeNull();
+    expect(stored().repo).toBeNull();
+
+    // And the one press out lands it: the repository is registered whatever
+    // GitHub said, so the draft goes on it the way a clean create's does.
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    await waitFor(() => expect(stored().repo).toBe(MADE.id));
+    await waitFor(() =>
+      expect(screen.queryByText(/Name already exists/)).toBeNull(),
+    );
   });
 });
 

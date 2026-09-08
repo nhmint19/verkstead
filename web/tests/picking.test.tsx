@@ -4,16 +4,16 @@
 //! A native `<select>` arrives with all of this and a control drawn out of
 //! ordinary elements arrives with none of it, so the whole of what was given
 //! back is asserted here rather than trusted: the workbench is answered from a
-//! phone and from a keyboard as readily as from a mouse, and every one of the
-//! five choices this control stands in for is a choice about who runs somebody's
-//! work.
+//! phone and from a keyboard as readily as from a mouse, and every choice this
+//! control stands in for settles something about somebody's work — who runs it,
+//! and which repository it is in.
 //!
 //! Driven straight rather than through a page — what is asked is the control's
 //! own, so no query, no card and no modal is in the way of the answer. Where a
 //! page's own picker is the subject, the test is with that page:
-//! `workbench.test.tsx` for the four pairing pickers, `profiles.test.tsx` for
-//! the profile form's harness type, and `surviving.test.tsx` for what a re-read
-//! leaves of a choice.
+//! `workbench.test.tsx` for the four pairing pickers and the Repo,
+//! `profiles.test.tsx` for the profile form's harness type, and
+//! `surviving.test.tsx` for what a re-read leaves of a choice.
 
 import { fireEvent, render, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
@@ -27,11 +27,14 @@ import claudeMarkFile from "../src/marks/claude-color.svg?raw";
 import grokMarkFile from "../src/marks/grok.svg?raw";
 import { art, marked } from "./marking";
 import {
+  actionRows,
+  actions,
   expanded,
   offered,
   opened,
   pick,
   picker,
+  press,
   rows,
   showing,
 } from "./pickers";
@@ -79,6 +82,39 @@ function picking(
   return { chosen };
 }
 
+/// The same control with rows at its foot that press rather than pick, which is
+/// what the Repo dropdown draws: two of them, behind a rule.
+function pressing(at = ""): {
+  chosen: () => string;
+  pressed: () => string[];
+} {
+  const [chosen, setChosen] = createSignal(at);
+  const [pressed, setPressed] = createSignal<string[]>([]);
+
+  const acts = (label: string) => () =>
+    setPressed((was) => [...was, label]);
+
+  render(() => (
+    <>
+      <label for="under">Run it under</label>
+      <Listbox
+        id="under"
+        options={ROWS}
+        value={(row) => row.value}
+        label={(row) => row.label}
+        chosen={chosen()}
+        pick={setChosen}
+        actions={[
+          { label: "Create repo", press: acts("Create repo") },
+          { label: "Open repo", press: acts("Open repo") },
+        ]}
+      />
+    </>
+  ));
+
+  return { chosen, pressed };
+}
+
 /// The one picker every test here drives.
 const UNDER = "Run it under";
 
@@ -88,7 +124,8 @@ const control = () => picker(UNDER);
 describe("what the listbox says it is", () => {
   /// The label reaching the control is why it is a `button` rather than a `div`
   /// with a role: only a labelable element is what a `<label for=…>` names, and
-  /// every one of the five callers labels its picker that way.
+  /// every caller but the composer's Repo row labels its picker that way — that
+  /// one names itself from inside its handle, which is `heading` on the control.
   it("is reached by the label that names it", () => {
     picking();
 
@@ -475,7 +512,7 @@ describe("the listbox with its label in the handle", () => {
 
 /// The last thing a native dropdown kept for itself: its popup is the browser's
 /// and goes wherever it fits, and these rows are an element inside whatever
-/// clips the page. Every one of the five controls stands in a box that clips —
+/// clips the page. Every one of these controls stands in a box that clips —
 /// a pane scrolls its own content, the steer modal's card is capped at `80vh` —
 /// so a control low in one of those would drop its rows out of sight behind a
 /// backdrop that says nothing about where they went.
@@ -584,22 +621,119 @@ describe("which way the rows come down", () => {
   });
 });
 
+/// The rows at the foot that press rather than pick — the Repo dropdown's, and
+/// no other control's.
+///
+/// What is asked here is the whole of what makes them a row *kind* rather than
+/// another option: they are never picked, never what the closed control shows,
+/// and never mistaken for the choice being gone — while the keyboard walks them
+/// with the rest, because a list somebody is reading down does not stop at the
+/// rule.
+describe("the rows that press rather than pick", () => {
+  it("draws them at the foot of the list, behind a rule", () => {
+    pressing();
+
+    const list = opened(UNDER);
+    const rule = list.querySelector('[role="separator"]')!;
+
+    expect(actionRows(UNDER)).toEqual(["Create repo", "Open repo"]);
+
+    // Behind the rule and after every option: the rule is a break in one list
+    // rather than the edge of a second.
+    for (const row of offered(UNDER)) {
+      expect(
+        rule.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_PRECEDING,
+      ).toBeTruthy();
+    }
+    for (const row of actions(UNDER)) {
+      expect(
+        rule.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+  });
+
+  /// Not a choice, and never one: nothing about it can be selected, and what the
+  /// control offers is the rows above the rule.
+  it("is never the choice, and never what the control shows", () => {
+    const { chosen, pressed } = pressing();
+
+    expect(
+      actions(UNDER).map((row) => row.getAttribute("aria-selected")),
+    ).toEqual(["false", "false"]);
+
+    press(UNDER, "Open repo");
+
+    // The press went out, the rows went with it, and nothing was picked — so
+    // the control is saying exactly what it said before.
+    expect(pressed()).toEqual(["Open repo"]);
+    expect(chosen()).toBe("");
+    expect(showing(UNDER)).toBe("Not chosen");
+    expect(expanded(UNDER)).toBe(false);
+  });
+
+  /// A choice already made is left where it was: pressing one of these is not an
+  /// unpicking, and a control that fell to its placeholder would be saying the
+  /// repository had gone.
+  it("leaves a choice that was already made standing", () => {
+    const { chosen } = pressing("2:grok-4.6");
+
+    press(UNDER, "Create repo");
+
+    expect(chosen()).toBe("2:grok-4.6");
+    expect(showing(UNDER)).toBe("Grok 4.6");
+  });
+
+  /// The walk runs across both lists as one — End goes to the last row of all,
+  /// which is the last of these — and Enter presses rather than picks.
+  it("is walked with the rest, and Enter presses it", () => {
+    const { chosen, pressed } = pressing();
+
+    fireEvent.keyDown(control(), { key: "ArrowDown" });
+    fireEvent.keyDown(control(), { key: "End" });
+
+    expect(control().getAttribute("aria-activedescendant")).toBe(
+      actions(UNDER)[1]!.id,
+    );
+
+    fireEvent.keyDown(control(), { key: "Enter" });
+
+    expect(pressed()).toEqual(["Open repo"]);
+    expect(chosen()).toBe("");
+  });
+
+  /// And every other control goes on holding none of this: a rule and two rows
+  /// under a list of accounts would be a foot with nothing in it.
+  it("is drawn nowhere a caller offers none", () => {
+    picking();
+
+    expect(actions(UNDER)).toEqual([]);
+    expect(opened(UNDER).querySelector('[role="separator"]')).toBeNull();
+  });
+});
+
 /// And the one question about this control that is not about the control: a
-/// listbox is worth its keep only where a row has something to draw, so which
-/// modules draw one is written down here rather than left to spread.
+/// listbox is worth its keep only where a row has something a native `<option>`
+/// cannot hold, so which modules draw one is written down here rather than left
+/// to spread.
+///
+/// Two things earn it. A row that carries a **mark** beside its words, which is
+/// the four pairing pickers and the profile form's harness type; and a list with
+/// rows at its foot that **press** rather than pick, which is the Repo's, where
+/// **Create repo** and **Open repo** stand behind the rule — an `<option>` that
+/// acted is the bug class this whole module was written against.
 describe("where the listbox is drawn at all", () => {
   it("reads every source in the viewer", () => {
     expect(Object.keys(SOURCES).length).toBeGreaterThan(10);
   });
 
-  /// Every other choice in the app stays a native `<select>` — the repos, the
-  /// branches, the merge strategy — because a control the app draws itself has
-  /// to be given the keyboard, the roles and the tap targets back, and none of
-  /// those rows has a mark to justify it.
+  /// Every other choice in the app stays a native `<select>` — the branches, the
+  /// merge strategy — because a control the app draws itself has to be given the
+  /// keyboard, the roles and the tap targets back, and none of those rows has
+  /// either reason to ask for it.
   /// Read for the element rather than for the word: the browsing path field
   /// names this control in its own header, having borrowed the chrome and the
   /// keyboard off it, and naming one is not drawing one.
-  it("is drawn by the three modules whose rows carry marks", () => {
+  it("is drawn by the three modules whose rows have earned it", () => {
     const drawing = Object.entries(SOURCES)
       .filter(([path]) => path !== "../src/picking.tsx")
       .filter(([, source]) => /<Listbox\b/.test(source))

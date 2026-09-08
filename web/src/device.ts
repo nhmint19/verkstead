@@ -36,6 +36,30 @@ export function setWrapping(on: boolean): void {
   }
 }
 
+/// And where the last repo this device made was put.
+///
+/// Somebody making a second repository is almost certainly putting it beside the
+/// first, and where they keep their code is a fact about the machine in front of
+/// them rather than something to tell the server: a laptop's `~/src` and a
+/// phone's nothing at all are two answers to the same question, and neither is
+/// the other's to write down.
+const PARENT = "verkstead.repo-parent";
+
+/// The directory the Create repo modal starts its browse in — empty where this
+/// device has not made one yet, which is what a first run always is.
+///
+/// Empty rather than `null` because empty is what the field is given: a path
+/// field standing empty browses the server's own home, so nothing here has to
+/// know what that home is.
+export function repoParent(): string {
+  return read(PARENT) ?? "";
+}
+
+/// Remember where a repo was just made, for the next one.
+export function setRepoParent(path: string): void {
+  write(PARENT, path);
+}
+
 /// What is being held under this key, if anything — and `null` when there is no
 /// storage to be had, which is a browser that blocks it or one in a context
 /// that has none.

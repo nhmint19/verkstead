@@ -669,6 +669,28 @@ off the repo and re-read whenever it is switched, so the page shows what a draft
 created there would have arrived showing — shown and not held, so a picker left
 on it sends nothing at create and the server's own prefill answers for it.
 
+**And with nothing to list, that page is the whole of the app** (*settled
+2026-09-08, onboarding stage 04*). The **zero state** is a fact about the
+sidebar's list rather than about a first run: it holds while that list *as
+filtered* is empty — no unarchived Conversation, and the archived ones either
+absent or hidden — and it is left the moment anything is in that list, a
+Conversation created or *Show archived* switched on. So it is decided where the
+list is read rather than in the route table, a redirect written into the routes
+being a second opinion about a list only the sidebar reads. `/` replaces itself
+with `/compose` — replaces, so that Back does not walk into a page that will
+only redirect again — and the page stands on the frame with no conversations
+pane at all: one pane across the window, no divider and no width to remember.
+The wordmark takes the pane title's place with the gear after it, both of them
+the sidebar's until now and drawn by one component either page can use. The
+archived switch is pinned to the page's bottom-left and drawn only where
+something is archived, which the server says beside where the switch stands: the
+list is filtered in SQL, so an empty one cannot be told apart from one with
+archived rows hidden behind it, and a switch that could bring nothing back is a
+control with no state to be in. Switching it on brings the sidebar back with them
+in it, a list with the archived in it not being an empty list. The settings page
+keeps its sidebar throughout — it is a list of its own, and a settings page with
+no way back to the conversations is one somebody has to type their way out of.
+
 Timeline events:
 
 | Event | In timeline | In details pane |

@@ -22,13 +22,13 @@ use crate::{
     CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionModeChoice,
     CompanionModeChosen, CompanionRemoved, ConflictResolutionEdit, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
-    ConversationUnarchived, ConversationView, DirectoryListing, GrillingStarted, Locked,
-    NewAdoption, NewCompanion, NewConversation, NewOrder, OnboardingView, PrefillView,
+    ConversationUnarchived, ConversationView, Created, Creation, DirectoryListing, GrillingStarted,
+    Locked, NewAdoption, NewCompanion, NewConversation, NewOrder, OnboardingView, PrefillView,
     ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved,
     PullRequestDetails, PushKey, Registered, Registration, RemoteBanner, RemoteView, RepoChoice,
     RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed,
     RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress, SetReading, SettingsEdit,
-    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedConversation,
+    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedConversation, ShowArchived,
     ShowingArchived, Shown, Started, SteerOpened, SteerSubmission, Submitted, Subscribed,
     Subscription, TerminalOpened, TerminalsView, TranscriptView, Unsubscribe, UpdateNotice,
     Watching,
@@ -65,6 +65,11 @@ fn the_viewers_types_are_written_from_these() {
     Registration::export_all(&config).unwrap();
     Registered::export_all(&config).unwrap();
     RepoRemoved::export_all(&config).unwrap();
+
+    // And making one, which is the other way a Repo arrives: a parent and a name
+    // in, and the whole opened Repo or the reason there is none back.
+    Creation::export_all(&config).unwrap();
+    Created::export_all(&config).unwrap();
 
     // And the one thing there is to say to a registered Repo: how it resolves a
     // conflict, which is an override of the global setting or nothing at all.
@@ -103,6 +108,12 @@ fn the_viewers_types_are_written_from_these() {
     // And the order the human dragged that sidebar into, which is the one thing
     // they say about the list itself rather than about anything on it.
     NewOrder::export_all(&config).unwrap();
+
+    // And the other: whether what has been put away is drawn among them, which
+    // is read back with whether there is anything put away at all and written
+    // back as the position alone.
+    ShowingArchived::export_all(&config).unwrap();
+    ShowArchived::export_all(&config).unwrap();
 
     // And starting one to adopt a roadmap with, which is the other way in — the
     // Conversation it starts comes back inside the view above.
@@ -186,7 +197,6 @@ fn the_viewers_types_are_written_from_these() {
     // down the socket — the repaint above, then what the session prints — and
     // what a watcher says back up it.
     Shown::export_all(&config).unwrap();
-    ShowingArchived::export_all(&config).unwrap();
     Watching::export_all(&config).unwrap();
 
     // And the terminals a Conversation holds of its own: which of them are

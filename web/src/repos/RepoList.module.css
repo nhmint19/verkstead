@@ -343,3 +343,78 @@
     border-color: var(--ink-soft);
   }
 }
+
+/* The same registration asked from the Repo dropdown, on the one modal in the
+   UI — see `Modal.module.css`, which is the card and everything around it. What
+   is here is only what the card holds: a heading, and the form above already
+   drawn. */
+.openRepo h3 {
+  margin: 0 0 0.85rem;
+  font-size: 1rem;
+}
+
+/* The press that undoes rather than does, drawn as the outline of the one beside
+   it — the steer modal's cancel, and the profile form's. */
+.buttons .cancel {
+  color: var(--accent);
+  background: none;
+}
+
+@media (hover: hover) {
+  .buttons .cancel:hover {
+    border-color: var(--accent);
+  }
+}
+
+/* And the create asked from the same foot, on the same modal: two fields rather
+   than one, so the second label needs the air the first gets from the heading
+   above it. */
+.createRepo h3 {
+  margin: 0 0 0.85rem;
+  font-size: 1rem;
+}
+
+.form .second {
+  margin-top: 0.85rem;
+}
+
+/* The name is typed rather than browsed for, so it stands on a line of its own
+   with nothing beside it — where the path field's box shares its line with the
+   press that drops the rows. */
+.form .name {
+  width: 100%;
+}
+
+/* And the third question the create asks, where there is a token to answer it
+   with: a tick and its words on one line, because what it says is short and a
+   label above a box would read as a fourth field. */
+.form .github {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
+  font-size: 0.9rem;
+}
+
+.form .github input {
+  /* The box is the control here, so it keeps its own width rather than taking
+     the full-width one every other input in this form has. */
+  width: auto;
+  margin: 0;
+}
+
+/* What stands where the tick would be on a Verkstead with no token saved. Given
+   the tick's own air above it, so that the card is the same height either way
+   and the buttons do not move when a token is saved. */
+.form .remote {
+  margin: 0.85rem 0 0;
+}
+
+/* What the card becomes when a repository was made and GitHub would not have
+   it: the news where the fields were, and one press out. Its own class rather
+   than the form's, because nothing in it is a field — what it shares is the
+   line the reason is drawn on. */
+.made .failure {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}

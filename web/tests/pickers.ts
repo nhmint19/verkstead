@@ -42,14 +42,32 @@ export function opened(label: string): HTMLElement {
   return listbox(label);
 }
 
-/// The rows themselves, in the order they come down.
+/// The rows themselves, in the order they come down — the ones that can be
+/// picked, which is what a picker *offers*.
+///
+/// The rows under the rule at the foot are not among them: they press rather
+/// than pick, and a test asking what a control offers is not asking about those.
+/// They are [`actions`], one function along.
 export function offered(label: string): HTMLElement[] {
-  return [...opened(label).querySelectorAll<HTMLElement>('[role="option"]')];
+  return [
+    ...opened(label).querySelectorAll<HTMLElement>('[role="option"]'),
+  ].filter((row) => !row.classList.contains(styles.action!));
 }
 
 /// And what each of them reads as.
 export function rows(label: string): string[] {
   return offered(label).map(words);
+}
+
+/// The rows at the foot that press rather than pick — the Repo dropdown's
+/// **Create repo** and **Open repo**, and no other control's.
+export function actions(label: string): HTMLElement[] {
+  return [...opened(label).querySelectorAll<HTMLElement>(`.${styles.action}`)];
+}
+
+/// And what each of those reads as.
+export function actionRows(label: string): string[] {
+  return actions(label).map(words);
 }
 
 /// Pick the row that reads as `reading`.
@@ -59,6 +77,19 @@ export function pick(label: string, reading: string): void {
   if (!row) {
     throw new Error(
       `nothing on the "${label}" picker reads as "${reading}" — it offers ${JSON.stringify(rows(label))}`,
+    );
+  }
+
+  fireEvent.click(row);
+}
+
+/// And press the row at the foot that reads as `reading`.
+export function press(label: string, reading: string): void {
+  const row = actions(label).find((action) => words(action) === reading);
+
+  if (!row) {
+    throw new Error(
+      `nothing at the foot of the "${label}" picker reads as "${reading}" — it holds ${JSON.stringify(actionRows(label))}`,
     );
   }
 

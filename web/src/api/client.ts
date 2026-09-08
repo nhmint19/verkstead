@@ -31,6 +31,7 @@ import type {
   ConversationStopped,
   ConversationUnarchived,
   ConversationView,
+  Created,
   DirectoryListing,
   GrillingStarted,
   OnboardingView,
@@ -219,6 +220,31 @@ export function registerRepo(path: string): Promise<Registered> {
   return post<Registered>("/api/ui/repos", { path });
 }
 
+/// Ask Verkstead to *make* a repository under `parent` and take it on.
+///
+/// The other way a Repo arrives, and the one that ends in the same
+/// registration: a directory of that name, `git init` onto `main`, a `README.md`
+/// committed as the configured author, and the opened Repo back.
+///
+/// Two fields rather than a joined path, because the two halves are answered
+/// differently — the parent is browsed for and the name is typed — and joining
+/// them here would be the one place a path is built out of a separator the
+/// server never agreed to. Every refusal is in the body for the registration's
+/// reason: each is a different sentence to put in front of the human, and none
+/// of them is something to retry.
+///
+/// `github` is the modal's tick: the same repository on GitHub, private, with
+/// `origin` written and `main` pushed. False wherever no token is saved, there
+/// being nothing to make it as — and a GitHub failure after the local repository
+/// exists comes back as the Repo *and* the reason rather than as either.
+export function createRepo(
+  parent: string,
+  name: string,
+  github: boolean,
+): Promise<Created> {
+  return post<Created>("/api/ui/repos/new", { parent, name, github });
+}
+
 /// Take one off the registry, which is an unregistering rather than a delete:
 /// every Conversation ever started on it goes on naming it, and what changes is
 /// what is offered for new work. There is nothing to send but its own id, which
@@ -292,13 +318,19 @@ export async function placeConversations(order: number[]): Promise<void> {
   await refused(await sent("/api/ui/conversations/order", { order }));
 }
 
-/// Whether the sidebar is drawing what has been archived.
+/// Whether the sidebar is drawing what has been archived, and whether there is
+/// anything archived for it to draw.
 ///
 /// The server's answer rather than this device's, because the choice is the
 /// human's rather than the browser's: a toggle kept here would be one they had
 /// to find again on their phone.
-export async function showingArchived(): Promise<boolean> {
-  return (await get<ShowingArchived>("/api/ui/conversations/archived")).showing;
+///
+/// Both halves rather than the position alone: the list is filtered by the
+/// switch on the server, so a page looking at an empty one cannot tell nothing
+/// archived from everything archived and hidden. See `workbench/zero.ts`, which
+/// is what wants the difference.
+export function showingArchived(): Promise<ShowingArchived> {
+  return get<ShowingArchived>("/api/ui/conversations/archived");
 }
 
 /// And put that switch where they have just put it.

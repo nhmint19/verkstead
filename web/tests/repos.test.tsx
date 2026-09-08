@@ -32,7 +32,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   DirectoryListing,
-  Registered,
   RepoEntry,
   RepoView,
   ConflictResolution,
@@ -40,7 +39,12 @@ import type {
 } from "../src/api/types";
 import card from "../src/CardButton.module.css";
 import button from "../src/IconButton.module.css";
-import { RepoDetails, RepoList, RepoPane } from "../src/repos/RepoList";
+import {
+  RepoDetails,
+  RepoList,
+  RepoPane,
+  type RepoRefused,
+} from "../src/repos/RepoList";
 import styles from "../src/repos/RepoList.module.css";
 import head from "../src/workbench/PaneHead.module.css";
 import { drawn } from "./bench";
@@ -693,7 +697,7 @@ describe("the pane the plus opens", () => {
   });
 
   it("sends the path that was typed", async () => {
-    const fetching = theRepos(json("Added"));
+    const fetching = theRepos(json({ Added: REPOS[0] }));
     mountPane();
 
     register("/srv/repos/verkstead");
@@ -713,7 +717,7 @@ describe("the pane the plus opens", () => {
   /// A pane that has been spent: what says the registration landed is the card
   /// behind it, which is where the human is put back.
   it("spends the pane once the server took the path", async () => {
-    theRepos(json("Added"));
+    theRepos(json({ Added: REPOS[0] }));
     const { done } = mountPane();
 
     register("/srv/repos/verkstead");
@@ -727,7 +731,7 @@ describe("the pane the plus opens", () => {
   /// arriving with an unadopted roadmap in it, or a taken-away path registered
   /// again, has something to offer the moment it lands.
   it("reads the roadmap offers again with the list", async () => {
-    theRepos(json("Added"));
+    theRepos(json({ Added: REPOS[0] }));
     const { queries, done } = mountPane();
     const invalidated = vi.spyOn(queries, "invalidateQueries");
 
@@ -748,10 +752,19 @@ describe("the pane the plus opens", () => {
     ["Missing", /nothing at that path/i],
     ["NotAbsolute", /starting with a slash/i],
     ["NoDefaultBranch", /no branch to call its default/i],
-  ] satisfies Array<[Exclude<Registered, "Added">, RegExp]>)(
+  ] satisfies Array<[RepoRefused, RegExp]>)(
     "says why a path was refused as %s",
     async (outcome, said) => {
-      theRepos(json(outcome));
+      // One of these is not a bare word on the wire: a path registered already
+      // carries the Repo it found, and this pane is where that is still a
+      // refusal — it is a place to add a repo rather than a way onto one.
+      theRepos(
+        json(
+          outcome === "AlreadyRegistered"
+            ? { AlreadyRegistered: REPOS[0] }
+            : outcome,
+        ),
+      );
       const { done } = mountPane();
 
       register("/elsewhere/verkstead");
@@ -888,7 +901,7 @@ describe("browsing for one", () => {
   /// registering a typed one. Add sends the box, and what the server makes of
   /// it goes on deciding everything.
   it("registers a browsed path exactly as a typed one", async () => {
-    const fetching = theBrowse(json("Added"));
+    const fetching = theBrowse(json({ Added: REPOS[0] }));
     const { done } = mountPane();
 
     await browsedToTheRepo();

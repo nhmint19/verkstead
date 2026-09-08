@@ -56,8 +56,8 @@ mod waits;
 mod wrap_up;
 
 pub use archives::{
-    Archiving, Unarchiving, archive_conversation, archived, show_archived, showing_archived,
-    unarchive_conversation,
+    Archiving, Unarchiving, any_archived, archive_conversation, archived, show_archived,
+    showing_archived, unarchive_conversation,
 };
 pub use attachments::{Attachment, Origin, attach, attachment, attachments, detach};
 pub use banners::{dismiss_remote_banner, remote_banner_dismissed};
@@ -108,7 +108,8 @@ pub use push::{
 };
 pub use repos::{
     ConflictResolution, Repo, Unregistering, load_repo, recorded_repos, register_repo,
-    registered_repo, registered_repos, repo_resolution, set_repo_resolution, unregister_repo,
+    registered_repo, registered_repo_at, registered_repos, repo_resolution, set_repo_resolution,
+    unregister_repo,
 };
 pub use session_names::session_id;
 pub use session_pairings::RanUnder;

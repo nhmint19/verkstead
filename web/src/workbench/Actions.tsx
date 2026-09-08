@@ -436,7 +436,7 @@ function actions(): {
   /// list with this Conversation still on it. See `eager.ts`.
   const leaving = (conversation: ConversationView): void => {
     if (String(conversation.id) !== opened.id) return;
-    if (archived.data ?? false) return;
+    if (archived.data?.showing ?? false) return;
 
     const rows = pressedRows(conversations.data ?? [], false);
     const at = rows.findIndex((row) => row.id === conversation.id);

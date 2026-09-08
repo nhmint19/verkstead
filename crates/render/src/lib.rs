@@ -48,8 +48,8 @@ pub use conversations::{
     NewCompanion, NewConversation, NewOrder, NoticeEvent, PinnedEvent, ProposalView,
     PullRequestCheck, PullRequestComment, PullRequestCommit, PullRequestDetails, PullRequestEvent,
     PullRequestSummary, QuestionSetEvent, RepoChoice, RepoSwitched, ResolveConflictsEvent,
-    Resolved, Resumed, RoadmapPane, Screen, SetRow, ShareView, ShowingArchived, Shown, Size,
-    StageDocument, StageEntry, StageListEvent, StageListReached, StageSource, Started,
+    Resolved, Resumed, RoadmapPane, Screen, SetRow, ShareView, ShowArchived, ShowingArchived,
+    Shown, Size, StageDocument, StageEntry, StageListEvent, StageListReached, StageSource, Started,
     SteerCompanionRefusal, SteerEvent, SteerOpened, SteerSubmission, SteerTarget, TaskDocument,
     TaskEntry, TaskListEvent, TaskListReached, TaskSource, TerminalOpened, TerminalsView,
     TimelineEvent, UnreadableSetEvent, Watching, Worktree, agent_output_event, agent_output_pinned,
@@ -70,7 +70,8 @@ pub use profiles::{
 pub use push::{PushKey, Subscribed, Subscription, Unsubscribe};
 pub use remote::{RemoteBanner, RemoteView, ServeEdit, ServePress, ServeView};
 pub use repos::{
-    ConflictResolutionEdit, Registered, Registration, RepoEntry, RepoRemoved, RepoView,
+    ConflictResolutionEdit, Created, Creation, Registered, Registration, RepoEntry, RepoRemoved,
+    RepoView,
 };
 pub use settings::{
     Author, BindEntry, BuildCacheEdit, BuildCacheView, CleanupEdit, CleanupStepEdit,

@@ -49,11 +49,18 @@
 //! [`Listbox`] is the same choice drawn out of ordinary elements, for the rows
 //! that carry a harness mark beside their words: an `<option>` holds text and
 //! nothing else, in every browser, which is the whole reason there is a second
-//! control here at all. It is the four pairing pickers and the profile form's
-//! harness type, and no other choice in the app — a control the app draws itself
-//! has to be given back everything the native one arrived with, which is the
-//! keyboard, the roles a screen reader reads it by and a row a finger can hit,
-//! so it earns its keep only where a row has something of its own to draw.
+//! control here at all. It is the four pairing pickers, the profile form's
+//! harness type and the Repo — a control the app draws itself has to be given
+//! back everything the native one arrived with, which is the keyboard, the roles
+//! a screen reader reads it by and a row a finger can hit, so it earns its keep
+//! only where a row has something of its own to draw.
+//!
+//! The Repo's is the second reason to draw one: the two rows at the foot of that
+//! dropdown *act* — **Create repo**, **Open repo** — and a native `<option>`
+//! that acted rather than picked is the bug class at the head of this file said
+//! again, the browser having a settled opinion about what an option does. So an
+//! action is a row kind here instead, behind a rule and never a choice: see
+//! [`Action`].
 //!
 //! ## And what a third control borrows
 //!
@@ -241,6 +248,26 @@ export function Picker<T>(props: Choosing<T>): JSX.Element {
   return select;
 }
 
+/// A row at the foot of the list that presses rather than picks.
+///
+/// The Repo dropdown's **Create repo** and **Open repo**: a list of what is
+/// registered, and under a rule the two ways to register something. They are the
+/// list's own foot rather than a second control beside it, because there is
+/// nowhere else the human is looking when the repository they want is not among
+/// the rows.
+///
+/// What they are not is choices. Nothing here carries a value, so an action is
+/// never what [`showing`] reads, never what the closed control draws, and never
+/// what `pick` is called with — the whole of the divergence this module closes is
+/// about the rows above the rule.
+export type Action = {
+  /// What the row reads as.
+  label: string;
+  /// And what pressing it does. The rows are taken back first, the way a pick
+  /// takes them back: whatever this opens is what the human is looking at next.
+  press: () => void;
+};
+
 /// The same choice, drawn out of ordinary elements so that every row can carry
 /// its harness's mark.
 ///
@@ -256,12 +283,17 @@ export function Picker<T>(props: Choosing<T>): JSX.Element {
 /// a finger can hit on the phone the workbench is answered from.
 export function Listbox<T>(
   props: Choosing<T> & {
+    /// Rows at the foot of the list that press rather than pick — see
+    /// [`Action`]. Behind a rule, and walked by the keyboard with the rest,
+    /// because a list somebody is reading down does not stop at the rule.
+    actions?: Action[];
+
     /// Which harness's mark goes in front of a row's words, and `null` for a
     /// row that has none — the two rows that are not accounts at all.
     ///
     /// Optional so that the reading is the whole of a row by default, and drawn
     /// here rather than by each caller because the space between a mark and the
-    /// words it belongs to is the same space in all five pickers.
+    /// words it belongs to is the same space in every one of them.
     mark?: (option: T) => AgentType | null;
 
     /// What the *closed* control reads, where that is not what the row it came
@@ -291,8 +323,8 @@ export function Listbox<T>(
     heading?: { words: string; class?: string };
 
     /// The anchor's own class, for the caller with the field around it to lay
-    /// out. What the control *looks* like is this module's, all five being one
-    /// control in five places.
+    /// out. What the control *looks* like is this module's, all of them being
+    /// one control in several places.
     class?: string;
   },
 ): JSX.Element {
@@ -315,6 +347,10 @@ export function Listbox<T>(
   // they are down.
   let dropped: HTMLDivElement | undefined;
 
+  /// The rows under the rule, as they stand — none, wherever the caller offers
+  /// none, which is every place this control is drawn but the Repo's.
+  const actions = (): Action[] => props.actions ?? [];
+
   /// Take one row.
   ///
   /// The pick goes up exactly as the `<select>`'s does, and with nothing to
@@ -322,10 +358,19 @@ export function Listbox<T>(
   /// is a choice like any other, and there is no placeholder row here to be
   /// mistaken for one — the placeholder is something the closed control *says*
   /// rather than a row of the list.
+  ///
+  /// The walk runs across both lists as one, the options first, so an index past
+  /// the last option is one of the rows under the rule and is pressed instead.
+  /// Nothing is picked either way it goes: an action carries no value, so there
+  /// is nothing here for `pick` to be handed.
   const take = (index: number): void => {
     const option = props.options[index];
+    const action = actions()[index - props.options.length];
+
     shut();
+
     if (option) props.pick(props.value(option));
+    else if (action) action.press();
   };
 
   /// Everything about the rows that is not what they say — see [`dropping`],
@@ -337,7 +382,7 @@ export function Listbox<T>(
   /// than submitting the form it stands in, which is what a native dropdown
   /// does — where the browse field, being a text box, lets both through.
   const { open, above, walking, list, rowId, drop, shut, key } = dropping({
-    rows: () => props.options.length,
+    rows: () => props.options.length + actions().length,
     from: () => Math.max(0, at()),
     anchor: () => control,
     dropped: () => dropped,
@@ -469,6 +514,40 @@ export function Listbox<T>(
               </div>
             )}
           </For>
+
+          {/* And the rows that press, behind the rule that says they are not
+              more of the list. Inside it rather than beside it, because that is
+              where the keyboard is: `aria-activedescendant` names a row of the
+              list this control opened, and a row hung outside it would be one a
+              screen reader was sent to and could not find.
+
+              Never the choice, though the walk reaches them: they carry no
+              value, so `aria-selected` is false on them for as long as they are
+              drawn — a row that acts is not one the control could be showing. */}
+          <Show when={actions().length > 0}>
+            <div class={styles.rule} role="separator" />
+            <For each={actions()}>
+              {(action, index) => (
+                <div
+                  id={rowId(props.options.length + index())}
+                  class={[
+                    styles.row,
+                    styles.action,
+                    props.options.length + index() === walking()
+                      ? styles.walked
+                      : undefined,
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  role="option"
+                  aria-selected="false"
+                  onClick={() => take(props.options.length + index())}
+                >
+                  <span class={styles.words}>{action.label}</span>
+                </div>
+              )}
+            </For>
+          </Show>
         </div>
       </Show>
     </div>

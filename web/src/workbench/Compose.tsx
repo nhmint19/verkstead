@@ -95,9 +95,11 @@ import { useReading } from "../freshness";
 import { holding } from "../holding";
 import { ErrorLine, Note } from "../notices";
 import * as pairing from "../pairing";
+import { ShowArchived } from "./Archived";
 import { Conversations } from "./Conversations";
 import styles from "./Composer.module.css";
 import { PaneHead } from "./PaneHead";
+import { Wordmark } from "./Wordmark";
 import {
   BasePicker,
   BranchField,
@@ -125,6 +127,7 @@ import {
   type Composed,
 } from "./composing";
 import { pathOf } from "./openings";
+import { useZero } from "./zero";
 
 /// The page: the conversations down the left and the composer beside them.
 ///
@@ -132,22 +135,46 @@ import { pathOf } from "./openings";
 /// there is no record to read, so there is no level between the list and this.
 /// Which makes the narrow walk two steps as well: the page opens on the
 /// composer, and the way off it is the way out of the page.
+///
+/// **And one pane where there is nothing to list.** The zero state is a fact
+/// about the sidebar's list rather than about onboarding — see `zero.ts` — and
+/// where it holds there is no list to draw, so the pane is not handed to the
+/// frame at all and this page is the whole window: entered at the wordmark
+/// rather than at a way back to a pane that is not there, with the switch that
+/// could bring the archived ones back pinned to its corner. It is the page a
+/// fresh Verkstead lands on, and the page the last Conversation being archived
+/// leaves behind.
+///
+/// Nothing at all until the list has answered, for the reason the app's own gate
+/// draws nothing until the machine has (see `Gate` in `src/App.tsx`): the two
+/// shapes are not a detail of this page but the whole of it, and a first sight
+/// of Verkstead that was somebody else's empty sidebar for half a second before
+/// the page it is meant to be is worse than the half-second. Reached from the
+/// sidebar the answer is already in hand — it is that pane's own query — so this
+/// waits on nothing at all in the case it happens in most.
 export function ComposePage(): JSX.Element {
   const navigate = useNavigate();
+  const zero = useZero();
 
   return (
-    <Panes
-      pane="details"
-      middleLabel="Timeline"
-      conversations={
-        <Conversations selected="" open={(id) => navigate(pathOf(id))} />
-      }
-      details={
-        <Compose
-          back={{ to: "Conversations", go: () => navigate("/") }}
-        />
-      }
-    />
+    <Show when={!zero().pending}>
+      <Panes
+        pane="details"
+        middleLabel="Timeline"
+        conversations={
+          zero().holds ? undefined : (
+            <Conversations selected="" open={(id) => navigate(pathOf(id))} />
+          )
+        }
+        details={
+          <Compose
+            zero={zero().holds}
+            archived={zero().archived}
+            back={{ to: "Conversations", go: () => navigate("/") }}
+          />
+        }
+      />
+    </Show>
   );
 }
 
@@ -162,8 +189,17 @@ const NO_REPO = "No repo selected";
 /// The composer itself, over the compose state.
 function Compose(props: {
   /// The way out of the pane, named as well as pressed — the conversations,
-  /// there being no Timeline on this page for it to be anything else.
+  /// there being no Timeline on this page for it to be anything else. Not drawn
+  /// in the zero state: the pane it names is not on the page.
   back: { to: string; go: () => void };
+
+  /// Whether there is nothing to list, which is what makes this page the whole
+  /// of Verkstead rather than one pane of it — see `zero.ts` and [`ComposePage`].
+  zero: boolean;
+
+  /// And whether anything is archived, which is what the switch in the corner
+  /// would have to bring back. A switch with nothing behind it is not drawn.
+  archived: boolean;
 }): JSX.Element {
   const navigate = useNavigate();
   const queries = useQueryClient();
@@ -442,8 +478,20 @@ function Compose(props: {
 
   return (
     <>
+      {/* The head this page is entered at. Ordinarily the pane's own — what it
+          is and the way back to the list beside it — and the wordmark where
+          there is no list to go back to: this page is then the whole of
+          Verkstead, and what stands over it is the thing rather than the name of
+          one pane of it. Drawn by the same component the sidebar draws it with,
+          gear and all, so the way out to the settings is where it always was.
+          See `Wordmark.tsx`. */}
       <PaneSticky>
-        <PaneHead back={props.back} title="New conversation" />
+        <Show
+          when={props.zero}
+          fallback={<PaneHead back={props.back} title="New conversation" />}
+        >
+          <Wordmark />
+        </Show>
       </PaneSticky>
 
       <div class={`${styles.composer} ${shell.paneComposer}`}>
@@ -737,6 +785,21 @@ function Compose(props: {
           </Show>
         </div>
       </div>
+
+      {/* And the corner of the page, where there is no sidebar to keep it in:
+          the switch that says whether what has been put away is drawn. It is
+          what brings the sidebar back — a list with the archived ones in it is
+          not an empty list — which is why it is on this page at all, and why it
+          is not drawn where nothing is archived: a switch that could bring
+          nothing back is a control with no state to be in.
+
+          Last in the pane, which is what stands it against the bottom edge: the
+          pane is a column, the composer's own margins take the room that is left
+          over, and this wears the frame's `paneFoot` exactly as it does at the
+          foot of the sidebar. */}
+      <Show when={props.zero && props.archived}>
+        <ShowArchived />
+      </Show>
     </>
   );
 }

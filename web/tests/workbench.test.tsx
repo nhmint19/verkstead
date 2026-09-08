@@ -41,6 +41,7 @@ import type {
   PinnedEvent,
   PullRequestDetails,
   RemoteBanner,
+  RepoView,
   Resolved,
   Resumed,
   RoadmapPane,
@@ -136,6 +137,8 @@ import commitPaneCss from "../src/workbench/Commit.module.css?raw";
 import diffSection from "../src/set/Diff.module.css";
 // The sidebar, both ways: the hashed names its rows are queried by, and the
 // source of the rules that say what a card's state looks like.
+import archived from "../src/workbench/Archived.module.css";
+import archivedCss from "../src/workbench/Archived.module.css?raw";
 import sidebar from "../src/workbench/Conversations.module.css";
 import sidebarCss from "../src/workbench/Conversations.module.css?raw";
 import documentPane from "../src/workbench/Document.module.css";
@@ -245,9 +248,11 @@ import {
 } from "./bench";
 import { art, marked } from "./marking";
 import {
+  actionRows,
   offered,
   pick,
   picker,
+  press,
   rows as offers,
   showing,
 } from "./pickers";
@@ -280,6 +285,8 @@ import transcript from "./fixtures/transcript.json" with { type: "json" };
 import more from "./fixtures/transcript-more.json" with { type: "json" };
 import screenOfIt from "./fixtures/screen.json" with { type: "json" };
 import wrapping from "./fixtures/conversation-wrapping.json" with { type: "json" };
+import repoView from "./fixtures/repo.json" with { type: "json" };
+import told from "./fixtures/settings.json" with { type: "json" };
 
 /// The renderer, which is each pane's own doing rather than this file's: what is
 /// asked here is whether a commit's pane reached for it at all, and never what it
@@ -595,13 +602,18 @@ describe("the workbench", () => {
     expect(row.textContent).not.toContain(DRAFTING.state);
   });
 
+  /// Which the pane says wherever it is still standing beside an empty list —
+  /// a Conversation opened by its own URL after the last of them was archived
+  /// elsewhere, which is the one page that draws this pane over nothing. The
+  /// bare workbench is not: an empty list is the zero state, and there is no
+  /// sidebar there at all.
   it("says so plainly when nothing is being worked on", async () => {
     serving(
       whenever("/api/ui/conversations", json([])),
       whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
       whenever("/api/ui/repos", json(REPOS)),
     );
-    mount();
+    mountSidebar("/");
 
     await waitFor(() => screen.getByText("Nothing is being worked on yet."));
   });
@@ -659,9 +671,9 @@ describe("the workbench", () => {
   /// showing does not have to be said — and a label that wrapped would leave the
   /// switch on a line of its own with nothing beside it to say what it was for.
   it("keeps the archived switch on one line", () => {
-    const at = sidebarCss.indexOf("\n.showArchived label > span {");
+    const at = archivedCss.indexOf("\n.showArchived label > span {");
     expect(at, "expected the sheet to hold the switch's own label rule").toBeGreaterThan(-1);
-    expect(sidebarCss.slice(at, sidebarCss.indexOf("\n}", at))).toContain(
+    expect(archivedCss.slice(at, archivedCss.indexOf("\n}", at))).toContain(
       "white-space: nowrap;",
     );
   });
@@ -676,7 +688,7 @@ describe("the workbench", () => {
     theWorkbench(
       whenever(
         "/api/ui/conversations/archived",
-        json({ showing: true } satisfies ShowingArchived),
+        json({ showing: true, any: true } satisfies ShowingArchived),
       ),
     );
     mount();
@@ -759,7 +771,7 @@ describe("the workbench", () => {
     const pane = container.querySelector(`.${shell.conversationsPane}`)!;
     const foot = pane.lastElementChild!;
 
-    expect(foot.classList.contains(sidebar.showArchived!)).toBe(true);
+    expect(foot.classList.contains(archived.showArchived!)).toBe(true);
     expect(foot.classList.contains(shell.paneFoot!)).toBe(true);
 
     const stuck = shellCss.indexOf("\n.pane > .paneFoot {");
@@ -2091,7 +2103,7 @@ describe("a press that takes the open conversation off the list", () => {
     const fetching = theOpenGrilling(
       whenever(
         "/api/ui/conversations/archived",
-        json({ showing: true } satisfies ShowingArchived),
+        json({ showing: true, any: true } satisfies ShowingArchived),
       ),
     );
     const { container, history } = mount(`/conversations/${GRILLING.id}`);
@@ -3914,19 +3926,16 @@ describe("a conversation's setup", () => {
 /// is that the press goes out, that the panel reads the record back, and that a
 /// branch already cut settles the picker rather than hiding it.
 describe("switching a draft's repo", () => {
-  /// The picker, waited for: the repos arrive on a read of their own, and a
-  /// `<select>` told to show an option it has not been given yet falls to the
-  /// first one it has.
-  async function repoPicker(container: ParentNode): Promise<HTMLSelectElement> {
+  /// The panel opened and the rows down, waited for: the repos arrive on a read
+  /// of their own, so a control asked about before that read landed is one with
+  /// nothing to offer yet.
+  ///
+  /// The app's own listbox rather than a `<select>` — the two rows at its foot
+  /// press rather than pick, which is nothing a native option can do — so it is
+  /// driven the way every other one is, through `./pickers`.
+  async function repoRows(container: ParentNode): Promise<void> {
     await openRepo(container);
-
-    const picker = (await waitFor(() =>
-      screen.getByLabelText("Repo"),
-    )) as HTMLSelectElement;
-
-    await waitFor(() => expect(picker.options.length).toBe(REPOS.length));
-
-    return picker;
+    await waitFor(() => expect(offered("Repo").length).toBe(REPOS.length));
   }
 
   /// Every registered repo, the conversation's own among them and showing —
@@ -3936,12 +3945,10 @@ describe("switching a draft's repo", () => {
     theWorkbench();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    const picker = await repoPicker(container);
+    await repoRows(container);
 
-    expect([...picker.options].map((option) => option.textContent)).toEqual(
-      REPOS.map((repo) => repo.name),
-    );
-    expect(picker.value).toBe(String(OPEN.repo.id));
+    expect(offers("Repo")).toEqual(REPOS.map((repo) => repo.name));
+    expect(showing("Repo")).toBe(OPEN.repo.name);
 
     // At the top of the panel, which is the order the panel is read in: the
     // repo, and then everything that is a fact about it.
@@ -3958,9 +3965,8 @@ describe("switching a draft's repo", () => {
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const elsewhere = REPOS.find((repo) => repo.id !== OPEN.repo.id)!;
-    fireEvent.change(await repoPicker(container), {
-      target: { value: String(elsewhere.id) },
-    });
+    await repoRows(container);
+    pick("Repo", elsewhere.name);
 
     await waitFor(() =>
       expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/repo`)).toEqual({
@@ -3975,13 +3981,165 @@ describe("switching a draft's repo", () => {
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const elsewhere = REPOS.find((repo) => repo.id !== OPEN.repo.id)!;
-    fireEvent.change(await repoPicker(container), {
-      target: { value: String(elsewhere.id) },
-    });
+    await repoRows(container);
+    pick("Repo", elsewhere.name);
 
     await waitFor(() =>
       expect(screen.getByText(REPO_SWITCH_REFUSAL.NoSuchRepo)).toBeTruthy(),
     );
+  });
+
+  /// And the two rows at the foot of that dropdown, which are the compose page's
+  /// same two: one control in two places, so a draft's composer gets them too.
+  ///
+  /// What they are is `picking.test.tsx`'s and what the modal behind **Open
+  /// repo** does with a path is `composing.test.tsx`'s. What is asked here is
+  /// the one thing this page adds: a repository registered from the panel is a
+  /// move on the draft, exactly as picking a registered one is.
+  it("offers the two rows at its foot, neither of them a repo", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await repoRows(container);
+
+    expect(actionRows("Repo")).toEqual(["Create repo", "Open repo"]);
+    expect(offers("Repo")).toEqual(REPOS.map((repo) => repo.name));
+  });
+
+  it("moves the work onto a repo registered from Open repo", async () => {
+    const opened = {
+      id: 4242,
+      name: "widgets",
+      path: "/srv/repos/widgets",
+      default_branch: "main",
+    };
+    const fetching = theWorkbench(
+      whenever("/api/ui/repos", json({ Added: opened }), "POST"),
+      json("Switched"),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await repoRows(container);
+    press("Repo", "Open repo");
+
+    fireEvent.input(
+      await waitFor(() => screen.getByLabelText(/absolute path/i)),
+      { target: { value: opened.path } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+
+    // The move carries the id the registration answered with, which is the
+    // whole reason the outcome carries the Repo: the path that was typed is not
+    // what it is recorded under, and there is nothing here to match against.
+    await waitFor(() =>
+      expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/repo`)).toEqual({
+        repo_id: opened.id,
+      }),
+    );
+  });
+
+  /// And the row beside it, which lands the same way: what a create answers with
+  /// is the Repo it made, and a saved draft goes onto it by the move a pick
+  /// makes. What the modal asks for is `composing.test.tsx`'s.
+  it("moves the work onto a repo made from Create repo", async () => {
+    const fetching = theWorkbench(
+      whenever(
+        "/api/ui/repos/new",
+        json({ Made: { ...(repoView as RepoView), id: 4343 } }),
+        "POST",
+      ),
+      // The card asks the settings one thing — whether a GitHub token is saved
+      // — and says nothing about GitHub, and takes no create, until they
+      // answer. Which is a read this page makes nowhere else, so it is served
+      // here rather than left to the fallback.
+      whenever("/api/ui/settings", json(told)),
+      json("Switched"),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await repoRows(container);
+    press("Repo", "Create repo");
+
+    fireEvent.input(
+      await waitFor(() => screen.getByLabelText("Where it goes")),
+      { target: { value: "/home/ada/src" } },
+    );
+
+    // Waited for, as the human filling the card in waits for it: what says the
+    // settings have answered is the card having something to say about GitHub.
+    await waitFor(() =>
+      expect(
+        screen.getByLabelText("Create it on GitHub too, privately"),
+      ).toBeTruthy(),
+    );
+    fireEvent.input(screen.getByLabelText("What it is called"), {
+      target: { value: "widgets" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() =>
+      expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/repo`)).toEqual({
+        repo_id: 4343,
+      }),
+    );
+  });
+
+  /// And once, which is the whole of what a move is: the card is taken away by
+  /// the very landing that moves the work, and a modal that said its close back
+  /// afterwards would land the same Repo a second time — two switches onto the
+  /// repo the draft is already on, which re-picks the base. See `Modal.tsx`.
+  ///
+  /// The GitHub-failed create is the one that goes out this way: it is the only
+  /// answer where landing the Repo is what the press *out* of the card does
+  /// rather than what the create's own answer does.
+  it("moves it once, though the card lands it on the way out", async () => {
+    const fetching = theWorkbench(
+      whenever(
+        "/api/ui/repos/new",
+        json({
+          MadeWithoutRemote: {
+            repo: { ...(repoView as RepoView), id: 4343 },
+            why: "`gh` said: Name already exists on this account",
+          },
+        }),
+        "POST",
+      ),
+      whenever("/api/ui/settings", json(told)),
+      json("Switched"),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await repoRows(container);
+    press("Repo", "Create repo");
+
+    fireEvent.input(
+      await waitFor(() => screen.getByLabelText("Where it goes")),
+      { target: { value: "/home/ada/src" } },
+    );
+    fireEvent.input(screen.getByLabelText("What it is called"), {
+      target: { value: "widgets" },
+    });
+    await waitFor(() =>
+      expect(
+        screen.getByLabelText("Create it on GitHub too, privately"),
+      ).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    // The card is what happened rather than a form now, and the one press out
+    // of it is what lands the Repo.
+    fireEvent.click(
+      await waitFor(() => screen.getByRole("button", { name: "Done" })),
+    );
+
+    await waitFor(() =>
+      expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/repo`)).toBe(1),
+    );
+    // Waited past the turn a second close would land on, so that a second move
+    // has had every chance to go out rather than merely not having gone yet.
+    await new Promise((go) => setTimeout(go, 0));
+
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/repo`)).toBe(1);
   });
 
   /// A later round, steered onto work that is already built: the checkout is of

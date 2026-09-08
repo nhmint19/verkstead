@@ -6,6 +6,9 @@
 //! GitHub what happened afterwards: which PR the branch has, what is on it, and
 //! what has been said about it.
 //!
+//! And the few things it *writes*: a share's gist, a comment on a pull request,
+//! and the repository half of a create — see [`create_repository`].
+//!
 //! It authenticates as the configured token — the one in `secrets.yaml` that
 //! every session's sandbox gets too — handed to `gh` as `GH_TOKEN` in the
 //! environment of the call. The file is read at the moment of the call rather
@@ -561,6 +564,44 @@ pub(crate) fn create_gist(
 /// it in months later.
 pub(crate) fn delete_gist(gh: &Gh, token: &str, id: &str) -> Result<(), Trouble> {
     gh.ask_as(token, &["api", "-X", "DELETE", &format!("/gists/{id}")])?;
+
+    Ok(())
+}
+
+/// Put a repository Verkstead has just made on GitHub, and push it there.
+///
+/// The other half of a create — see [`crate::repos::create`]. One `gh` rather
+/// than a remote added by hand with a push behind it: `gh repo create` makes
+/// the repository, writes `origin` and pushes the branch, and doing it in three
+/// steps would be three ways to leave half a remote behind.
+///
+/// **Private**, always. A repository made from here is somebody's work before it
+/// is anybody else's business, and public is a decision to take deliberately
+/// rather than by leaving a box alone.
+///
+/// `--source .` rather than a path: `gh` is run inside the directory anyway —
+/// see [`Gh::ask`], which is also where the configured token comes from, read at
+/// the moment of the call so that one saved through the settings page reaches
+/// the next create without a restart.
+///
+/// Run **after** the first commit, there being nothing to push before it.
+///
+/// Blocking, like everything else here — see [`Gh::run`].
+pub(crate) fn create_repository(gh: &Gh, repo: &Path, name: &str) -> Result<(), Trouble> {
+    gh.ask(
+        repo,
+        &[
+            "repo",
+            "create",
+            name,
+            "--private",
+            "--source",
+            ".",
+            "--remote",
+            "origin",
+            "--push",
+        ],
+    )?;
 
     Ok(())
 }

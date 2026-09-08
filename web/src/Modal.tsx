@@ -39,6 +39,11 @@ type Sheet = {
   /// Said when the modal has closed itself, which is what Escape and a press on
   /// the backdrop come back as. Nothing here changes `open`; the caller does,
   /// along with whatever else it keeps beside it.
+  ///
+  /// **Once, and never for a close the caller made.** Taking this modal away is
+  /// how a caller answers its own Cancel, and being told about that afterwards
+  /// would be being told twice — which costs nothing where a `close` only puts a
+  /// signal back, and is a second Repo landing on a draft where it does more.
   close: () => void;
   /// What a screen reader calls the dialog, where the card's own heading is not
   /// what names it.
@@ -84,10 +89,24 @@ function Drawn(props: Sheet): JSX.Element {
 
   onMount(() => dialog.showModal());
 
+  /// Whether the caller has already taken this modal away, which is what makes
+  /// the close below its own doing rather than something to tell the caller
+  /// about — see `close` on [`Sheet`], which is only ever *this closed itself*.
+  let taken = false;
+
   // Closed on the way out, even where it is the caller taking it away: a modal
   // dialog merely removed from the document leaves the top layer without handing
   // the focus back, and the button that opened this is where the focus belongs.
+  //
+  // Marked first, because `close()` fires the event below on a node that is on
+  // its way out of the document but still carries its listeners: unmarked, a
+  // caller whose way out is the thing that unmounts this would be told it had
+  // closed a second time, having already acted on the first. Which every caller
+  // survived while every `close` did nothing but put a signal back — and the
+  // Create repo card's does not: it lands the Repo it made on the draft, and
+  // landing it twice is two moves on a saved one.
   onCleanup(() => {
+    taken = true;
     if (dialog.open) dialog.close();
   });
 
@@ -97,7 +116,12 @@ function Drawn(props: Sheet): JSX.Element {
       ref={dialog}
       aria-label={props.name}
       aria-labelledby={props.labelledBy}
-      onClose={() => props.close()}
+      // Every way this closes itself comes through here — Escape, and the
+      // backdrop below — and nothing else does: a close the caller caused is
+      // marked above and says nothing back.
+      onClose={() => {
+        if (!taken) props.close();
+      }}
       // The one way out `dialog` has no opinion about. A press on the backdrop
       // lands on the dialog itself, which is why the card underneath carries the
       // padding: with any of its own, a press on the card's margin would read as

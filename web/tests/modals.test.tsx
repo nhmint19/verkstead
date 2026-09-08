@@ -137,6 +137,45 @@ describe("a modal", () => {
 
     await waitFor(() => expect(sheet(container)).toBeNull());
   });
+
+  /// And says nothing back about it, however the caller got there.
+  ///
+  /// Taking the modal away closes the `dialog` on the way out, so that the focus
+  /// goes back to whatever opened it — and a `dialog` closed fires its own close
+  /// event on a node that is leaving the document but still carries its
+  /// listeners. Said back, that is the caller being told a second time about a
+  /// close it made itself and has already acted on: harmless where a `close`
+  /// only puts a signal back, and a second Repo landing on a draft where it does
+  /// more.
+  it("does not say a close the caller made back to them", async () => {
+    const [open, setOpen] = createSignal(true);
+    const closed: string[] = [];
+
+    /// A caller whose way out of its own card is what unmounts the card — which
+    /// is the Create repo modal's, where the Repo it made goes onto the draft on
+    /// the way past.
+    const leave = () => {
+      closed.push("leave");
+      setOpen(false);
+    };
+
+    const { container } = render(() => (
+      <Modal class="example" open={open()} close={leave} name="example">
+        <button type="button" onClick={leave}>
+          Done
+        </button>
+      </Modal>
+    ));
+
+    fireEvent.click(container.querySelector("button")!);
+
+    await waitFor(() => expect(sheet(container)).toBeNull());
+    // Waited past the turn a close event would land on, so that a second saying
+    // has had every chance to arrive rather than merely not having arrived yet.
+    await new Promise((go) => setTimeout(go, 0));
+
+    expect(closed).toEqual(["leave"]);
+  });
 });
 
 /// One rule rather than one per modal, which is the visible half of there being

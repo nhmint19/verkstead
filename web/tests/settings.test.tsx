@@ -110,7 +110,7 @@ const SAVED = saved as SettingsSaved;
 
 /// The sidebar's one setting, off — which is where a workbench nobody has
 /// archived anything in stands.
-const HIDING_ARCHIVED: ShowingArchived = { showing: false };
+const HIDING_ARCHIVED: ShowingArchived = { showing: false, any: false };
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -1136,7 +1136,7 @@ function thePage(at = "/settings") {
     // The one write this page can make that is not the credentials' own: a
     // registration, which the pane sends to the same path it read the list
     // from.
-    whenever("/api/ui/repos", json("Added"), "POST"),
+    whenever("/api/ui/repos", json({ Added: FIRST_REPO }), "POST"),
     whenever("/api/ui/update", json("Current")),
     whenever("/api/ui/conversations", json(SIDEBAR)),
     whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),

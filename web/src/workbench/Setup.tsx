@@ -93,8 +93,9 @@ import type {
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import * as pairing from "../pairing";
-import { Listbox, Picker } from "../picking";
+import { Listbox, Picker, type Action } from "../picking";
 import { BROKEN } from "../profiles/ProfileList";
+import { CreateRepo, OpenRepo } from "../repos/RepoList";
 import { AUTOMATIC, chosen } from "./naming";
 import styles from "./Setup.module.css";
 import { keeping } from "./settling";
@@ -396,6 +397,8 @@ export function RepoSelect(props: {
     freshness: { reconcile: "id" },
   }));
 
+  const { rows, modal } = repoRows((repoId) => props.pick(repoId));
+
   return (
     <div class={styles.repoSelect}>
       <Listbox
@@ -411,6 +414,7 @@ export function RepoSelect(props: {
         chosen={props.chosen}
         disabled={props.disabled}
         pick={(repo) => props.pick(Number(repo))}
+        actions={rows}
       />
 
       {/* A list that could not be read at all, said under the control it would
@@ -421,8 +425,62 @@ export function RepoSelect(props: {
           Could not read the repos: {repos.error?.message}
         </ErrorLine>
       </Show>
+
+      {modal()}
     </div>
   );
+}
+
+/// The two rows at the foot of either Repo dropdown, and what they open.
+///
+/// A factory rather than a component, for the reason the actions menu's rows are
+/// one: the pair is drawn in two controls — the compose page's dropdown and the
+/// panel's, which are one control in two places — and everything behind them is
+/// the same modal over the same page. A component would have had to be the
+/// dropdown as well as the rows, and there are two dropdowns.
+///
+/// What either row lands on is still the caller's, exactly as a pick is: the
+/// compose state's repo id where the page is composing, a move where the draft is
+/// saved. Which is the whole reason both answer with the Repo — a create is told
+/// what to call the directory rather than where it ends up, and the path a
+/// registration was given is not the one it is recorded under, so there is
+/// nothing here to match against the list either way.
+function repoRows(pick: (repoId: number) => void): {
+  /// The rows themselves, for the [`Listbox`] to draw behind its rule.
+  rows: Action[];
+  /// And what they open, which outlives the rows: the dropdown is shut by the
+  /// press that opened the modal.
+  modal: () => JSX.Element;
+} {
+  // Which of the two is up, or `null` while neither is. One signal rather than
+  // two, because they are two cards over one page and the second is opened from
+  // the same shut dropdown as the first: a pair of booleans could say both were
+  // up, which is a state there is no way to reach and no way to draw.
+  const [opening, setOpening] = createSignal<"create" | "open" | null>(null);
+
+  const shut = () => setOpening(null);
+
+  const landed = (repoId: number) => {
+    shut();
+    pick(repoId);
+  };
+
+  return {
+    rows: [
+      { label: "Create repo", press: () => setOpening("create") },
+      { label: "Open repo", press: () => setOpening("open") },
+    ],
+    modal: () => (
+      <>
+        <Show when={opening() === "create"}>
+          <CreateRepo close={shut} landed={(repo) => landed(repo.id)} />
+        </Show>
+        <Show when={opening() === "open"}>
+          <OpenRepo close={shut} landed={(repo) => landed(repo.id)} />
+        </Show>
+      </>
+    ),
+  };
 }
 
 /// Which Repo the work is in at all: the first thing in the Repo panel, and the
@@ -503,6 +561,14 @@ function RepoPicker(props: {
 /// Presentational and shared, for [`RepoOptions`]'s reason. What a pick *does*
 /// is the caller's — a move on a saved Conversation, a field of the compose
 /// state — and so is everything said under it.
+///
+/// A [`Listbox`] rather than the `<select>` this was, and for one reason: the
+/// two rows at its foot press rather than pick. A native `<option>` that acted
+/// is the bug class `picking.tsx` was written against, and a second control
+/// beside the dropdown would be the invitation to register one drawn in two
+/// shapes — so the panel's picker is the control the compose page's already is,
+/// and the rows are added once. Nothing else about it moved: the same repos, the
+/// same move, disabled in the same two states.
 export function RepoChoice(props: {
   /// What is chosen, as the picker writes it: the Repo's id, or the empty
   /// string where nothing is picked yet, which is only ever the compose page.
@@ -538,6 +604,8 @@ export function RepoChoice(props: {
       : [held, ...listed];
   };
 
+  const { rows, modal } = repoRows((repoId) => props.pick(repoId));
+
   return (
     <div class={styles.repoPick}>
       <label for="conversation-repo">Repo</label>
@@ -548,12 +616,12 @@ export function RepoChoice(props: {
           </ErrorLine>
         </Match>
         <Match when={true}>
-          {/* A [`Picker`] rather than a `<select>`, so this cannot come to show
-              one repo while the mutation behind it would record another — the
-              same reason the base picker under it is one. A Conversation is on
-              a repo from the moment it exists, so the placeholder is the
-              compose page's alone. */}
-          <Picker
+          {/* The app's own control rather than a native one, so this cannot
+              come to show one repo while the mutation behind it would record
+              another — and so that the two rows at its foot can press. A
+              Conversation is on a repo from the moment it exists, so the
+              placeholder is the compose page's alone. */}
+          <Listbox
             id="conversation-repo"
             options={options()}
             value={(repo) => String(repo.id)}
@@ -561,11 +629,16 @@ export function RepoChoice(props: {
             chosen={props.chosen}
             disabled={props.disabled}
             pick={(repo) => props.pick(Number(repo))}
+            actions={rows}
           />
         </Match>
       </Switch>
 
       {props.children}
+
+      {/* And what the rows open, which outlives the dropdown they were pressed
+          in: shutting the rows is the first thing a press does. */}
+      {modal()}
     </div>
   );
 }

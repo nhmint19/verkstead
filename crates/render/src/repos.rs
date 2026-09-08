@@ -1,11 +1,20 @@
-//! Registering a Repo, the list of the ones that are, one of them opened, and
-//! taking one away again: what the viewer sends and what it is handed back.
+//! Registering a Repo, making one, the list of the ones that are, one of them
+//! opened, and taking one away again: what the viewer sends and what it is
+//! handed back.
 //!
 //! Every way registering can be refused is a named outcome rather than a status
 //! code, as answering and locking are — because each of them is a different
 //! sentence to put in front of the human, and none of them is something to
 //! retry. A directory that is not a repository is something to go and put right,
 //! not an error.
+//!
+//! Making one is refused the same way and for the same reason, with one more
+//! of its own behind it: a create that got half way is a directory on somebody's
+//! disk rather than a form to fill in again.
+//!
+//! And a create may reach GitHub as well, which is the one outcome here that is
+//! neither a Repo nor a refusal: the repository is made, and the remote it was
+//! to have is not. Both halves travel — see [`Created::MadeWithoutRemote`].
 
 use serde::{Deserialize, Serialize};
 
@@ -45,11 +54,18 @@ pub struct Registration {
 /// The refusals are the server's and not the form's: a check the browser made
 /// is a courtesy, and every request reaching this endpoint is decided here
 /// whether or not a form was involved.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// The two outcomes that leave a Repo registered carry it, because whoever
+/// asked is usually about to put something *on* it — the Repo dropdown's **Open
+/// repo** row registers one and lands the draft on it — and the path that was
+/// typed is not the resolved path the Repo is recorded under. A caller left to
+/// match its own spelling against the list afterwards would be guessing at an
+/// answer this endpoint is already holding.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Registered {
     /// Recorded. It is on the list, and it is there after a restart.
-    Added,
+    Added(RepoEntry),
 
     /// The path was relative. There is nothing to resolve it against that would
     /// mean the same thing twice, so it is refused rather than guessed at.
@@ -72,7 +88,12 @@ pub enum Registered {
     ///
     /// A path a Repo that was taken away still holds is not this: registering it
     /// again revives that Repo, and the answer is [`Registered::Added`].
-    AlreadyRegistered,
+    ///
+    /// It carries the Repo for the reason [`Registered::Added`] does, and it is
+    /// the same Repo either way: a settings pane goes on saying *registered
+    /// already* and nothing else, while a dropdown that was registering one to
+    /// work in has the repository it named rather than a dead end.
+    AlreadyRegistered(RepoEntry),
 }
 
 /// What became of taking one off the registry.
@@ -156,6 +177,106 @@ pub struct RepoView {
     /// would be a choice nobody made. What that global is, is on the settings
     /// themselves — see [`crate::SettingsView::conflict_resolution`].
     pub conflict_resolution: Option<ConflictResolution>,
+}
+
+/// A repository the human is asking Verkstead to *make*, said as where it is to
+/// go and what it is to be called.
+///
+/// Two fields rather than the one path a [`Registration`] carries, because the
+/// two halves are answered differently: the parent is browsed for, and the name
+/// is typed. Joining them in the browser would be the one place a path is built
+/// out of a separator the server never agreed to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct Creation {
+    /// The directory the new repository goes in. Absolute, and somewhere the
+    /// server can write.
+    pub parent: String,
+
+    /// And what to call it, which is the directory's name and so the Repo's:
+    /// what a Repo is called is read off the directory rather than claimed, and
+    /// a create is the one moment the human chooses the directory.
+    pub name: String,
+
+    /// And whether the same repository is to be made on GitHub, pushed to, and
+    /// left as this one's `origin`.
+    ///
+    /// Asked because the pipeline ends in a push and a pull request: a
+    /// repository with nowhere to push is one that will stop halfway through
+    /// the first Conversation. What is made there is private — a repository
+    /// made from here is somebody's work before it is anybody else's business,
+    /// and public is a decision to take deliberately rather than by leaving a
+    /// box alone.
+    ///
+    /// False where no token is configured, there being nothing to make it as:
+    /// the modal draws no tick at all then, and says a remote is needed before
+    /// the work is finished.
+    pub github: bool,
+}
+
+/// What became of a create.
+///
+/// Every refusal is a named outcome for the reason [`Registered`]'s are, and one
+/// more of its own: a create that got half way is a directory on somebody's
+/// disk, so what comes back has to be a sentence about their machine rather
+/// than a status code.
+///
+/// A refusal registers nothing. The two outcomes that leave a Repo both carry
+/// the whole opened Repo rather than the row: the modal that asked for it is
+/// about to put a draft on it, and a page that had to go and read the Repo it
+/// just made would be asking for something the server was already holding.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Created {
+    /// Made: the directory is there, `main` holds one commit by the configured
+    /// author, and the Repo is on the registry — and where GitHub was asked
+    /// for, the repository is there too, private, with `origin` set and `main`
+    /// pushed.
+    Made(RepoView),
+
+    /// Made here, and not on GitHub.
+    ///
+    /// Not a failed create, which is why it carries the Repo the way
+    /// [`Created::Made`] does: the directory, the commit and the registration
+    /// all stand, and what is missing is a remote that can be added afterwards.
+    /// So the answer holds both halves rather than choosing between them — the
+    /// Repo lands on the draft exactly as a clean create's does, and the modal
+    /// says what failed.
+    ///
+    /// `why` is `gh`'s own account of it, for the reason [`Created::Refused`]
+    /// carries git's.
+    MadeWithoutRemote { repo: RepoView, why: String },
+
+    /// Nothing is at the parent, or what was typed was not an absolute path —
+    /// which is the same sentence, there being no directory either way for the
+    /// new one to go in.
+    ParentMissing,
+
+    /// Something of that name is in that parent already. A create never writes
+    /// into a directory that is there: what is in it is somebody's, and a
+    /// repository made around it would be a repository nobody asked for.
+    ///
+    /// One that is already a repository is **Open repo**'s to register rather
+    /// than this one's to make.
+    AlreadyThere,
+
+    /// The name is not one a directory can have — blank, or a path rather than a
+    /// name.
+    BadName,
+
+    /// Nobody is configured to commit as. The first commit is this repository's
+    /// own history from here on, so it is refused rather than made by a
+    /// stand-in — see the settings page's **Git author**.
+    NoAuthor,
+
+    /// Anything else, in git's own words where git is what failed: the directory
+    /// could not be made, or `git` would not do one of the four things a fresh
+    /// repository is made of.
+    ///
+    /// Nothing is on the registry either way, and a directory this got half way
+    /// through making is taken back: a create that did not happen leaves nothing
+    /// behind that looks as though it did.
+    Refused(String),
 }
 
 /// How one Repo is to resolve a conflict from now on, which is the one thing

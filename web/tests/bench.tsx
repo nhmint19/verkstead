@@ -68,11 +68,16 @@ export const NO_PAIRINGS: RepoPairingsView = {
   review: "Nothing",
 };
 
-/// And the sidebar's one setting, off — which is where a workbench nobody has
-/// archived anything in stands. Written here rather than read out of a fixture
-/// for the reason the branches are: one boolean is not a shape a golden file
-/// could hold true.
-export const HIDING_ARCHIVED: ShowingArchived = { showing: false };
+/// And the sidebar's one setting, off with nothing behind it — which is where a
+/// workbench nobody has archived anything in stands. Written here rather than
+/// read out of a fixture for the reason the branches are: two booleans are not a
+/// shape a golden file could hold true.
+export const HIDING_ARCHIVED: ShowingArchived = { showing: false, any: false };
+
+/// And the same switch with something behind it: off, and something put away
+/// that turning it on would bring back. What the compose page draws the pinned
+/// switch for — see `zero.ts`.
+export const HIDING_SOMETHING: ShowingArchived = { showing: false, any: true };
 
 /// And how this machine stands, which the app asks about before it draws
 /// anything at all: a Verkstead with the objective met, which is the only
