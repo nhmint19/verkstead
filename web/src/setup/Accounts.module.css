@@ -176,12 +176,12 @@
   cursor: pointer;
 }
 
-/* And the heading that replaces it, which takes the focus the press left behind
-   without ever being tabbed to: nothing is drawn around it, the section
-   appearing under the hand being what says the press landed. */
-.byHand h3:focus-visible {
-  outline: none;
-}
+/* And the heading that replaces it takes nothing off: it wears the ring the
+   browser puts round it, being where the focus lands when the press that opened
+   the section takes its own control away. A hand that pressed with the pointer
+   never matches `:focus-visible` and sees none of it; the hand that pressed with
+   Enter is the one being told where it now is, which is the whole reason the
+   focus is moved there at all — see `named` in `Accounts.tsx`. */
 
 @media (hover: hover) {
   .continue:not(:disabled):hover {
