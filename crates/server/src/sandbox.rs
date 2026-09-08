@@ -1199,6 +1199,15 @@ enum Landing {
 ///
 /// A relative target is read against the directory the link is in, the way the
 /// kernel reads one, and [`HOPS`] is where a chain that never ends stops.
+///
+/// **What that join comes to is normalised before anything reads it** — see
+/// [`normalised`]. A target of `../../opt/claude/claude` joined onto
+/// `~/bin` spells a path that begins with the home and ends up outside it, and
+/// what asks whether a target is under the home is [`within`], which compares
+/// the name rather than the place. So the `..` comes out here, where the join
+/// that put it in is: an unnormalised name would be read as the human's own and
+/// bound on that account, which is the one thing nothing outside the home is to
+/// be.
 fn landing(program: &Path) -> Landing {
     let mut at = program.to_owned();
 
@@ -1216,13 +1225,50 @@ fn landing(program: &Path) -> Landing {
         };
 
         at = match (target.is_absolute(), at.parent()) {
-            (true, _) => target,
-            (false, Some(directory)) => directory.join(target),
+            (true, _) => normalised(&target),
+            (false, Some(directory)) => normalised(&directory.join(target)),
             (false, None) => return Landing::Dangling,
         };
     }
 
     Landing::Dangling
+}
+
+/// `path` with the `.` and `..` written in it taken out of the name.
+///
+/// What a link's target is spelled as, once it has been joined onto the
+/// directory the link sits in — see [`landing`], the one caller. A `..` is the
+/// ordinary way an installer writes a target, `npm` leaving
+/// `~/.npm-global/bin/codex` pointing at `../lib/node_modules/…`, and the name
+/// that join makes is what [`within`] and [`beneath`] are then asked about.
+/// Those two read the name rather than the place, so a `..` in it is a path
+/// that reads as under one directory and is under another.
+///
+/// **The name and not the machine**, which is [`landing`]'s own rule and the
+/// reason [`std::fs::canonicalize`] is no part of this: what a target has to be
+/// measured against is a home spelled the way the server was told it, and
+/// resolving the directories above the file would spell it the other way. What
+/// that costs is a `..` climbing out through a directory that is itself a link,
+/// where the kernel would land somewhere else than the name says — a path
+/// nothing here has ever followed, every directory on this walk being one an
+/// installer wrote rather than one a session opens.
+///
+/// A `..` at the root stays at the root, having nowhere above it to go, which
+/// is what the kernel does with one.
+fn normalised(path: &Path) -> PathBuf {
+    let mut normalised = PathBuf::new();
+
+    for piece in path.components() {
+        match piece {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalised.pop();
+            }
+            piece => normalised.push(piece),
+        }
+    }
+
+    normalised
 }
 
 /// How many links are followed before a chain is one nothing is at the end of.
@@ -4392,6 +4438,57 @@ mod tests {
         assert!(
             installs(Platform::Linux, &path, home.path()).is_empty(),
             "and nothing is bound on either link's account",
+        );
+    }
+
+    /// A relative target is read as the place it lands rather than as the name
+    /// the join spells: a `..` climbing out of the home is a link out of the
+    /// home, and nothing outside it is bound because a program pointed at it.
+    ///
+    /// The way `npm` writes a target — `../lib/node_modules/…` — is the reason
+    /// this is the ordinary case rather than a corner. One of them stays inside
+    /// the home and is granted; the other climbs past it and is not found at
+    /// all.
+    #[cfg(unix)]
+    #[test]
+    fn a_relative_target_is_read_as_where_it_lands_rather_than_how_it_is_spelled() {
+        let holding = tempfile::tempdir().unwrap();
+        let (home, elsewhere) = (holding.path().join("you"), holding.path().join("opt"));
+        let (local, lib) = (home.join(".npm-global/bin"), home.join(".npm-global/lib"));
+
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::create_dir_all(&lib).unwrap();
+        std::fs::create_dir_all(&elsewhere).unwrap();
+
+        // The install `npm` leaves: a link out of `bin` and back down into the
+        // `lib` beside it, which is under the home however it is spelled.
+        std::fs::write(lib.join("codex"), "#!/bin/sh\n").unwrap();
+        std::os::unix::fs::symlink("../lib/codex", local.join("codex")).unwrap();
+
+        // And one climbing past the home altogether, which is the same spelling
+        // and a different place.
+        std::fs::write(elsewhere.join("claude"), "#!/bin/sh\n").unwrap();
+        std::os::unix::fs::symlink("../../../opt/claude", local.join("claude")).unwrap();
+
+        let path = joined(&[local.as_os_str()]);
+
+        assert_eq!(
+            install(Platform::Linux, "codex", Some(&path), None, Some(&home)).as_deref(),
+            Some(lib.join("codex").as_path()),
+            "the `..` is taken out of the name, so what a row says is the file \
+             a session runs",
+        );
+        assert_eq!(
+            install(Platform::Linux, "claude", Some(&path), None, Some(&home)),
+            None,
+            "and a target that climbs out of the home is a link out of the \
+             home, whatever the name it is spelled with begins with",
+        );
+        assert_eq!(
+            installs(Platform::Linux, &path, &home),
+            vec![lib.clone()],
+            "so the one inside is granted and the one outside is bound by \
+             nothing at all",
         );
     }
 
