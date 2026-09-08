@@ -8131,6 +8131,46 @@ async fn a_head_branch_ahead_of_origin_refuses_the_press_by_name() {
     );
 }
 
+/// And one that has gone its own way is refused as that rather than as either
+/// of the two beside it: each of the branches holds commits the other has not,
+/// so there is no fast-forward to be had and nothing here for Verkstead to
+/// decide.
+///
+/// Which is the third of the three ways a local head branch can stand against
+/// origin's, and it is the arm that never takes a branch it should not — a git
+/// that would not say how the two stand reads as this as well. Told apart from
+/// *ahead* by asking the same containment the other way round, so the two are
+/// worth proving apart.
+#[tokio::test]
+async fn a_head_branch_that_has_diverged_from_origin_refuses_the_press_by_name() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_with_origin().await;
+    head_on_origin(&upstream, "rate-limiting");
+
+    // A commit of its own on each side of the same branch, which is the whole
+    // of *diverged*: neither tip has the other in its history.
+    git(&repo, &["fetch", "origin"]);
+    git(
+        &repo,
+        &["checkout", "-b", "rate-limiting", "origin/rate-limiting"],
+    );
+    let mine = commit(&repo, "unpushed.md");
+    git(&repo, &["checkout", "main"]);
+
+    git(&upstream, &["checkout", "rate-limiting"]);
+    commit(&upstream, "theirs.md");
+    git(&upstream, &["checkout", "main"]);
+
+    let id = ready_to_take_up(&app, elsewhere.path(), repo_id, 41).await;
+
+    assert_eq!(press_take_up(&app, id).await, TakenUp::BranchDiverged);
+    nothing_taken_up(&app, id, &repo).await;
+    assert_eq!(
+        git(&repo, &["rev-parse", "refs/heads/rate-limiting"]).trim(),
+        mine,
+        "and the branch is exactly where it was",
+    );
+}
+
 /// A branch somebody is standing on is refused naming the place: git holds one
 /// checkout per branch, and *which one* is the whole of what the human needs.
 #[tokio::test]
