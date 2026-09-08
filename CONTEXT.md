@@ -53,8 +53,9 @@ _Avoid_: project, codebase, checkout
 The core entity: a Repo, a base commit, a Brief, one branch and one Worktree.
 Everything done about one piece of work hangs off it. Runs through Draft →
 Grilling → Implementing → Wrapping → Done — a roadmap Conversation passes
-straight from Grilling to Wrapping, its building belonging to its Stages — and
-can be closed from any of them, a **Steer** being the way back into a
+straight from Grilling to Wrapping, its building belonging to its Stages, and
+one adopting a pull request from Draft straight to Wrapping, its building
+having happened before Verkstead saw it — and can be closed from any of them, a **Steer** being the way back into a
 Conversation that is closed and one of the two ways into one that is Done. There
 is one move back down the ladder: a wrap-up whose review split its findings out
 into a backlog returns to Implementing to build it, and its finish step wraps up
@@ -622,17 +623,34 @@ so it is left the moment there is anything in that list: a Conversation created,
 or *Show archived* switched on with archived ones present, which brings the
 sidebar back with them in it.
 
-**Adopting a roadmap is that page too**, from an **Adopt a roadmap** dropdown
-under the box, at the near edge of the row the two presses are at the far edge
-of — drawn only where there is a roadmap to adopt and nothing written in the box,
-since what it loads stands in place of what would have been written there.
-Picking one creates nothing: the roadmap is loaded into what the device is
-holding, the box locks to a card naming it and the Stage that would be started,
-the Repo and the base commit are the roadmap's own, and what is still the
-human's is the Pairings and the repos the work runs alongside. A clear control
-puts it down and gives the box back what was in it. **Start** then creates the
-adopting Conversation and adopts the Stage; **Save as draft** creates it and
-leaves the adopting to the press on its own page.
+**Adopting is that page too**, from an **Other actions** dropdown under the
+box, at the near edge of the row the two presses are at the far edge of — drawn
+whenever nothing is written in the box and nothing is loaded, since what it
+loads stands in place of what would have been written there. One nested level
+per action, in the one card the menu always is: **Continue a roadmap** and
+**Wrap up a pull request**, each greyed rather than hidden while there is
+nothing under it, because a menu that came and went with its lists would say
+nothing about what it offers. Picking a roadmap creates nothing: the roadmap is
+loaded into what the device is holding, the box locks to a card naming it and
+the Stage that would be started, the Repo and the base commit are the roadmap's
+own, and what is still the human's is the Pairings and the repos the work runs
+alongside. A clear control puts it down and gives the box back what was in it.
+**Start** then creates the adopting Conversation and adopts the Stage; **Save
+as draft** creates it and leaves the adopting to the press on its own page.
+
+**Picking a pull request loads it the same way**, with one difference: a pull
+request brings words of its own. The card names it — the Repo, the number, the
+title, the head branch and the base it goes into — over a box that stays a
+box, prefilled with the title as a heading and the description under it, and
+what is left there when the work starts is the Brief; what was typed before is
+put away and given back on clear, the way a held file is. The Repo is the pull
+request's and reads disabled, the branch and the base are its own and not
+drawn, and the grilling Pairing is not asked for, there being no grilling: what
+is the human's is the Implementation and Review Pairings and the companions.
+**Start** creates the Conversation and takes the pull request up; **Save as
+draft** creates it holding the pull request for the press on its own page. A
+pull request a Conversation already holds is listed all the same, and its row
+goes to that Conversation rather than loading anything.
 
 Every one of those freezes at the same moment the Brief does, so once grilling
 starts none of it is drawn; on a later round the branch and the base commit are
@@ -1335,23 +1353,50 @@ progress* on this branch.
 _Avoid_: phase, milestone, epic, step (that is a backlog's)
 
 **Adopt**:
-Take a roadmap the Repo already holds — written by the old tools, by hand, by
-anything that was not this Verkstead — into the pipeline, by starting its next
-Stage as a Conversation. The human's press stands in for the Stage before it
-that would otherwise have started it, so there is no grilling and no Brief to
-write: what they settle is the Pairings, the base commit and the repos the work
-runs alongside, and the stage brief becomes the Brief. **Taken up on the compose
-page**, from the dropdown under its box: the roadmap loads into the composer, and
-the press under it creates the Conversation and adopts the Stage together — the
-same two presses every other piece of work is composed with, the quieter of which
-stops at a draft, for the adopting to be pressed on its own pane. One Stage is
-the whole of what adopting starts, and all it has to start — that Stage's own
-plan commit writes to the roadmap, so when it settles the Stage after it begins
-the ordinary unattended way, and an adopted roadmap is a staged one from there
-on. Never stacks: there is no predecessor
-Conversation to stack on, and building on an unmerged branch is the human's
-move, made by picking that branch as the base.
-_Avoid_: import, attach, resume, take over, migrate
+Take work the Repo already holds — written by the old tools, by hand, by
+anything that was not this Verkstead — into the pipeline. Two kinds of work are
+adopted, and *adopt* is the code's and this vocabulary's word for both; what the
+human reads is **Continue a roadmap** for the one and **Wrap up a pull
+request** for the other, both levels of the **Other actions** dropdown on the
+compose page.
+
+**A roadmap is adopted** by starting its next Stage as a Conversation. The
+human's press stands in for the Stage before it that would otherwise have
+started it, so there is no grilling and no Brief to write: what they settle is
+the Pairings, the base commit and the repos the work runs alongside, and the
+stage brief becomes the Brief. The roadmap loads into the composer, and the
+press under it creates the Conversation and adopts the Stage together — the
+same two presses every other piece of work is composed with, the quieter of
+which stops at a draft, for the adopting to be pressed on its own pane. One
+Stage is the whole of what adopting starts, and all it has to start — that
+Stage's own plan commit writes to the roadmap, so when it settles the Stage
+after it begins the ordinary unattended way, and an adopted roadmap is a staged
+one from there on. Never stacks: there is no predecessor Conversation to stack
+on, and building on an unmerged branch is the human's move, made by picking
+that branch as the base.
+
+**A pull request is adopted** by starting a Conversation on it at its wrap-up:
+one opened by hand, by a contributor, by anything that was not this Verkstead.
+Read off GitHub rather than the repository — every open pull request of every
+registered Repo with a GitHub remote, through the configured `gh`, when the
+compose page opens and again on each reopen, never kept: any author, and never
+one from a fork, whose head branch is nowhere origin can be pushed to. One a
+Conversation already holds, Closed included, is listed and leads to that
+Conversation instead, the branch being that Conversation's. Taking it up puts
+the Conversation on the pull request's head branch, named for it and never
+invented — made off origin's, or a local one fast-forwarded where it is behind;
+one ahead, diverged or checked out anywhere else is refused by name, on the
+composer where the press was — with the head at take-up as its base commit and
+GitHub's base branch beside it, so the Timeline draws only what Verkstead adds
+from here and a conflict merge of the base drags nothing. Recording the pull
+request is the move, from Draft straight into **Wrapping**, and the wrap-up is
+the ordinary one from there: the Review Pairing decides whether the branch is
+read afresh with everything already said on it folded in, or, under *No
+review*, only what stands on it is answered. No grilling and no handoff: the
+pull request's own title and description stand as the Brief, edited or not,
+and nothing about the pull request itself — its draft flag, its description —
+is touched.
+_Avoid_: import, attach, resume, take over, migrate, improve
 
 **Abandoned**:
 What a roadmap in a registered Repo is when it has a Stage startable right now

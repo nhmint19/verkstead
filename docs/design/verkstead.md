@@ -669,6 +669,33 @@ off the repo and re-read whenever it is switched, so the page shows what a draft
 created there would have arrived showing — shown and not held, so a picker left
 on it sends nothing at create and the server's own prefill answers for it.
 
+**Other actions is one menu with a level per action** (*settled 2026-09-08,
+building improve-pr*). The compose page's *Adopt a roadmap* dropdown was drawn
+only while a roadmap was abandoned, and a second action beside it — wrapping up
+a pull request Verkstead did not open — would have made two dropdowns that each
+came and went with a list. So there is one, **Other actions**, drawn whenever
+the box is empty and nothing is loaded, and each action is a nested level in
+the shared menu's one card: **Continue a roadmap** and **Wrap up a pull
+request**, a level with nothing under it greyed rather than hidden, because a
+menu that says what it offers is worth more than one that says nothing until
+there is something. The human-facing words are the friendlier ones; *adopt*
+stays the name in the code and the vocabulary, widened to cover both. The open
+pull requests are read off GitHub through the configured `gh` when the page
+opens — every registered Repo with a remote, any author, forks left out — and
+never kept, a list GitHub owns being one Verkstead should not hold a second
+opinion about. A pull request already on a Conversation's record is listed and
+leads there, Closed included, since the branch is that Conversation's and a
+steer is its way back into Wrapping. Loading one prefills the box with the
+title and description as an editable Brief rather than locking it to a card, a
+pull request being the one thing adopted that brings words of its own and the
+one the human is likeliest to have something to add to. Taking it up records
+the head at take-up as the base commit with GitHub's base branch beside it, so
+the Timeline draws only what Verkstead adds from there; the pull request's own
+commits are its own record. Recording the pull request is the move from Draft
+into Wrapping, and the wrap-up is untouched: the Review Pairing picker was
+already the whole of review-or-not, and a review-only mode that stopped short
+of the checks and comments was not worth a state of its own.
+
 **And with nothing to list, that page is the whole of the app** (*settled
 2026-09-08, onboarding stage 04*). The **zero state** is a fact about the
 sidebar's list rather than about a first run: it holds while that list *as
