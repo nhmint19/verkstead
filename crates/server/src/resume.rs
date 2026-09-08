@@ -385,8 +385,7 @@ pub(crate) async fn resume(
                 return Ok(Resumed::NoImplementationPairing);
             }
 
-            let Some(follow_up) = crate::follow_ups::opened(&state.pool, conversation_id).await?
-            else {
+            let Some(follow_up) = crate::follow_ups::opened(state, conversation_id).await? else {
                 return Ok(Resumed::NoFollowUpBrief);
             };
 

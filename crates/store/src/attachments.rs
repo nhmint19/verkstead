@@ -269,6 +269,33 @@ pub async fn set_attachments(pool: &SqlitePool, set_id: i64) -> Result<Vec<Attac
     rows.into_iter().map(made).collect()
 }
 
+/// The title of every Question Set this Conversation has files on the Answers
+/// to, oldest Set first.
+///
+/// What a later session's prompt heads an Answer's files with — see
+/// `attached_to` in `crates/server/src/skills.rs`. A label alone says which of a
+/// Set's Questions and nothing about which Set, and a Conversation that has been
+/// asked all week has plenty of both; the title is on the Set rather than on the
+/// file, so it is read beside the files rather than carried on them.
+///
+/// Only the Sets these files name, rather than every Set the Conversation ever
+/// asked: the join is what drops the Brief's rows, which name none.
+pub async fn attached_sets(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<(i64, String)>> {
+    sqlx::query_as(
+        "SELECT DISTINCT a.set_id, q.title
+         FROM attachments a
+         JOIN question_sets q ON q.id = a.set_id
+         WHERE a.conversation_id = ?
+         ORDER BY a.set_id",
+    )
+    .bind(conversation_id)
+    .fetch_all(pool)
+    .await
+    .with_context(|| {
+        format!("reading the Sets Conversation {conversation_id} has files on the Answers to")
+    })
+}
+
 /// One of them, or `None` where this Conversation has no attachment with that
 /// id.
 ///
@@ -462,12 +489,18 @@ mod tests {
 
     /// A Question Set on that Conversation's Timeline, to put files on.
     async fn asked(pool: &SqlitePool, conversation: i64) -> i64 {
-        let set = verkstead_schema::QuestionSet::from_yaml(
-            "title: the rate limiter\n\
+        asked_about(pool, conversation, "the rate limiter").await
+    }
+
+    /// And one called something in particular, for the reading that is about
+    /// what a Set is called rather than about what was put on it.
+    async fn asked_about(pool: &SqlitePool, conversation: i64, title: &str) -> i64 {
+        let set = verkstead_schema::QuestionSet::from_yaml(&format!(
+            "title: {title}\n\
              questions:\n\
              \x20 - label: Q1\n\
              \x20   text: where does the counter live?\n",
-        )
+        ))
         .unwrap();
 
         crate::ask(pool, conversation, &set, crate::Ask::Blocking)
@@ -555,6 +588,46 @@ mod tests {
 
         assert!(detach_from_set(&pool, theirs, put.id).await.unwrap());
         assert!(set_attachments(&pool, theirs).await.unwrap().is_empty());
+    }
+
+    /// What the Sets an Answer's files were put on are called, which is what a
+    /// later session's prompt heads them with. The Brief's own files name no
+    /// Set, so a Conversation with only those has none of these.
+    #[tokio::test]
+    async fn the_sets_a_conversations_answer_files_were_put_on_say_what_they_are_called() {
+        let (_dir, pool, conversation) = conversation().await;
+        let counting = asked_about(&pool, conversation, "How the limiter counts").await;
+        let wording = asked_about(&pool, conversation, "The wording of the error").await;
+
+        attach(&pool, conversation, Origin::Brief, "rates.csv", 12)
+            .await
+            .unwrap();
+
+        assert!(attached_sets(&pool, conversation).await.unwrap().is_empty());
+
+        for set in [wording, counting, counting] {
+            attach(
+                &pool,
+                conversation,
+                Origin::Answer {
+                    set,
+                    label: "Q1".to_owned(),
+                },
+                "trace.txt",
+                9,
+            )
+            .await
+            .unwrap();
+        }
+
+        assert_eq!(
+            attached_sets(&pool, conversation).await.unwrap(),
+            [
+                (counting, "How the limiter counts".to_owned()),
+                (wording, "The wording of the error".to_owned()),
+            ],
+            "each Set named once, whatever it is holding",
+        );
     }
 
     /// An `answer` row that names no Set is a record nothing here can read as

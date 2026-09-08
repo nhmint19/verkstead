@@ -30,6 +30,8 @@
 //! nothing anybody here can name: all three are one refusal, because all three
 //! are a file put where no Answer would ever draw it.
 
+use std::path::PathBuf;
+
 use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{AnswerAttached, AnswerAttachmentRemoved, AttachmentView};
@@ -287,4 +289,100 @@ async fn asks(pool: &SqlitePool, set_id: i64, label: &str) -> Result<bool> {
     };
 
     Ok(stored.set.set().is_some_and(|set| set.asks(label)))
+}
+
+/// Every file this Conversation's Answers carry, and where a session reads
+/// them.
+///
+/// What a session brought up to speed on an exchange it did not see is told
+/// about the files that came with it — see [`crate::exchanges::exchange`],
+/// which writes them under the decision they were put on. The digest is made of
+/// what the Timeline holds, and what the Timeline holds is the Response the
+/// human submitted: the files are a record beside it, exactly as they are on the
+/// way out to a waiting agent — see [`onto`], which fills the same paths into
+/// the same Answers from the same rows.
+///
+/// The whole Conversation's rather than one Set's, because the two readings
+/// that use it walk several Sets: a relaunched grilling is primed with
+/// everything settled, and a folding carries every Deferred Ask answered since.
+/// One read, and the Sets are told apart inside it.
+pub(crate) struct OnAnswers {
+    /// Every file the Conversation holds, in the order they were attached —
+    /// the Brief's among them, which name no Answer and are therefore never
+    /// found by one.
+    files: Vec<store::Attachment>,
+
+    /// Where the Conversation's directory is reached from inside the sandbox.
+    inside: PathBuf,
+}
+
+impl OnAnswers {
+    /// Read back for one Conversation.
+    ///
+    /// A read that fails is nothing named rather than a session that does not
+    /// start: what the digest is for is priming a session with what was decided,
+    /// and a launch lost over the files beside it would cost the human the whole
+    /// exchange to save a line of it.
+    pub(crate) async fn of(state: &AppState, conversation_id: i64) -> OnAnswers {
+        let files = match store::attachments(&state.pool, conversation_id).await {
+            Ok(files) => files,
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id, "reading the files put on this Conversation's Answers failed");
+                Vec::new()
+            }
+        };
+
+        OnAnswers::holding(
+            files,
+            Attachments::under(&state.data_dir).inside(Platform::HERE, conversation_id),
+        )
+    }
+
+    /// Made of what the record holds and where the sandbox puts it, which is
+    /// the pair every reading of these is: the rows say which file is on which
+    /// Answer, and the directory says what to call it.
+    pub(crate) fn holding(files: Vec<store::Attachment>, inside: PathBuf) -> OnAnswers {
+        OnAnswers { files, inside }
+    }
+
+    /// The files put on one Set's Answers, which is what an exchange of that Set
+    /// is written with.
+    pub(crate) fn on(&self, set_id: i64) -> OnSet<'_> {
+        OnSet {
+            answers: self,
+            set_id,
+        }
+    }
+}
+
+/// One Set's share of them, scoped so that an exchange cannot draw another
+/// Set's files under its own decisions.
+#[derive(Clone, Copy)]
+pub(crate) struct OnSet<'a> {
+    answers: &'a OnAnswers,
+    set_id: i64,
+}
+
+impl OnSet<'_> {
+    /// The paths the files put on one Question's Answer are read at, in the
+    /// order they were attached.
+    ///
+    /// The path the prompt's own listing names the same file at, off the one
+    /// reading — see [`crate::attachments::inside`] — so a session cannot be
+    /// told about a file twice and given two different paths for it.
+    pub(crate) fn under(&self, label: &str) -> Vec<String> {
+        self.answers
+            .files
+            .iter()
+            .filter(|file| match &file.origin {
+                store::Origin::Answer { set, label: on } => *set == self.set_id && on == label,
+                store::Origin::Brief => false,
+            })
+            .map(|file| {
+                crate::sandbox::under(&self.answers.inside, &file.name)
+                    .display()
+                    .to_string()
+            })
+            .collect()
+    }
 }

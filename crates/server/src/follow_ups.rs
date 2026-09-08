@@ -21,8 +21,9 @@
 //! mark is read inside that same window — see `store::nothing_else`.
 
 use anyhow::Result;
-use sqlx::SqlitePool;
 
+use crate::AppState;
+use crate::answer_files::OnAnswers;
 use crate::store;
 
 /// What a follow-up session is primed with.
@@ -85,8 +86,13 @@ impl FollowUp {
 /// One read of the Timeline for both halves, as a relaunched grilling takes one
 /// for its three: a Conversation on a pull request has a long Timeline behind
 /// it, and picking a follow-up up again is no reason to read it twice.
-pub(crate) async fn opened(pool: &SqlitePool, conversation_id: i64) -> Result<Option<FollowUp>> {
-    let timeline = store::timeline(pool, conversation_id).await?;
+///
+/// The state rather than the pool alone, because the digest names the files put
+/// on those Answers at the path this session will open them — which is a
+/// question about the Data Directory as well as about the record. See
+/// [`OnAnswers`].
+pub(crate) async fn opened(state: &AppState, conversation_id: i64) -> Result<Option<FollowUp>> {
+    let timeline = store::timeline(&state.pool, conversation_id).await?;
 
     let Some((steered, brief)) = steered(&timeline) else {
         return Ok(None);
@@ -98,7 +104,10 @@ pub(crate) async fn opened(pool: &SqlitePool, conversation_id: i64) -> Result<Op
         // follow-up's rounds rather than the whole Conversation's: a wrap-up's
         // review, the grilling that settled the work and the round before this
         // one are all above it.
-        settled: crate::grillings::settled(&timeline[steered + 1..]),
+        settled: crate::grillings::settled(
+            &timeline[steered + 1..],
+            &OnAnswers::of(state, conversation_id).await,
+        ),
         again: true,
     }))
 }

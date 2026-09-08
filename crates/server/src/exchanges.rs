@@ -10,6 +10,8 @@
 
 use verkstead_schema::{QuestionOption, QuestionSet, Response};
 
+use crate::answer_files::OnSet;
+
 /// What is written where the human left a question open, and where nothing came
 /// back for one at all.
 ///
@@ -20,12 +22,20 @@ use verkstead_schema::{QuestionOption, QuestionSet, Response};
 const LEFT_OPEN: &str = "_Left open._";
 
 /// One Set and its Answers: what it was called, each question against what
-/// became of it, and whatever the human said about the whole of it.
+/// became of it, whatever the human attached to it, and whatever they said about
+/// the whole of it.
 ///
 /// The agent's own markdown, kept as it was written. What this is going into is
 /// a prompt rather than a table on a phone, so the question that was asked with
 /// a code block in it is worth having with the code block still in it.
-pub(crate) fn exchange(set: &QuestionSet, response: &Response) -> String {
+///
+/// `files` is what was put on this Set's Answers, which the session reading the
+/// digest never saw handed over: an exchange it is brought up to speed on is one
+/// it was not there for, so what came with each decision is named under it — see
+/// [`attached`]. Read off the record beside the Response rather than out of it,
+/// exactly as a waiting agent's own Response is filled in — see
+/// [`crate::answer_files::onto`].
+pub(crate) fn exchange(set: &QuestionSet, response: &Response, files: OnSet<'_>) -> String {
     let mut said = format!("## {}\n\n", set.title.trim());
 
     for question in &set.questions {
@@ -36,11 +46,12 @@ pub(crate) fn exchange(set: &QuestionSet, response: &Response) -> String {
         ));
 
         // A Heading asks nothing of its own — it heads its Sub-questions — so no
-        // Answer ever comes back for one, and nothing is written under it.
+        // Answer ever comes back for one, and no file is ever put on one either.
         if !question.heading() {
             said.push_str(&format!(
-                "{}\n\n",
-                decided(response, question.name(), &question.options)
+                "{}\n\n{}",
+                decided(response, question.name(), &question.options),
+                attached(files, question.name()),
             ));
         }
 
@@ -48,9 +59,10 @@ pub(crate) fn exchange(set: &QuestionSet, response: &Response) -> String {
             let name = subquestion.name(question);
 
             said.push_str(&format!(
-                "**{name}** {}\n\n{}\n\n",
+                "**{name}** {}\n\n{}\n\n{}",
                 subquestion.text.trim(),
-                decided(response, &name, &subquestion.options)
+                decided(response, &name, &subquestion.options),
+                attached(files, &name),
             ));
         }
     }
@@ -65,6 +77,30 @@ pub(crate) fn exchange(set: &QuestionSet, response: &Response) -> String {
     }
 
     said
+}
+
+/// And what the human put on that Answer, named by the path the session reading
+/// this opens each file at.
+///
+/// Under the decision rather than beside it, because that is what it is: a file
+/// handed over with an Answer is part of the answer, and a session primed with
+/// the exchange has to be able to open it. The path alone — how large it is is
+/// in the prompt's own `# Attached files` listing, which names every one of them
+/// again under the Set and the Question.
+///
+/// Nothing at all where the Answer carried none, which is nearly every one of
+/// them: a line saying so would be a paragraph per question about files that
+/// were never there.
+fn attached(files: OnSet<'_>, name: &str) -> String {
+    let paths = files.under(name);
+
+    if paths.is_empty() {
+        return String::new();
+    }
+
+    let named: Vec<String> = paths.iter().map(|path| format!("`{path}`")).collect();
+
+    format!("_Attached:_ {}\n\n", named.join(", "))
 }
 
 /// What became of one question: the Option that was chosen, whatever the human

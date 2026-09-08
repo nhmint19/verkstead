@@ -902,12 +902,22 @@ pub(crate) fn alongside(prompt: &str, branch: &str, companions: &[store::Compani
 /// than sorted into groups, because that order is the order they were attached
 /// in and an origin's files therefore arrive together.
 ///
+/// `sets` is what each Set an Answer's files were put on is called — see
+/// [`store::attached_sets`] — because a group headed by a label alone would say
+/// which of a Set's Questions and nothing about which Set, and a session
+/// reading a Conversation that has been asked all week has both to tell apart.
+///
 /// `inside` is where the Conversation's directory is reached from inside the
 /// sandbox, which is not the same path on both platforms — see
 /// [`crate::attachments::inside`]. A Conversation with nothing attached is the
 /// prompt unchanged, which is most of them: a heading over an empty list would
 /// tell a session that something had been handed over.
-pub(crate) fn attached(prompt: &str, files: &[store::Attachment], inside: &Path) -> String {
+pub(crate) fn attached(
+    prompt: &str,
+    files: &[store::Attachment],
+    sets: &[(i64, String)],
+    inside: &Path,
+) -> String {
     if files.is_empty() {
         return prompt.to_owned();
     }
@@ -921,7 +931,7 @@ pub(crate) fn attached(prompt: &str, files: &[store::Attachment], inside: &Path)
                 listed.push('\n');
             }
 
-            listed.push_str(&format!("{}\n\n", attached_to(&file.origin)));
+            listed.push_str(&format!("{}\n\n", attached_to(&file.origin, sets)));
             under = Some(&file.origin);
         }
 
@@ -945,12 +955,27 @@ pub(crate) fn attached(prompt: &str, files: &[store::Attachment], inside: &Path)
 /// section made of sub-sections would be a shape built for a list that is a
 /// handful of lines long.
 ///
-/// An Answer's line names the Question it answers, which is what a later session
-/// reading the Set back would look the file up by.
-fn attached_to(origin: &store::Origin) -> String {
-    match origin {
-        store::Origin::Brief => "Attached to the Brief:".to_owned(),
-        store::Origin::Answer { label, .. } => format!("Attached to the Answer to {label}:"),
+/// An Answer's line names the Set it was put on and the Question it answers,
+/// which is the pair a later session reading the Set back would look the file up
+/// by: the label says which Question of which Set, and the title is what the Set
+/// is called wherever it is drawn.
+///
+/// A Set `sets` does not name is one whose row has gone from under its files,
+/// which is a record that cannot be true — the rows go together. The label is
+/// said on its own rather than the line being dropped: what the session needs is
+/// the file, and half a heading over it beats none.
+fn attached_to(origin: &store::Origin, sets: &[(i64, String)]) -> String {
+    let store::Origin::Answer { set, label } = origin else {
+        return "Attached to the Brief:".to_owned();
+    };
+
+    match sets
+        .iter()
+        .find_map(|(id, title)| (id == set).then_some(title.trim()))
+        .filter(|title| !title.is_empty())
+    {
+        Some(title) => format!("Attached to the Answer to {label} of \"{title}\":"),
+        None => format!("Attached to the Answer to {label}:"),
     }
 }
 
@@ -3508,6 +3533,7 @@ mod tests {
                 attachment("wireframe.png", 1_240_000),
                 attachment("rates.csv", 4_096),
             ],
+            &[],
             &attachments_inside(),
         );
 
@@ -3534,6 +3560,89 @@ mod tests {
         );
     }
 
+    /// And a file put on an Answer, which names the Set it was put on and the
+    /// Question it answers.
+    fn on_an_answer(name: &str, bytes: i64, set: i64, label: &str) -> store::Attachment {
+        store::Attachment {
+            origin: store::Origin::Answer {
+                set,
+                label: label.to_owned(),
+            },
+            ..attachment(name, bytes)
+        }
+    }
+
+    /// A file put on an Answer is listed under the Set it was put on and the
+    /// Question it answers, after the Brief's own group: a label alone says
+    /// which of a Set's Questions and nothing about which Set, and a session
+    /// reading a Conversation that has been asked all week has both to tell
+    /// apart.
+    #[test]
+    fn an_answers_files_are_listed_under_the_set_and_the_question_they_answer() {
+        let prompt = attached(
+            "# The work\n",
+            &[
+                attachment("rates.csv", 4_096),
+                on_an_answer("trace.txt", 512, 11, "Q3"),
+                on_an_answer("graph.png", 2_048, 11, "Q3"),
+                on_an_answer("wording.md", 64, 12, "Q9a"),
+            ],
+            &[
+                (11, "How the limiter counts".to_owned()),
+                (12, "The wording of the error".to_owned()),
+            ],
+            &attachments_inside(),
+        );
+
+        let listed = prompt
+            .split_once("# Attached files")
+            .expect("the files are listed")
+            .1;
+
+        assert!(
+            listed.contains(
+                "Attached to the Brief:\n\n- `/verkstead/attachments/rates.csv`, 4.1 kB.\n"
+            ),
+            "the Brief's group is still what it was, and comes first: {listed:?}"
+        );
+        assert!(
+            listed.contains(
+                "Attached to the Answer to Q3 of \"How the limiter counts\":\n\n\
+                 - `/verkstead/attachments/trace.txt`, 512 bytes.\n\
+                 - `/verkstead/attachments/graph.png`, 2.0 kB.\n"
+            ),
+            "an Answer's files are grouped under its Set and its Question, in the \
+             order they were attached: {listed:?}"
+        );
+        assert!(
+            listed.contains("Attached to the Answer to Q9a of \"The wording of the error\":"),
+            "and a Sub-question's Answer is one like any other: {listed:?}"
+        );
+    }
+
+    /// A Set nothing says the title of is one whose row has gone from under its
+    /// files, which is a record that cannot be true. The label is said on its
+    /// own rather than the file being left out of the listing: what the session
+    /// needs is the file, and half a heading over it beats none.
+    #[test]
+    fn a_file_on_a_set_nothing_names_is_still_listed_under_its_question() {
+        let prompt = attached(
+            "# The work\n",
+            &[on_an_answer("trace.txt", 512, 11, "Q3")],
+            &[(12, "Another Set entirely".to_owned())],
+            &attachments_inside(),
+        );
+
+        assert!(
+            prompt.contains("Attached to the Answer to Q3:\n"),
+            "the Question it answers is what there is to say: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("- `/verkstead/attachments/trace.txt`, 512 bytes."),
+            "and the file is listed all the same: {prompt:?}"
+        );
+    }
+
     /// The section is on every session prompt of the Conversation, whichever
     /// builder made it: a file is attached to the Conversation rather than to a
     /// round of it, and the directory is inside every one of its sandboxes.
@@ -3546,6 +3655,7 @@ mod tests {
             let prompt = attached(
                 &built,
                 &[attachment("rates.csv", 4_096)],
+                &[],
                 &attachments_inside(),
             );
 
@@ -3564,6 +3674,7 @@ mod tests {
         let prompt = attached(
             "",
             &[attachment("wireframe.png", 1_240_000)],
+            &[],
             &attachments_inside(),
         );
 
@@ -3581,7 +3692,7 @@ mod tests {
     fn a_conversation_with_nothing_attached_is_started_on_the_prompt_as_it_stands() {
         let prompt = next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None);
 
-        assert_eq!(attached(&prompt, &[], &attachments_inside()), prompt);
+        assert_eq!(attached(&prompt, &[], &[], &attachments_inside()), prompt);
     }
 
     /// A size is said in whichever unit keeps it to a few digits, because what

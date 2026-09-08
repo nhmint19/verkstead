@@ -1713,9 +1713,15 @@ impl Sessions {
         // the bind below puts it at. Both sides ask
         // [`crate::attachments::Attachments`] the same question, so a session
         // cannot be told about a directory other than the one it was given.
+        //
+        // The Sets beside the files, because a file put on an Answer is listed
+        // under what its Set is called as well as under the Question — see
+        // [`skills::attached`]. A second read rather than a column on the files:
+        // what a Set is called is a fact about the Set.
         let prompt = skills::attached(
             &prompt,
             &store::attachments(pool, conversation.id).await?,
+            &store::attached_sets(pool, conversation.id).await?,
             &agents.attachments.inside(Platform::HERE, conversation.id),
         );
 

@@ -60,8 +60,8 @@ pub use archives::{
     showing_archived, unarchive_conversation,
 };
 pub use attachments::{
-    Attachment, Origin, attach, attachment, attachments, detach, detach_from_set, set_attachment,
-    set_attachments,
+    Attachment, Origin, attach, attachment, attached_sets, attachments, detach, detach_from_set,
+    set_attachment, set_attachments,
 };
 pub use banners::{dismiss_remote_banner, remote_banner_dismissed};
 pub use captures::{Summary, append_capture, capture, start_capture, summarise_capture};
