@@ -972,7 +972,7 @@ fn system(platform: Platform) -> &'static [&'static str] {
 ///
 /// **One list, and it is every name the wizard has a row for** — see
 /// [`crate::onboarding`], whose rows are drawn from the same names and whose
-/// probe is [`install`] below, so a row and a session cannot come to disagree
+/// probe is [`opened`] below, so a row and a session cannot come to disagree
 /// about which file a name is. Adding a name here is the whole of extending the
 /// rule: it is resolved on a session's `PATH`, followed into whatever install
 /// it links into, and granted where that install is the human's own.
@@ -1003,7 +1003,7 @@ pub(crate) const GH: &str = "gh";
 /// shell profile and a restart; a link into somewhere no sandbox binds is an
 /// install to move. The wizard says which of the three a row is — see
 /// [`crate::onboarding`], which is the caller that wants more than *found* —
-/// and [`install`] beside this is the same walk asked the shorter question.
+/// and [`opened`] beside this is the same walk asked what a grant is made of.
 ///
 /// **A name that is a link is followed, and where it lands has to be somewhere
 /// a session can reach** — see [`reachable`], the same question a `PATH` entry
@@ -1054,6 +1054,7 @@ pub(crate) fn standing(
             Some(at) => Standing::Found {
                 landed: at.clone(),
                 at,
+                through: Vec::new(),
             },
             None => Standing::Nowhere,
         };
@@ -1070,14 +1071,40 @@ pub(crate) fn standing(
             // goes, exactly as an `execvp` would.
             Landing::Nothing => {}
 
-            Landing::File(landed)
-                if landed == at || reachable(platform, landed.as_os_str(), home) =>
-            {
-                return Standing::Found { at, landed };
+            // A file where it stands, which is nothing further to ask: the
+            // entry it was found in is one the composing already kept.
+            Landing::File { landed, through } if landed == at => {
+                return Standing::Found {
+                    at,
+                    landed,
+                    through,
+                };
             }
 
-            Landing::File(target) => {
-                passed.get_or_insert(Standing::Leading { at, target });
+            Landing::File { landed, through } => {
+                // Every hop is a path a session opens, so every hop has to be
+                // one a session can reach: a chain whose middle link sits
+                // somewhere no sandbox binds fails to exec exactly as one whose
+                // end does. The first out of reach is what is said about it,
+                // that being where the trail goes cold.
+                let out_of_reach = through
+                    .iter()
+                    .chain(std::iter::once(&landed))
+                    .find(|opened| !reachable(platform, opened.as_os_str(), home))
+                    .cloned();
+
+                match out_of_reach {
+                    None => {
+                        return Standing::Found {
+                            at,
+                            landed,
+                            through,
+                        };
+                    }
+                    Some(target) => {
+                        passed.get_or_insert(Standing::Leading { at, target });
+                    }
+                }
             }
 
             Landing::Dangling => {
@@ -1102,6 +1129,17 @@ pub(crate) enum Standing {
         /// And the file that is really run, which is what a grant is made of
         /// and what a version number is read off.
         landed: PathBuf,
+
+        /// And every link's target walked through on the way between the two,
+        /// `at` and `landed` neither of them among it — empty on all but a
+        /// chain of more than one link. See [`Landing::File`], whose own field
+        /// this is, and [`installs`], which grants each of these a directory
+        /// the way it grants `landed` one.
+        ///
+        /// Nothing the wizard draws: what a row says is where the name resolved
+        /// and what it runs, and the hops between are a fact about what a
+        /// session must be able to open rather than about which program it got.
+        through: Vec<PathBuf>,
     },
 
     /// The name is on the `PATH` the *server* was started with, in a directory
@@ -1147,26 +1185,44 @@ fn beyond(program: &str, path: Option<&OsStr>, servers: Option<&OsStr>) -> Stand
         .flat_map(apart)
         .filter(|entry| !held(entry))
         .map(|entry| Path::new(entry).join(program))
-        .find(|at| matches!(landing(at), Landing::File(_)))
+        .find(|at| matches!(landing(at), Landing::File { .. }))
         .map_or(Standing::Nowhere, |at| Standing::Beyond { at })
 }
 
-/// Where `program` really is for a session, where a session can run it at all:
-/// [`standing`] asked the shorter question.
+/// Every file a session opens to run `program`, in the order it opens them —
+/// each link's target on the way, and the file at the end of them last. Empty
+/// where a session would not find it at all: [`standing`] asked the shorter
+/// question.
 ///
 /// The one every caller that is making a grant asks — see [`installs`] — a
 /// directory being bound for a program a session runs rather than for one it
 /// was going to be told about.
-pub(crate) fn install(
+///
+/// **The whole chain rather than the file at the end of it.** A chain of links
+/// is resolved by whoever runs the program, so a link in the middle of one is a
+/// path a session opens exactly as the file at the end is: a session granted
+/// the file and not the link that points at it finds an `ENOENT` where a
+/// harness was, however plainly the two ends are there. The name a session
+/// resolved is not among these — the directory *it* is in is a `PATH` entry,
+/// which is [`per_user`]'s to grant.
+pub(crate) fn opened(
     platform: Platform,
     program: &str,
     path: Option<&OsStr>,
     pathext: Option<&OsStr>,
     home: Option<&Path>,
-) -> Option<PathBuf> {
+) -> Vec<PathBuf> {
     match standing(platform, program, path, None, pathext, home) {
-        Standing::Found { landed, .. } => Some(landed),
-        _ => None,
+        Standing::Found {
+            landed,
+            mut through,
+            ..
+        } => {
+            through.push(landed);
+
+            through
+        }
+        _ => Vec::new(),
     }
 }
 
@@ -1182,7 +1238,22 @@ enum Landing {
     Nothing,
 
     /// A file, at the end of a chain of none or more links.
-    File(PathBuf),
+    File {
+        /// The file itself.
+        landed: PathBuf,
+
+        /// And every link's target on the way to it, in the order they were
+        /// followed, `landed` not among them — empty where the name was a file
+        /// where it stood, and empty again where one link was the whole of it.
+        ///
+        /// **What a session has to be able to open besides the file.** A chain
+        /// is resolved by whoever runs the program rather than by whoever found
+        /// it, so a middle link is a path a session opens exactly as the file at
+        /// the end is: a session given the two ends and not the middle finds an
+        /// `ENOENT` where a harness was. See [`installs`], which grants the
+        /// directory each of these sits in.
+        through: Vec<PathBuf>,
+    },
 
     /// A chain of links with nothing at the end of it — or one that never ends,
     /// which is the same thing to whoever tries to run it.
@@ -1211,6 +1282,11 @@ enum Landing {
 fn landing(program: &Path) -> Landing {
     let mut at = program.to_owned();
 
+    // Every target walked through on the way, the one landed on taken off the
+    // end below: what a session opens to reach the file is the file and each of
+    // these — see [`Landing::File`].
+    let mut through: Vec<PathBuf> = Vec::new();
+
     for hop in 0..HOPS {
         let Ok(target) = std::fs::read_link(&at) else {
             // Not a link, which is the end of the chain: a file is what was
@@ -1218,7 +1294,14 @@ fn landing(program: &Path) -> Landing {
             // runnable at it — nothing at all where no link was followed to get
             // here, and a chain that led nowhere where one was.
             return match (at.is_file(), hop) {
-                (true, _) => Landing::File(at),
+                (true, _) => {
+                    through.pop();
+
+                    Landing::File {
+                        landed: at,
+                        through,
+                    }
+                }
                 (false, 0) => Landing::Nothing,
                 (false, _) => Landing::Dangling,
             };
@@ -1229,6 +1312,8 @@ fn landing(program: &Path) -> Landing {
             (false, Some(directory)) => normalised(&directory.join(target)),
             (false, None) => return Landing::Dangling,
         };
+
+        through.push(at.clone());
     }
 
     Landing::Dangling
@@ -1279,8 +1364,8 @@ fn normalised(path: &Path) -> PathBuf {
 const HOPS: usize = 40;
 
 /// The directories a session has to be granted on a *program's* account: for
-/// every name on [`PROGRAMS`], the directory holding the file that name lands
-/// on, where that is under the home of whoever runs the server.
+/// every name on [`PROGRAMS`], the directory holding each file that name is
+/// opened through, where that is under the home of whoever runs the server.
 ///
 /// [`per_user`]'s sibling and the other half of the same hole. That one grants
 /// the directories a session's `PATH` names, which is `~/.local/bin`; this one
@@ -1288,17 +1373,25 @@ const HOPS: usize = 40;
 /// install is `~/.local/share/claude/versions/X` — a directory no `PATH` names
 /// and one a session without it finds a dangling link at.
 ///
-/// **The directory holding the file and nothing above it.** A version's own
+/// **Every hop of the chain and not only the end of it** — see [`opened`],
+/// which is what walks one. A link is resolved by whoever runs the program, so
+/// a chain of two needs the directory the middle link sits in as much as it
+/// needs the one holding the file: a session granted the two ends and not the
+/// middle would find an `ENOENT` where the wizard's row said a harness was, the
+/// row having probed out here where the whole chain is there.
+///
+/// **The directory holding each file and nothing above it.** A version's own
 /// directory rather than the versions directory it is in, and an install's own
 /// rather than the `~/.local/share` half the machine keeps everything else in
 /// too: what a session needs is the file it runs and what sits beside it.
 ///
-/// **Read-only, strictly under the home, and only what [`install`] found.** A
-/// link into somewhere else is not on this list, which is what keeps the hole
-/// where [`per_user`] left it — nothing outside the home is bound on a link's
-/// account. A directory the `PATH` itself already names is not on it either:
-/// that one is [`per_user`]'s, and a path said twice in a description is a path
-/// said once.
+/// **Read-only, strictly under the home, and only what [`opened`] found.** A
+/// chain leading anywhere else is not on this list at all — [`standing`] finds
+/// no such name in the first place, whichever hop of it left the home — which
+/// is what keeps the hole where [`per_user`] left it: nothing outside the home
+/// is bound on a link's account. A directory the `PATH` itself already names is
+/// not on it either: that one is [`per_user`]'s, and a path said twice in a
+/// description is a path said once.
 ///
 /// **Nothing at all on Windows**, for [`per_user`]'s reason: the same rule is
 /// the boundary's own there, written on the real path as the container is made.
@@ -1310,18 +1403,16 @@ pub(crate) fn installs(platform: Platform, path: &OsStr, home: &Path) -> Vec<Pat
     }
 
     for program in PROGRAMS {
-        let Some(landed) = install(platform, program, Some(path), None, Some(home)) else {
-            continue;
-        };
+        for landed in opened(platform, program, Some(path), None, Some(home)) {
+            let Some(directory) = holding(&landed, home) else {
+                continue;
+            };
 
-        let Some(directory) = holding(&landed, home) else {
-            continue;
-        };
-
-        if !apart(path).any(|entry| same(entry, directory.as_os_str()))
-            && !directories.contains(&directory)
-        {
-            directories.push(directory);
+            if !apart(path).any(|entry| same(entry, directory.as_os_str()))
+                && !directories.contains(&directory)
+            {
+                directories.push(directory);
+            }
         }
     }
 
@@ -3930,6 +4021,23 @@ fn nix(dir: &Path, args: &[&str]) -> Option<String> {
 mod tests {
     use super::*;
 
+    /// The file a session would run `program` from, or nothing at all.
+    ///
+    /// The last of what [`opened`] walks, which is the half of that answer
+    /// these read by: what a grant is made of is the whole chain, and what a
+    /// row says and a session starts is the file at the end of it.
+    fn install(
+        platform: Platform,
+        program: &str,
+        path: Option<&OsStr>,
+        pathext: Option<&OsStr>,
+        home: Option<&Path>,
+    ) -> Option<PathBuf> {
+        opened(platform, program, path, pathext, home)
+            .last()
+            .cloned()
+    }
+
     /// An executable that is really there, wherever a test's temporary
     /// directory is.
     fn executable(bin: &Path, name: &str, data_dir: &Path) -> Option<Executable> {
@@ -4392,6 +4500,101 @@ mod tests {
         );
     }
 
+    /// A chain of more than one link is granted every directory it goes
+    /// through, and not only the one it ends in.
+    ///
+    /// A link is resolved by whoever runs the program, so a session handed the
+    /// two ends of a chain and not its middle finds an `ENOENT` where a harness
+    /// is — a row that ticked out here, where the whole chain is there, and a
+    /// session that could not start.
+    #[cfg(unix)]
+    #[test]
+    fn a_chain_of_links_is_granted_every_directory_it_goes_through() {
+        let home = tempfile::tempdir().unwrap();
+        let (local, current, version) = (
+            home.path().join(".local/bin"),
+            home.path().join(".local/state/claude"),
+            home.path().join(".local/share/claude/versions/0.0.0"),
+        );
+
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::create_dir_all(&current).unwrap();
+        std::fs::create_dir_all(&version).unwrap();
+        std::fs::write(version.join("claude"), "#!/bin/sh\n").unwrap();
+
+        // Two hops: the name, a link naming whichever version is current, and
+        // the version's own directory at the end of it.
+        std::os::unix::fs::symlink(version.join("claude"), current.join("claude")).unwrap();
+        std::os::unix::fs::symlink(current.join("claude"), local.join("claude")).unwrap();
+
+        let path = joined(&[local.as_os_str()]);
+
+        assert_eq!(
+            opened(
+                Platform::Linux,
+                "claude",
+                Some(&path),
+                None,
+                Some(home.path())
+            ),
+            vec![current.join("claude"), version.join("claude")],
+            "what a session opens to run it is the middle link and the file, in \
+             the order it opens them",
+        );
+        assert_eq!(
+            installs(Platform::Linux, &path, home.path()),
+            vec![current.clone(), version.clone()],
+            "so both of their directories are granted, the middle one being as \
+             much a path a session opens as the last",
+        );
+    }
+
+    /// And a chain whose middle leaves the home is a name a session does not
+    /// have, however plainly the file at the end of it is under one: what says
+    /// so is the hop that left, that being where the trail goes cold.
+    #[cfg(unix)]
+    #[test]
+    fn a_chain_that_leaves_the_home_partway_is_a_name_not_found() {
+        let home = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let (local, version) = (
+            home.path().join(".local/bin"),
+            home.path().join(".local/share/claude/versions/0.0.0"),
+        );
+
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::create_dir_all(&version).unwrap();
+        std::fs::write(version.join("claude"), "#!/bin/sh\n").unwrap();
+
+        // Out of the home and back into it: both ends are the human's own and
+        // the middle is somewhere no sandbox binds.
+        std::os::unix::fs::symlink(version.join("claude"), elsewhere.path().join("claude"))
+            .unwrap();
+        std::os::unix::fs::symlink(elsewhere.path().join("claude"), local.join("claude")).unwrap();
+
+        let path = joined(&[local.as_os_str()]);
+
+        assert_eq!(
+            standing(
+                Platform::Linux,
+                "claude",
+                Some(&path),
+                None,
+                None,
+                Some(home.path()),
+            ),
+            Standing::Leading {
+                at: local.join("claude"),
+                target: elsewhere.path().join("claude"),
+            },
+            "the hop a session could not open is what the row has to name",
+        );
+        assert!(
+            installs(Platform::Linux, &path, home.path()).is_empty(),
+            "and nothing of either end is bound on the chain's account",
+        );
+    }
+
     /// A link into somewhere outside the home, and one that leads nowhere at
     /// all, are both a name a session does not have: the row reads absent, and
     /// neither directory is bound on the link's account.
@@ -4694,6 +4897,7 @@ mod tests {
             Standing::Found {
                 at: local.join("claude"),
                 landed: local.join("claude"),
+                through: Vec::new(),
             },
             "the `PATH` a session gets is searched first and answers, the other \
              list being asked only where nothing did",

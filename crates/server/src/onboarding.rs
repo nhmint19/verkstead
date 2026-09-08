@@ -34,7 +34,7 @@
 //! [`crate::sessions::binary`] gives with `git` and `gh` beside them: what a row
 //! is about is a program a session is launched as or reaches for, and every one
 //! of them is followed into its install by the sandbox and by the probe alike —
-//! see [`crate::sandbox::install`]. So a name that is a link into somewhere no
+//! see [`crate::sandbox::opened`]. So a name that is a link into somewhere no
 //! session can reach reads absent here, a row promising a session that starts
 //! rather than a file that happens to be on a list.
 //!
@@ -320,7 +320,7 @@ impl Machine {
     /// which is where all four answers are decided.
     fn installed(&self, program: &str) -> DependencyState {
         match self.reaches(program) {
-            sandbox::Standing::Found { at, landed } => DependencyState::Present {
+            sandbox::Standing::Found { at, landed, .. } => DependencyState::Present {
                 at: Some(shown_path(&at)),
                 // The link's target, and only where it is another file: a
                 // program that is no link has one path and would read as two.
