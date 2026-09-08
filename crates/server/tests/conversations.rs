@@ -8025,9 +8025,83 @@ async fn a_head_branch_behind_origin_is_fast_forwarded_and_taken() {
         "the branch was moved on to origin's rather than worked at where it was",
     );
 
+    assert_eq!(
+        upstream_of(&repo, "rate-limiting"),
+        "origin/rate-limiting",
+        "and it was pointed at origin's, the `git branch` that made it having \
+         left it tracking nothing",
+    );
+
     let view = opened(&app, id).await;
     assert_eq!(view.state, Lifecycle::Wrapping);
     assert_eq!(view.base_commit.as_deref(), Some(head.as_str()));
+}
+
+/// And one already level with origin's is taken where it stands — and pointed
+/// at origin's all the same, whether or not whoever made it left it tracking
+/// anything.
+///
+/// Which is the whole of what a branch that was already here needs and a branch
+/// cut off origin's gets for nothing. The wrap-up's sessions push with a bare
+/// `git push`, and what gives every other Conversation its upstream is the
+/// implementing session's `push -u`: a take-up runs no such session, so this is
+/// the only place a branch like this can get one.
+#[tokio::test]
+async fn a_head_branch_level_with_origin_is_taken_where_it_stands_and_pointed_at_it() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_with_origin().await;
+    let head = head_on_origin(&upstream, "rate-limiting");
+
+    // Made off the commit rather than off `origin/rate-limiting`, which is what
+    // leaves it tracking nothing at all — a `git branch` off a sha, or a fetch
+    // into a name.
+    git(&repo, &["fetch", "origin"]);
+    git(&repo, &["branch", "rate-limiting", &head]);
+    assert_eq!(
+        upstream_of(&repo, "rate-limiting"),
+        "",
+        "the branch this is about is one nothing has pointed anywhere",
+    );
+
+    let id = ready_to_take_up(&app, elsewhere.path(), repo_id, 41).await;
+
+    assert_eq!(press_take_up(&app, id).await, TakenUp::TakenUp);
+
+    assert_eq!(
+        git(&repo, &["rev-parse", "refs/heads/rate-limiting"]).trim(),
+        head,
+        "the branch was taken where it stood rather than moved",
+    );
+    assert_eq!(upstream_of(&repo, "rate-limiting"), "origin/rate-limiting");
+
+    // Which is the point of it: the worktree the wrap-up works in can push.
+    let worktree = opened(&app, id)
+        .await
+        .worktree
+        .expect("a taken-up Conversation has a worktree");
+
+    assert_eq!(
+        git(
+            &PathBuf::from(&worktree.path),
+            &["rev-parse", "--abbrev-ref", "HEAD@{upstream}"],
+        )
+        .trim(),
+        "origin/rate-limiting",
+    );
+}
+
+/// What `branch` is pointed at in `repo`, or the empty string where nothing has
+/// pointed it anywhere.
+///
+/// Asked as a listing rather than as `@{upstream}`, which is a revision git
+/// fails on when there is none: what is being told apart here is *tracking* from
+/// *not*, and both are answers.
+fn upstream_of(repo: &Path, branch: &str) -> String {
+    git(
+        repo,
+        &["branch", "--format=%(upstream:short)", "--list", branch],
+    )
+    .trim()
+    .to_owned()
 }
 
 /// And one that is ahead of origin is refused by name. Those commits are

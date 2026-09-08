@@ -581,6 +581,38 @@ pub(crate) fn fast_forward(repo: &Path, branch: &str, from: &str, to: &str) -> b
     .is_some()
 }
 
+/// Point `branch` at `upstream` in `repo`, and say whether it went.
+///
+/// What a take-up does to a head branch that was already local. [`add`] gets
+/// this for nothing — cutting a branch off a remote-tracking one is git setting
+/// the upstream as it cuts — and a branch that was here before this press has
+/// only whatever whoever made it left it, which a `git branch` off a commit
+/// leaves as nothing at all.
+///
+/// It matters because of how the wrap-up pushes. The sessions a wrap-up runs
+/// push with a bare `git push`, which git refuses on a branch with no upstream;
+/// what gives an ordinary Conversation one is the implementing session's
+/// `push -u origin HEAD`, and a take-up runs no such session — the work is
+/// built, and the first thing to push is a review's own commit or a fix for a
+/// red check. So this is the one place a taken-up branch can get it.
+///
+/// Set on the branch rather than in the worktree, because that is where it
+/// lives: `branch.<name>.remote` is the repository's config and is read by
+/// every checkout of it.
+pub(crate) fn track(repo: &Path, branch: &str, upstream: &str) -> bool {
+    git(
+        repo,
+        &[
+            "branch",
+            "--set-upstream-to",
+            upstream,
+            "--end-of-options",
+            branch,
+        ],
+    )
+    .is_some()
+}
+
 /// Check the branch `branch` — which is already there — out at `path` as a
 /// worktree of `repo`.
 ///

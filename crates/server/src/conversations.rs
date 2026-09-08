@@ -1405,10 +1405,23 @@ enum Holds {
         upstream: String,
     },
 
-    /// A branch that is already there, checked out where it stands. The one
-    /// kind an unwinding leaves behind: it was somebody's branch before this
-    /// press, with a pull request open on it.
-    Standing(String),
+    /// A branch that is already there, checked out where it stands and pointed
+    /// at origin's copy of it. The one kind an unwinding leaves behind: it was
+    /// somebody's branch before this press, with a pull request open on it.
+    ///
+    /// The upstream is set rather than inherited, which is the whole of what
+    /// separates this from [`Self::Track`] above. A branch git cuts off a
+    /// remote-tracking one is given its upstream as it is cut; a branch that
+    /// was already local has whatever whoever made it left it — often none, a
+    /// `git branch` off a commit setting none — and a worktree on one of those
+    /// is a worktree every wrap-up session's `git push` is refused in. See
+    /// [`worktrees::track`].
+    Standing {
+        branch: String,
+
+        /// Origin's copy of it, by name.
+        upstream: String,
+    },
 
     /// No branch at all — git's detached checkout, which is what a read-only
     /// companion gets, having nothing to commit and no business taking a name
@@ -1423,7 +1436,7 @@ impl Holds {
     fn cut(&self) -> Option<&str> {
         match self {
             Holds::Cut(branch) | Holds::Track { branch, .. } => Some(branch),
-            Holds::Standing(_) | Holds::Detached => None,
+            Holds::Standing { .. } | Holds::Detached => None,
         }
     }
 }
@@ -1591,7 +1604,14 @@ fn make(planned: &[Checkout]) -> Result<(), Unmade> {
             Holds::Track { branch, upstream } => {
                 worktrees::add(&checkout.repo, &checkout.path, branch, upstream)
             }
-            Holds::Standing(branch) => worktrees::check_out(&checkout.repo, &checkout.path, branch),
+            // Two git calls and one act: a worktree on somebody's branch that
+            // cannot push is one the wrap-up has no use for, so a tracking git
+            // would not set is this checkout failing — unwound the way any
+            // other refused one is, and the branch left where it was.
+            Holds::Standing { branch, upstream } => {
+                worktrees::check_out(&checkout.repo, &checkout.path, branch)
+                    && worktrees::track(&checkout.repo, branch, upstream)
+            }
             Holds::Detached => {
                 worktrees::add_detached(&checkout.repo, &checkout.path, &checkout.commit)
             }
@@ -2275,7 +2295,7 @@ fn settled(repo: &Path, head: &str) -> Result<(Holds, String), TakenUp> {
     };
 
     if local == origin {
-        return Ok((Holds::Standing(head.to_owned()), origin));
+        return Ok((standing(head, upstream), origin));
     }
 
     // Whether origin's tip has this branch's own in its history, which is the
@@ -2301,7 +2321,23 @@ fn settled(repo: &Path, head: &str) -> Result<(Holds, String), TakenUp> {
         return Err(TakenUp::FastForwardFailed);
     }
 
-    Ok((Holds::Standing(head.to_owned()), origin))
+    Ok((standing(head, upstream), origin))
+}
+
+/// The local head branch checked out where it stands, with origin's copy of it
+/// to be pointed at.
+///
+/// Both ways [`settled`] arrives at a branch that was already here — level with
+/// origin, and moved on to it — and the upstream rides along either way. What a
+/// local branch was left tracking is whoever made it's business and is often
+/// nothing at all, and the wrap-up sessions push with a bare `git push`: it is
+/// the implementing session's `push -u` that gives an ordinary Conversation its
+/// upstream, and a take-up never runs one of those.
+fn standing(head: &str, upstream: String) -> Holds {
+    Holds::Standing {
+        branch: head.to_owned(),
+        upstream,
+    }
 }
 
 /// What a taken-up Conversation's Timeline is told: which pull request was taken
