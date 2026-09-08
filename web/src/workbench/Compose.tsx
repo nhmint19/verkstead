@@ -54,14 +54,22 @@
 //! it is created; this page has no draft yet, so it asks for the same answer and
 //! shows it — see `showing`, which is careful to show it rather than hold it.
 //!
-//! **And it is where a roadmap is adopted from**, that being the other way work
-//! gets into the pipeline rather than another page for it: the *Adopt a roadmap*
-//! dropdown under the box lists the roadmaps nothing is driving, and picking one
-//! loads it into what this device is holding. The box locks to a card naming the
-//! roadmap and the stage that would be started, the repo and the base are the
-//! roadmap's own, and the pairings and the repos alongside stay the human's to
-//! settle — which is the whole of what adopting asks for. Clearing it gives the
-//! box back whatever was typed in it.
+//! **And it is where work that is already somewhere else is taken up from**,
+//! that being the other way into the pipeline rather than another page for it:
+//! the *Other actions* menu under the box holds one nested level per way of
+//! doing it, and picking a row loads what it names into what this device is
+//! holding. *Continue a roadmap* is the level here — the roadmaps nothing is
+//! driving, each named with its Repo and the stage a press would start. The box
+//! locks to a card naming the roadmap and that stage, the repo and the base are
+//! the roadmap's own, and the pairings and the repos alongside stay the human's
+//! to settle — which is the whole of what adopting asks for. Clearing it gives
+//! the box back whatever was typed in it.
+//!
+//! The menu is drawn whenever the box is empty and nothing is loaded, and a
+//! level with nothing under it is greyed rather than hidden: what there is to do
+//! here should not change shape with a list the human cannot see. *Adopt* stays
+//! the word in the code, the endpoints and the store; *continue* is what the
+//! human reads.
 //!
 //! What the two presses do with a roadmap loaded is what they always do, under
 //! the other name: *Start work* creates the adopting Conversation and adopts the
@@ -81,7 +89,7 @@ import { For, Show, createEffect, createSignal, type JSX } from "solid-js";
 import app from "../App.module.css";
 import { attaching } from "../Attaching";
 import { Icon } from "../Icon";
-import { Menu } from "../Menu";
+import { Menu, Nested } from "../Menu";
 import { PaneSticky, Panes } from "../Panes";
 import shell from "../Panes.module.css";
 import { Switch as Toggle } from "../Switch";
@@ -234,7 +242,7 @@ function Compose(props: {
   }));
 
   // And the roadmaps nothing is driving, which is the other way work gets into
-  // the pipeline: the rows behind the Adopt dropdown under the box. Read under
+  // the pipeline: the rows behind Continue a roadmap under the box. Read under
   // the key the rest of the app reads them under, and read again whenever the
   // page looks again — a roadmap somebody has picked up since simply stops
   // being on the list.
@@ -722,20 +730,16 @@ function Compose(props: {
                 <attach.Clip />
               </Show>
 
-              {/* And the roadmap somebody staged before Verkstead was driving
-                  anything, taken up as it stands. Drawn only when there is one
-                  to take up and the box is empty — what it loads stands in place
-                  of what would have been written there, and a dropdown offering
-                  to replace a half-written brief would be offering to lose
-                  it. */}
-              <Show
-                when={
-                  roadmaps().length &&
-                  state().brief.trim() === "" &&
-                  adopting() === null
-                }
-              >
-                <AdoptRoadmap roadmaps={roadmaps()} load={load} />
+              {/* And the work that is already somewhere else, taken up as it
+                  stands. Drawn while the box is empty and nothing is loaded —
+                  what a row loads stands in place of what would have been
+                  written there, and a menu offering to replace a half-written
+                  brief would be offering to lose it. Nothing to take up is a
+                  level greyed rather than a menu gone: what there is to do here
+                  is not a list the human can see, so it should not come and go
+                  with one. */}
+              <Show when={state().brief.trim() === "" && adopting() === null}>
+                <OtherActions roadmaps={roadmaps()} load={load} />
               </Show>
             </div>
 
@@ -853,23 +857,25 @@ function Loaded(props: {
   );
 }
 
-/// The roadmaps nothing is driving, and the dropdown that loads one.
+/// Everything that puts something in the box other than typing it, one nested
+/// level per way of doing it.
 ///
 /// An action with a chevron rather than a label over a value: the options along
 /// the box's edge say what the work *is*, and this says what to put in the box —
 /// which is why it stands under the box with the presses rather than in the row
 /// inside it.
 ///
-/// Pressing a row creates nothing. It writes the roadmap into what this device
-/// is holding, and the dropdown goes with the load: there is one roadmap on a
-/// page at a time, and the way to another is to clear the one in the box.
+/// One menu rather than a dropdown apiece. Each of these lists something the
+/// human cannot see from here, so a control that came and went with its list
+/// would be a row of chrome that changed shape between one visit and the next —
+/// and two of them would be two. So the menu is drawn whenever there is a box to
+/// put something in, and a level with nothing under it is greyed: *nothing to
+/// continue* is an answer, where a missing dropdown is not.
 ///
-/// Each row is worded the way the sidebar's menu worded it, this being where
-/// those rows moved to: the roadmap, the Repo it is in — the list is flat, and
-/// two repositories may each hold an `mvp` — the stage that would be started,
-/// and where the roadmap was found when that is somewhere other than the
-/// default branch.
-function AdoptRoadmap(props: {
+/// Pressing a row creates nothing. It writes what the row names into what this
+/// device is holding, and the menu goes with the load: there is one thing in the
+/// box at a time, and the way to another is to clear the one that is in it.
+function OtherActions(props: {
   roadmaps: Adopting[];
   load: (roadmap: Adopting) => void;
 }): JSX.Element {
@@ -877,14 +883,21 @@ function AdoptRoadmap(props: {
   // card back and hands the focus to the trigger it came from.
   let shut = (): void => {};
 
+  /// What a row of any level does: the menu taken back, and what it named
+  /// loaded into the box behind it.
+  const pick = (held: Adopting) => {
+    shut();
+    props.load(held);
+  };
+
   return (
     <Menu
-      class={styles.adopt!}
-      name="Adopt a roadmap"
+      class={styles.actions!}
+      name="Other actions"
       closer={(close) => (shut = close)}
       trigger={
         <>
-          Adopt a roadmap
+          Other actions
           {/* Which way the menu will go, and no part of what the button
               says. */}
           <Icon of={faChevronDown} />
@@ -892,36 +905,54 @@ function AdoptRoadmap(props: {
       }
     >
       {() => (
-        <For each={props.roadmaps}>
-          {(held) => (
-            <button
-              type="button"
-              role="menuitem"
-              class={styles.roadmapRow}
-              onClick={() => {
-                shut();
-                props.load(held);
-              }}
-            >
-              <span class={styles.what}>
-                <code>{held.roadmap}</code>
-                <span class={styles.in}>in {held.repo}</span>
-              </span>
-              <span class={styles.next}>
-                next is stage {held.stage}: {held.stage_title}
-              </span>
-              <Show when={held.base}>
-                {(base) => (
-                  <span class={styles.found}>
-                    on <code>{base()}</code>
-                  </span>
-                )}
-              </Show>
-            </button>
-          )}
-        </For>
+        <Nested
+          label="Continue a roadmap"
+          disabled={props.roadmaps.length === 0}
+        >
+          {() => <RoadmapRows roadmaps={props.roadmaps} load={pick} />}
+        </Nested>
       )}
     </Menu>
+  );
+}
+
+/// The roadmaps nothing is driving, as the rows of the level that lists them.
+///
+/// Each row is worded the way the sidebar's menu worded it, this being where
+/// those rows moved to: the roadmap, the Repo it is in — the list is flat, and
+/// two repositories may each hold an `mvp` — the stage that would be started,
+/// and where the roadmap was found when that is somewhere other than the
+/// default branch.
+function RoadmapRows(props: {
+  roadmaps: Adopting[];
+  load: (roadmap: Adopting) => void;
+}): JSX.Element {
+  return (
+    <For each={props.roadmaps}>
+      {(held) => (
+        <button
+          type="button"
+          role="menuitem"
+          class={styles.roadmapRow}
+          onClick={() => props.load(held)}
+        >
+          <span class={styles.what}>
+            <code>{held.roadmap}</code>
+            <span class={styles.in}>in {held.repo}</span>
+          </span>
+          <span class={styles.next}>
+            next is stage {held.stage}: {held.stage_title}
+          </span>
+          <Show when={held.base}>
+            {(base) => (
+              <span class={styles.found}>
+                on <code>{base()}</code>
+              </span>
+            )}
+          </Show>
+        </button>
+      )}
+    </For>
   );
 }
 

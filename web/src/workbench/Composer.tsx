@@ -312,7 +312,7 @@ function Written(props: {
                   when={props.conversation.adopting}
                   fallback={<>Nothing was written.</>}
                 >
-                  Nothing written yet — adopting the stage is what puts its
+                  Nothing written yet — starting the stage is what puts its
                   brief here.
                 </Show>
               </Empty>

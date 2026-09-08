@@ -211,17 +211,17 @@
   font-weight: 600;
 }
 
-/* The dropdown that loads one, at the near edge of the row the presses are at
-   the far edge of — pushed there by the presses' own `flex-end`, so a row with
-   no roadmaps to offer is the pair of presses exactly as it was.
+/* The menu that puts something in the box other than what is typed there, at
+   the near edge of the row the presses are at the far edge of — pushed there by
+   the presses' own `flex-end`.
 
    An action with a chevron rather than a label over a value: the row inside the
    box says what the work is, and this says what to put in the box. */
-.adopt {
+.actions {
   margin-right: auto;
 }
 
-.adopt > button {
+.actions > button {
   display: flex;
   align-items: center;
   gap: 0.4rem;
@@ -235,9 +235,9 @@
 
 /* Hung from the trigger's near edge rather than its far one, the trigger being
    the first thing in the row — and never wider than the window it comes down
-   over. Capped and scrolling inside the cap: a workbench watching a handful of
-   repositories has more roadmaps than a phone has room for. */
-.adopt > [role="menu"] {
+   over. Capped and scrolling inside the cap: a level of it listing a workbench's
+   worth of roadmaps has more rows than a phone has room for. */
+.actions > [role="menu"] {
   right: auto;
   left: 0;
   width: min(22rem, calc(100vw - 2.5rem));
@@ -273,7 +273,7 @@
    Conversation can be created without being started, and that is the quieter of
    the two. A row, so the presses sit against the far edge the start alone sat
    against and whatever stands at the near edge — the paperclip here, the
-   roadmap dropdown there — is pushed to it by a margin of its own. Inside
+   actions menu there — is pushed to it by a margin of its own. Inside
    `.startGrilling`, which is where what they have to say still goes. */
 .presses {
   display: flex;
@@ -284,7 +284,7 @@
 }
 
 /* What stands at the near edge of that row on the compose page, which is two
-   things rather than one: the paperclip and the roadmap dropdown. Grouped, so
+   things rather than one: the paperclip and the actions menu. Grouped, so
    that one margin pushes the pair of them away from the presses — two controls
    each claiming the free space for itself would put one of them in the middle
    of the row.
@@ -300,7 +300,7 @@
 }
 
 .near .attach,
-.near .adopt {
+.near .actions {
   margin-right: 0;
 }
 
@@ -332,7 +332,7 @@
 
   /* The two quiet controls under the box deepen their accent the way the
      filled one deepens its fill. */
-  .adopt > button:not(:disabled):hover {
+  .actions > button:not(:disabled):hover {
     color: var(--accent-deep);
   }
 

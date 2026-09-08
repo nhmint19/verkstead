@@ -2177,7 +2177,7 @@ describe("the adoption page", () => {
     expect(panel.textContent).toContain(ADOPTION.stage!.branch);
   });
 
-  it("offers both profiles, the base commit and one adopt press", async () => {
+  it("offers both profiles, the base commit and one continue press", async () => {
     theAdoption();
     const { container } = mount(`/conversations/${ADOPTING.id}`);
 
@@ -2191,7 +2191,7 @@ describe("the adoption page", () => {
     // repository is settled.
     await openRepo(container);
     expect(screen.getByLabelText("Base branch")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Adopt" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeTruthy();
   });
 
   /// There is nothing to type and nothing to grill: the brief is the stage

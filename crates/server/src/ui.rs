@@ -3158,7 +3158,7 @@ async fn adopt(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "adopting a roadmap stage failed");
-            unavailable("the stage could not be adopted")
+            unavailable("the stage could not be started")
         }
     }
 }

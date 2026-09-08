@@ -389,7 +389,7 @@ export async function create(
       const outcome = await adoptRoadmap(id);
       said(
         outcome === "Adopted",
-        `The stage could not be adopted: ${adoptRefusal(outcome)}`,
+        `The stage could not be started: ${adoptRefusal(outcome)}`,
       );
     }
   }

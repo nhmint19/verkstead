@@ -33,7 +33,7 @@ already says it does.
 
 ## Tasks
 
-- [ ] 01: Other actions, and a roadmap is continued — [details](01-other-actions.md)
+- [x] 01: Other actions, and a roadmap is continued — [details](01-other-actions.md)
 - [ ] 02: The open pull requests — [details](02-open-pull-requests.md)
 - [ ] 03: Loading a pull request into the composer — [details](03-loading-a-pull-request.md)
 - [ ] 04: Taking it up — [details](04-taking-it-up.md)

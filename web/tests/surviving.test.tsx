@@ -253,20 +253,33 @@ describe("what a Nudge leaves standing", () => {
     );
   });
 
-  /// The roadmaps there are to adopt are a menu rather than a `<select>`, and
+  /// The roadmaps there are to continue are a menu rather than a `<select>`, and
   /// the merge is what keeps its rows alive: a Nudge landing while the menu is
   /// open would otherwise rebuild the row the human had tabbed to and take their
-  /// focus with it.
-  it("keeps the open adopt menu's roadmap rows", async () => {
+  /// focus with it. Asked a level down, which is where the rows are: the first
+  /// level is one row per action and holds nothing a read could move.
+  it("keeps the open actions menu's roadmap rows", async () => {
     theWorkbench(whenever("/api/ui/abandoned-roadmaps", json(ABANDONED)));
     const { container, client } = mount("/compose");
-    fireEvent.click(await drawn(container, `.${composer.adopt} > .${menu.trigger}`));
-    await drawn(container, `.${menu.drop} > [role="menuitem"]`);
-    const offered = nodes(container, `.${menu.drop} > [role="menuitem"]`);
+    fireEvent.click(await drawn(container, `.${composer.actions} > .${menu.trigger}`));
+    // The level is greyed until the roadmaps land, the menu being drawn before
+    // they are read — so it is waited for rather than pressed straight away.
+    fireEvent.click(
+      await waitFor(() => {
+        const level = container.querySelector<HTMLButtonElement>(
+          `.${menu.nested}`,
+        );
+        if (!level || level.disabled) throw new Error("still greyed");
+        return level;
+      }),
+    );
+
+    await drawn(container, `.${composer.roadmapRow}`);
+    const offered = nodes(container, `.${composer.roadmapRow}`);
 
     await nudged(client);
 
-    survived(offered, nodes(container, `.${menu.drop} > [role="menuitem"]`));
+    survived(offered, nodes(container, `.${composer.roadmapRow}`));
   });
 
   /// The pairing pickers are the app's own listbox, whose rows are on the page

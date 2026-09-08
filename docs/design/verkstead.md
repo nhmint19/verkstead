@@ -644,9 +644,10 @@ human: only the roadmap's name is kept, so work moved off would be adopting a
 name rather than a roadmap.
 It is the pane for a Conversation while it drafts, whatever the Brief's own
 freeze — an adopting draft gets it with the box locked to the stage's rendering
-and the Adopt press where the start would be. Past drafting a frozen Brief opens
-the read-only pane instead, and the repo name, the worktree path and the
-conversation state are drawn nowhere on the record: it tells that story itself.
+and the *Continue* press where the start would be. Past drafting a frozen
+Brief opens the read-only pane instead, and the repo name, the worktree path
+and the conversation state are drawn nowhere on the record: it tells that
+story itself.
 
 **The same composer stands with nothing behind it, as the compose page**
 (*settled 2026-09-02, building brief-details-view*), reached from a New

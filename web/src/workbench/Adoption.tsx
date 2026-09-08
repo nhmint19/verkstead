@@ -4,7 +4,12 @@
 //! An adopting conversation has nothing to write. Its brief is the stage brief
 //! and it arrives when the stage is adopted, so what stands where the brief and
 //! `Start grilling` would be is the roadmap named, the stage that would be
-//! started, and one `Adopt` press.
+//! started, and one `Continue` press.
+//!
+//! *Adopt* is the word everywhere but here. It is the name of the feature, of
+//! the endpoint and of the record, and it is about to cover pull requests as
+//! well as roadmaps; what the human reads is the friendlier word for what the
+//! press does, which is carry on a roadmap somebody already started.
 //!
 //! What the roadmap and the stage are is the server's reading of the repository
 //! at this conversation's base commit, redone every time the page is drawn.
@@ -39,9 +44,9 @@ export const ADOPT_REFUSAL: Record<
 > = {
   Adopted: "",
   NoSuchConversation: "This conversation is gone.",
-  NotDrafting: "This conversation has already been adopted.",
+  NotDrafting: "This conversation has already been started.",
   NotAdopting:
-    "This conversation is adopting nothing, so it has no roadmap to take a stage from.",
+    "This conversation has no roadmap, so there is no stage for it to take.",
   NoGrillingProfile: "Choose a grilling profile and model first, on the brief.",
   NoImplementationProfile:
     "Choose an implementation profile and model first, on the brief.",
@@ -49,7 +54,7 @@ export const ADOPT_REFUSAL: Record<
   ProfileBroken:
     "A chosen profile's claude pair is not where it was left, so there is no account to run under.",
   FetchFailed:
-    "Git could not fetch from the repo's remote, so nothing was adopted. The server log says why.",
+    "Git could not fetch from the repo's remote, so nothing was started. The server log says why.",
   NoBaseCommit: "The repo has nothing to branch from any more.",
   NoRoadmap: "There is no roadmap by that name at the base commit.",
   RoadmapComplete:
@@ -102,8 +107,8 @@ export function Adoption(props: {
   }));
 
   return (
-    <section class={styles.adoption} aria-label="Adoption">
-      <h2>Adopt a roadmap</h2>
+    <section class={styles.adoption} aria-label="Continuing a roadmap">
+      <h2>Continue a roadmap</h2>
 
       <p class={styles.roadmap}>
         <code>{props.adopting.roadmap}</code>
@@ -120,7 +125,7 @@ export function Adoption(props: {
           // the roadmap finished, the roadmap not there, somebody already on
           // the next stage — is what the press says by name.
           <Empty>
-            Nothing to adopt at this base commit: no stage of{" "}
+            Nothing to continue at this base commit: no stage of{" "}
             <code>{props.adopting.roadmap}</code> can be started from it.
           </Empty>
         }
@@ -146,7 +151,7 @@ export function Adoption(props: {
           disabled={adopt.isPending}
           onClick={() => adopt.mutate()}
         >
-          {adopt.isPending ? "Adopting…" : "Adopt"}
+          {adopt.isPending ? "Continuing…" : "Continue"}
         </button>
         <Note>
           This creates the branch and its worktree, takes the stage brief as
@@ -168,7 +173,7 @@ export function Adoption(props: {
         </Show>
         <Show when={adopt.isError}>
           <ErrorLine class={styles.failure}>
-            The stage could not be adopted: {adopt.error?.message}
+            The stage could not be started: {adopt.error?.message}
           </ErrorLine>
         </Show>
       </Show>

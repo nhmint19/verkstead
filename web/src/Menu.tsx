@@ -37,7 +37,9 @@
 //! one backdrop, one Escape and one focus given back however deep it is — which
 //! is what makes it a level of this menu rather than a second menu, and what
 //! the flat alternative would have cost on a page with a dozen repositories to
-//! list.
+//! list. A level with nothing under it is greyed rather than left out, so a
+//! menu of levels reads as what it offers rather than as whatever happens to
+//! have something in it today.
 
 import {
   Show,
@@ -315,6 +317,18 @@ export function Nested(props: {
   /// says. One word for both, because they are the same place named twice.
   label: string;
 
+  /// Whether the level has nothing under it, which greys the row rather than
+  /// taking it away: a menu that says what it offers is worth more than one
+  /// that says nothing at all until there is something to say, and a row that
+  /// came and went with a list would be a menu whose shape moved under the hand
+  /// reaching for it.
+  ///
+  /// Truly `disabled`, as every other row of a menu that cannot be pressed is:
+  /// there is nothing here for a `title` to explain that the greying has not
+  /// already said, which is the one thing that ever asks for `aria-disabled`
+  /// instead.
+  disabled?: boolean;
+
   /// What the level holds.
   children: () => JSX.Element;
 }): JSX.Element {
@@ -326,6 +340,7 @@ export function Nested(props: {
       role="menuitem"
       class={styles.nested}
       aria-haspopup="menu"
+      disabled={props.disabled ?? false}
       ref={(row) => {
         if (levels?.returning(props.label)) focusing(row);
       }}

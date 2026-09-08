@@ -116,7 +116,7 @@ export const REPO_SWITCH_REFUSAL: Record<RepoSwitched, string> = {
   NotDrafting:
     "The branch exists by now, so which repo the work is in is settled.",
   Adopting:
-    "The stage being adopted is in this repo, so the work cannot be moved off it.",
+    "The stage being continued is in this repo, so the work cannot be moved off it.",
   NoSuchRepo: "That repo is not registered any more.",
 };
 
@@ -219,10 +219,10 @@ export function SetupNotes(props: {
           asked for all the same is worth a line. */}
       <Show when={props.conversation.adopting}>
         <Note class={styles.aside}>
-          All three pairings are fixed before adopting: the implementation one
-          is what the work runs under, the review one is what looks at it, and
-          the grilling one is carried, because the stages after this one inherit
-          all of them from it.
+          All three pairings are fixed before the stage starts: the
+          implementation one is what the work runs under, the review one is what
+          looks at it, and the grilling one is carried, because the stages after
+          this one inherit all of them from it.
         </Note>
       </Show>
 

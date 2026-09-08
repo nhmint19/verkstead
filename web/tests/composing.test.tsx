@@ -1225,10 +1225,11 @@ describe("making a repo from the Repo dropdown", () => {
 /// the composer and started from it.
 ///
 /// This is where the sidebar's New-conversation menu ended up. What was a group
-/// of rows under the repos is a dropdown under the box, and what a press does is
-/// the difference worth asking about: the menu created a conversation on the
-/// spot, and this creates nothing until one of the two presses under the box.
-describe("adopting a roadmap from the compose page", () => {
+/// of rows under the repos is a level of the *Other actions* menu under the box,
+/// and what a press does is the difference worth asking about: the menu created
+/// a conversation on the spot, and this creates nothing until one of the two
+/// presses under the box.
+describe("continuing a roadmap from the compose page", () => {
   beforeEach(() => {
     localStorage.clear();
     leaveRefusals(0, []);
@@ -1254,12 +1255,34 @@ describe("adopting a roadmap from the compose page", () => {
     );
   }
 
-  /// The dropdown under the box, dropped — and the rows it holds.
+  /// The menu under the box, dropped.
+  async function otherActions(container: ParentNode): Promise<HTMLElement> {
+    fireEvent.click(
+      await drawn(container, `.${composer.actions} > .${menu.trigger}`),
+    );
+    return screen.getByRole("menuitem", { name: CONTINUE });
+  }
+
+  /// And the level that holds the roadmaps, opened — and the rows it holds.
+  ///
+  /// Waited on rather than pressed straight away: the menu is drawn before the
+  /// roadmaps have been read, and the level ungreys as they land. Which is what
+  /// greying it is for — the control is there from the first paint, and what it
+  /// offers settles under the hand rather than the control arriving.
   async function roadmapRows(
     container: ParentNode,
   ): Promise<HTMLButtonElement[]> {
+    await otherActions(container);
     fireEvent.click(
-      await drawn(container, `.${composer.adopt} > .${menu.trigger}`),
+      await waitFor(() => {
+        const level = container.querySelector<HTMLButtonElement>(
+          `.${menu.nested}`,
+        );
+        if (!level || level.disabled) {
+          throw new Error(`${CONTINUE} is still greyed`);
+        }
+        return level;
+      }),
     );
     await drawn(container, `.${composer.roadmapRow}`);
     return [
@@ -1275,7 +1298,10 @@ describe("adopting a roadmap from the compose page", () => {
     await drawn(container, `.${composer.loaded}`);
   }
 
-  /// Every roadmap there is to adopt, flat, in the order the rows come down.
+  /// What the level reads as, and what the way back out of it says.
+  const CONTINUE = "Continue a roadmap";
+
+  /// Every roadmap there is to continue, flat, in the order the rows come down.
   const flat = ABANDONED.flatMap((held) =>
     held.roadmaps.map((roadmap) => ({ repo: held.repo, roadmap })),
   );
@@ -1302,33 +1328,43 @@ describe("adopting a roadmap from the compose page", () => {
     expect(rows[0]!.textContent).not.toContain("on ");
   });
 
-  /// Nothing to adopt is nothing to offer, and a brief already being written is
-  /// nothing to replace: the dropdown loads what would stand in the box, and
-  /// one offering to replace a half-written brief would be offering to lose it.
-  it("is drawn only with roadmaps to adopt and an empty box", async () => {
+  /// Nothing to continue is a level greyed rather than a menu gone: what there
+  /// is to do here is not a list the human can see, so a control that came and
+  /// went with one would change shape between one visit and the next.
+  it("draws the menu with nothing to continue, and greys the level", async () => {
     theWorkbench();
     const { container } = mount("/compose");
 
     // The bench serves no roadmaps at all, which is what a workbench whose
     // repositories are all being driven looks like.
     await composing(container);
-    expect(container.querySelector(`.${composer.adopt}`)).toBeNull();
+    const level = await otherActions(container);
+
+    expect((level as HTMLButtonElement).disabled).toBe(true);
+
+    // And it opens nothing: the card is still on its first level.
+    fireEvent.click(level);
+    expect(container.querySelector(`.${composer.roadmapRow}`)).toBeNull();
+    expect(screen.getByRole("menuitem", { name: CONTINUE })).toBeTruthy();
   });
 
+  /// A brief already being written is nothing to replace: a row loads what would
+  /// stand in the box, and a menu offering to replace a half-written brief would
+  /// be offering to lose it.
   it("goes when a brief is being written, and comes back when it is cleared", async () => {
     adopting();
     const { container } = mount("/compose");
     const box = await composing(container);
 
-    await drawn(container, `.${composer.adopt}`);
+    await drawn(container, `.${composer.actions}`);
 
     fireEvent.input(box, { target: { value: "Make the widget" } });
     await waitFor(() =>
-      expect(container.querySelector(`.${composer.adopt}`)).toBeNull(),
+      expect(container.querySelector(`.${composer.actions}`)).toBeNull(),
     );
 
     fireEvent.input(box, { target: { value: "" } });
-    await drawn(container, `.${composer.adopt}`);
+    await drawn(container, `.${composer.actions}`);
   });
 
   /// Loading one creates nothing: the row is written into what this device is
@@ -1344,8 +1380,10 @@ describe("adopting a roadmap from the compose page", () => {
     expect(card.textContent).toContain(ABANDONED[0]!.roadmaps[0]!.name);
     expect(card.textContent).toContain(ABANDONED[0]!.roadmaps[0]!.stage_title);
 
-    // No field left to write in, and nothing on the wire.
+    // No field left to write in, no menu over a box that is holding something,
+    // and nothing on the wire.
     expect(container.querySelector(`.${composer.box} textarea`)).toBeNull();
+    expect(container.querySelector(`.${composer.actions}`)).toBeNull();
     expect(writes(fetching, "/api/ui/adoptions")).toBe(0);
   });
 
@@ -1609,7 +1647,7 @@ describe("adopting a roadmap from the compose page", () => {
     await waitFor(() =>
       expect(
         screen.getByText(
-          `The stage could not be adopted: ${ADOPT_REFUSAL.NoGrillingProfile}`,
+          `The stage could not be started: ${ADOPT_REFUSAL.NoGrillingProfile}`,
         ),
       ).toBeTruthy(),
     );
