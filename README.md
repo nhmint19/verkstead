@@ -75,10 +75,10 @@ nix on this box, so the system toolchain does it.
 
 ### Once
 
-```console
-$ sudo apt install bubblewrap                                   # required — sessions
-$ sudo apt install libgtk-3-dev libayatana-appindicator3-dev    # only for `desktop`
-$ cargo install sccache                                         # optional — compile cache
+```bash
+sudo apt install bubblewrap                                   # required — sessions
+sudo apt install libgtk-3-dev libayatana-appindicator3-dev    # only for `desktop`
+cargo install sccache                                         # optional — compile cache
 ```
 
 Then add `/mnt/wsl` to `sandbox_binds` in the Data Directory's `config.yaml`,
@@ -93,10 +93,10 @@ sandbox_binds:
 
 ### Build and run
 
-```console
-$ (cd web && pnpm install && pnpm build)
-$ cargo build -p verkstead-cli --no-default-features
-$ ./target/debug/verkstead serve --data-dir ../verkstead-data
+```bash
+(cd web && pnpm install && pnpm build)
+cargo build -p verkstead-cli --no-default-features
+./target/debug/verkstead serve --data-dir ../verkstead-data
 ```
 
 Build the viewer **before** the first `cargo build` — the viewer is embedded
@@ -108,8 +108,8 @@ checkout because `secrets.yaml` is not in `.gitignore`.
 
 ### The link
 
-```console
-$ echo "http://127.0.0.1:8422/?key=$(cat ../verkstead-data/workbench.key)"
+```bash
+echo "http://127.0.0.1:8422/?key=$(cat ../verkstead-data/workbench.key)"
 ```
 
 The startup log prints the same thing as `workbench=`. Every page is 401 without
@@ -118,8 +118,8 @@ the key; paste the link once and the browser keeps the cookie. Delete
 
 ### Stopping it
 
-```console
-$ pkill -f 'verkstead[ ]serve'
+```bash
+pkill -f 'verkstead[ ]serve'
 ```
 
 Sessions are started `--die-with-parent`, so they go with the server; there is
