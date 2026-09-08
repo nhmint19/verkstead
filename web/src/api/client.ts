@@ -35,6 +35,7 @@ import type {
   DirectoryListing,
   GrillingStarted,
   OnboardingView,
+  OpenPullRequestRepo,
   PrefillView,
   ProfileChoice,
   ProfileChosen,
@@ -278,6 +279,22 @@ export function setRepoResolution(
 /// on the list.
 export function listAbandonedRoadmaps(): Promise<AbandonedRepo[]> {
   return get<AbandonedRepo[]>("/api/ui/abandoned-roadmaps");
+}
+
+/// And the pull requests open in those Repos, each saying which Conversation
+/// already holds it.
+///
+/// One request for every registered Repo, because the server asks them in
+/// parallel and the browser waiting on six of them in turn would be six round
+/// trips to say what one can.
+///
+/// Slower than everything else this page reads — a `gh` per Repo, each of them
+/// a call to GitHub — so whatever draws it has something to show while it is on
+/// its way. A Repo that could not be asked is simply not in the answer: this
+/// never refuses, and an empty list means *nothing to wrap up here* rather than
+/// *something went wrong*.
+export function listOpenPullRequests(): Promise<OpenPullRequestRepo[]> {
+  return get<OpenPullRequestRepo[]>("/api/ui/open-pull-requests");
 }
 
 /// Start a Conversation to adopt one of those roadmaps with.

@@ -21,6 +21,7 @@ import type {
   Adopted,
   Created,
   DirectoryListing,
+  OpenPullRequestRepo,
   ProfileEntry,
   RepoEntry,
   RepoPairingsView,
@@ -62,6 +63,7 @@ import { browse, held, listingAt } from "./fields";
 import { actionRows, offered, opened, pick, press, rows, showing } from "./pickers";
 import { askedFor, hangs, json, serving, whenever } from "./serving";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
+import pulls from "./fixtures/open-pull-requests.json" with { type: "json" };
 import listing from "./fixtures/directories.json" with { type: "json" };
 import made from "./fixtures/repo.json" with { type: "json" };
 import told from "./fixtures/settings.json" with { type: "json" };
@@ -69,6 +71,12 @@ import told from "./fixtures/settings.json" with { type: "json" };
 /// The roadmaps nothing is driving, as the server answers for them: three of
 /// them in one repo, the last found on a branch that has not merged.
 const ABANDONED = abandoned as AbandonedRepo[];
+
+/// And the pull requests open across them, as the server answers for them: two
+/// repositories, one of the four listed already taken up by a Conversation, and
+/// the fork among them already left out — see
+/// `crates/server/tests/pull_requests.rs`, which writes this.
+const OPEN_PULLS = pulls as OpenPullRequestRepo[];
 
 /// What the page put on the wire when it wrote to `path`, and how often it did.
 ///
@@ -1650,6 +1658,150 @@ describe("continuing a roadmap from the compose page", () => {
           `The stage could not be started: ${ADOPT_REFUSAL.NoGrillingProfile}`,
         ),
       ).toBeTruthy(),
+    );
+  });
+});
+
+/// The other level of that menu: the pull requests open across the registered
+/// Repos, which is work already somewhere else waiting to be wrapped up.
+///
+/// What is asked here is the level rather than the reading — which pull requests
+/// GitHub is asked about, which of them come back and which are left out is the
+/// server's, and `crates/server/tests/pull_requests.rs` is where that is pinned.
+/// This is fed the payload that suite writes.
+describe("wrapping up a pull request from the compose page", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    leaveRefusals(0, []);
+  });
+
+  /// The workbench with pull requests open in it, `answered` being what
+  /// `/api/ui/open-pull-requests` says.
+  function withOpen(answered = json(OPEN_PULLS)) {
+    return theWorkbench(whenever("/api/ui/open-pull-requests", answered));
+  }
+
+  /// What the level reads as, and what the way back out of it says.
+  const WRAP = "Wrap up a pull request";
+
+  /// The menu under the box, dropped — and the level that lists the pull
+  /// requests, which is the second of the two rows in it.
+  async function wrapLevel(container: ParentNode): Promise<HTMLButtonElement> {
+    fireEvent.click(
+      await drawn(container, `.${composer.actions} > .${menu.trigger}`),
+    );
+    return screen.getByRole("menuitem", { name: WRAP }) as HTMLButtonElement;
+  }
+
+  /// And that level opened, and the rows it holds.
+  async function pullRows(container: ParentNode): Promise<HTMLButtonElement[]> {
+    fireEvent.click(await wrapLevel(container));
+    await drawn(container, `.${composer.pullRow}`);
+    return [
+      ...container.querySelectorAll<HTMLButtonElement>(`.${composer.pullRow}`),
+    ];
+  }
+
+  /// Every open pull request there is, flat, in the order the rows come down.
+  const flat = OPEN_PULLS.flatMap((held) =>
+    held.pull_requests.map((pull) => ({ repo: held.repo, pull })),
+  );
+
+  it("names each pull request, its repo and number, its branches and its author", async () => {
+    withOpen();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const rows = await pullRows(container);
+    expect(rows.length).toBe(flat.length);
+
+    for (const [n, { repo, pull }] of flat.entries()) {
+      const said = rows[n]!.textContent!;
+      expect(said).toContain(repo);
+      expect(said).toContain(`#${pull.number}`);
+      expect(said).toContain(pull.title);
+      expect(said).toContain(pull.head);
+      expect(said).toContain(pull.base);
+      expect(said).toContain(pull.author);
+    }
+  });
+
+  /// One a Conversation already holds is listed all the same, says so, and goes
+  /// there: there is one Conversation per piece of work, and a second one over
+  /// the same branch would be two wrap-ups pushing to it.
+  it("says which pull requests are taken, and leads to the conversation holding one", async () => {
+    withOpen();
+    const { container, history } = mount("/compose");
+
+    await composing(container);
+    const rows = await pullRows(container);
+
+    const taken = flat.findIndex(({ pull }) => pull.conversation_id !== null);
+    expect(taken, "the fixture holds one that is taken").toBeGreaterThan(-1);
+
+    expect(rows[taken]!.textContent).toContain("already in a conversation");
+
+    fireEvent.click(rows[taken]!);
+
+    const held = flat[taken]!.pull.conversation_id!;
+    await waitFor(() =>
+      expect(history.get().startsWith(`/conversations/${held}`)).toBe(true),
+    );
+  });
+
+  /// The level is a `gh` per registered Repo, each a call out to GitHub, so it
+  /// is often still going when the menu is opened. Greying it then would be
+  /// saying *nothing to wrap up* about a list nobody has read yet.
+  it("opens to a line saying it is reading, rather than greying", async () => {
+    withOpen(hangs());
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const level = await wrapLevel(container);
+    expect(level.disabled).toBe(false);
+
+    fireEvent.click(level);
+    await drawn(container, `.${composer.reading}`);
+    expect(container.querySelector(`.${composer.pullRow}`)).toBeNull();
+  });
+
+  /// And once the reading is back with nothing in it, the level greys — which
+  /// is what the roadmap level beside it does with nothing to continue.
+  it("greys the level once the reading is back empty", async () => {
+    withOpen(json([]));
+    const { container } = mount("/compose");
+
+    await composing(container);
+
+    const level = await waitFor(async () => {
+      const row = await wrapLevel(container);
+      if (!row.disabled) throw new Error(`${WRAP} is not greyed yet`);
+      return row;
+    });
+
+    // And it opens nothing: the card is still on its first level.
+    fireEvent.click(level);
+    expect(container.querySelector(`.${composer.pullRow}`)).toBeNull();
+    expect(container.querySelector(`.${composer.reading}`)).toBeNull();
+  });
+
+  /// Read when the page opens and again on each reopen, and held nowhere:
+  /// GitHub owns this list, and a copy in the browser would be one this page had
+  /// to work out when to stop believing.
+  it("reads the list again every time the page is opened", async () => {
+    const fetching = withOpen();
+
+    const first = mount("/compose");
+    await composing(first.container);
+    await waitFor(() =>
+      expect(askedFor(fetching, "/api/ui/open-pull-requests")).toBe(1),
+    );
+    first.unmount();
+
+    const again = mount("/compose");
+    await composing(again.container);
+    await waitFor(() =>
+      expect(askedFor(fetching, "/api/ui/open-pull-requests")).toBe(2),
     );
   });
 });

@@ -113,6 +113,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // rather than under a Repo, because that is where it is read: what it
         // offers is another way to start work.
         .route("/api/ui/abandoned-roadmaps", get(abandoned_roadmaps))
+        // And the pull requests open in them, which is the other thing offered
+        // under that box: work that is already somewhere else, waiting to be
+        // wrapped up. Read off GitHub rather than out of the store, so it sits
+        // beside the roadmaps rather than under a Repo for the same reason.
+        .route("/api/ui/open-pull-requests", get(open_pull_requests))
         // And starting one to adopt a roadmap with, which is what clicking a
         // roadmap in that notice does. Its own endpoint rather than a field on
         // the one above: adopting is the other way into the pipeline, and what
@@ -899,6 +904,45 @@ async fn abandoned_roadmaps(State(state): State<AppState>) -> HttpResponse {
     };
 
     Json(crate::stages::abandoned(repos).await).into_response()
+}
+
+/// `GET /api/ui/open-pull-requests` — every open pull request in the registered
+/// Repos, grouped by Repo, each saying which Conversation already holds it.
+///
+/// The other way work gets into the pipeline: a pull request Verkstead did not
+/// open is a branch with a review on it and nothing driving the wrap-up, and
+/// this is what the *Wrap up a pull request* level under the compose box lists.
+///
+/// Read off GitHub through the host's `gh` every time it is asked for, like the
+/// roadmaps above and for a stronger version of their reason: GitHub owns this
+/// list, and a copy Verkstead kept would be wrong the moment somebody pressed
+/// *Merge*.
+///
+/// **Nothing here is an error.** A Repo with no GitHub remote, a machine with no
+/// `gh`, a login that has expired and a GitHub that timed out are all
+/// repositories this list has no news about — see [`crate::pull_requests::open`],
+/// where each of them contributes no rows and no failure. The one thing that can
+/// go wrong is the registry itself, which is Verkstead's own database.
+async fn open_pull_requests(State(state): State<AppState>) -> HttpResponse {
+    let repos = match store::registered_repos(&state.pool).await {
+        Ok(repos) => repos,
+        Err(error) => {
+            tracing::error!(error = ?error, "reading the registered Repos failed");
+            return unavailable("the registered Repos could not be read");
+        }
+    };
+
+    // Which pull requests are already in the pipeline, read once for the whole
+    // list — see [`store::held_pull_requests`].
+    let held = match store::held_pull_requests(&state.pool).await {
+        Ok(held) => held,
+        Err(error) => {
+            tracing::error!(error = ?error, "reading which pull requests are already held failed");
+            return unavailable("the open pull requests could not be read");
+        }
+    };
+
+    Json(crate::pull_requests::open(&state.github, repos, &held).await).into_response()
 }
 
 /// `GET /api/ui/conversations` — the sidebar, newest first.

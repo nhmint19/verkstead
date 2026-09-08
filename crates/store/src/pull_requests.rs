@@ -728,6 +728,42 @@ pub(crate) async fn on_timeline(
         .collect())
 }
 
+/// Which Conversation holds each pull request Verkstead has a record of, keyed
+/// by the Repo it was opened in and the number GitHub gave it.
+///
+/// What the *Wrap up a pull request* level is filtered against: GitHub answers
+/// with every open pull request in a repository, and the ones already in the
+/// pipeline are the ones a row leads to rather than loads.
+///
+/// **Every Conversation**, whatever state it is in — Done and Closed included.
+/// A pull request stays on the record it was written to, so a second
+/// Conversation over the same branch would be two wrap-ups pushing to it
+/// whether or not the first one has finished with it. Which is also why an
+/// Archived one counts: archiving is a Closed Conversation off the sidebar
+/// rather than a state of its own.
+///
+/// One read for the whole list rather than one per pull request. There are as
+/// many rows here as Verkstead has ever recorded, which is a handful per
+/// Conversation, and the alternative is a query per row of a list GitHub just
+/// answered with.
+///
+/// A pull request recorded twice against one Repo and number cannot happen —
+/// the table's unique index is the Conversation and the Repo, and a number is
+/// GitHub's own — but where a database somehow held two, the last read wins and
+/// the row leads to one of the two Conversations rather than to neither.
+pub async fn held_pull_requests(pool: &SqlitePool) -> Result<HashMap<(i64, i64), i64>> {
+    let rows: Vec<(i64, i64, i64)> =
+        sqlx::query_as("SELECT repo_id, number, conversation_id FROM pull_requests")
+            .fetch_all(pool)
+            .await
+            .context("reading which pull requests Conversations already hold")?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(repo_id, number, conversation_id)| ((repo_id, number), conversation_id))
+        .collect())
+}
+
 /// Write down how the pull request's checks are, and say whether that is news.
 ///
 /// Called on every poll of the checks watcher, which is every half minute for as

@@ -698,6 +698,114 @@ pub(crate) fn pull_request(
     })
 }
 
+/// One open pull request in a repository, as `gh pr list` gives it.
+///
+/// Everything a row of the *Wrap up a pull request* level draws, plus the one
+/// fact that decides whether there is a row at all: whether the head branch
+/// lives in a fork. See [`open_pull_requests`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Listed {
+    pub(crate) number: i64,
+    pub(crate) title: String,
+    pub(crate) url: String,
+
+    /// The branch the work is on, unqualified — `tobi/steer` rather than
+    /// `origin/tobi/steer`.
+    pub(crate) head: String,
+
+    /// And the branch it goes into.
+    pub(crate) base: String,
+
+    /// Whoever opened it, by their GitHub login. Empty where GitHub named
+    /// nobody, which is what a deleted account leaves behind.
+    pub(crate) author: String,
+
+    /// Whether the head branch is in another repository — a fork. Such a pull
+    /// request cannot be pushed to over `origin`, so a wrap-up over it would
+    /// have nowhere to put a fix.
+    pub(crate) fork: bool,
+}
+
+/// Every open pull request in `repo`, as the host's `gh` lists them.
+///
+/// Any author and any age: what makes a pull request worth taking into the
+/// pipeline is that it is open, and whose it is says nothing about that. Forks
+/// come back marked rather than dropped here — what to do about one is the
+/// caller's, and a reader of this function should be able to see that GitHub was
+/// asked about all of them.
+///
+/// `--state open` and `--limit` said out loud rather than left to `gh`'s
+/// defaults, which are the same two values today and are `gh`'s to change.
+///
+/// A repository with no GitHub remote answers [`Trouble::NoRemote`] here rather
+/// than being told apart beforehand: `gh` is what decides which repositories it
+/// can speak for — an SSH alias and a GitHub Enterprise host are both remotes a
+/// URL match would get wrong — and every caller of this already has to have an
+/// answer for a `gh` that will not answer.
+pub(crate) fn open_pull_requests(gh: &Gh, repo: &Path) -> Result<Vec<Listed>, Trouble> {
+    /// What `--json number,title,url,headRefName,baseRefName,author,isCrossRepository`
+    /// comes back as, one per pull request.
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Open {
+        number: i64,
+        title: String,
+        url: String,
+        head_ref_name: String,
+        base_ref_name: String,
+        #[serde(default)]
+        author: Author,
+        #[serde(default)]
+        is_cross_repository: bool,
+    }
+
+    /// Whoever opened it. An object rather than a name, and one that may be
+    /// missing its login: GitHub answers a deleted account with an empty one.
+    #[derive(Default, Deserialize)]
+    struct Author {
+        #[serde(default)]
+        login: String,
+    }
+
+    let said = gh.ask(
+        repo,
+        &[
+            "pr",
+            "list",
+            "--state",
+            "open",
+            "--limit",
+            LISTED,
+            "--json",
+            "number,title,url,headRefName,baseRefName,author,isCrossRepository",
+        ],
+    )?;
+
+    let open: Vec<Open> = serde_json::from_str(&said)
+        .map_err(|error| Trouble::Refused(format!("gh answered something unreadable: {error}")))?;
+
+    Ok(open
+        .into_iter()
+        .map(|one| Listed {
+            number: one.number,
+            title: one.title,
+            url: one.url,
+            head: one.head_ref_name,
+            base: one.base_ref_name,
+            author: one.author.login,
+            fork: one.is_cross_repository,
+        })
+        .collect())
+}
+
+/// How many open pull requests are asked for at once.
+///
+/// A ceiling rather than a page size — there is no second request, and a
+/// repository with more open pull requests than this has a list nobody was
+/// going to scroll to the end of anyway. `gh`'s own default is thirty, which is
+/// low enough that a busy repository would quietly hide work worth wrapping up.
+const LISTED: &str = "100";
+
 /// One check GitHub is running against a pull request's head commit.
 ///
 /// The name is what a human calls it by and what Verkstead counts fix attempts

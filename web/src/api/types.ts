@@ -2024,6 +2024,91 @@ accounts: Array<AccountView>,
 steps: StepsView, };
 
 /**
+ * One open pull request, as a row of that level draws it.
+ *
+ * Any author, because whose pull request it is says nothing about whether it is
+ * worth wrapping up — what the pipeline takes up is the branch rather than the
+ * person. Forks are the one exclusion, and they are excluded for what taking
+ * one up would have to do rather than out of taste: a head branch in another
+ * repository cannot be pushed to over `origin`, so a wrap-up that fixed a red
+ * check would have nowhere to put the fix.
+ */
+export type OpenPullRequest = { 
+/**
+ * The number GitHub gave it, which is what everybody calls it by — in
+ * this repository and nowhere else.
+ */
+number: number, 
+/**
+ * Its title, which is the line a row leads with.
+ */
+title: string, 
+/**
+ * The whole URL, so a row can lead out to GitHub without a repository
+ * name being guessed at.
+ */
+url: string, 
+/**
+ * The branch the work is on, which is the branch taking it up checks out.
+ */
+head: string, 
+/**
+ * And the branch it goes into, which is what the wrap-up watches for
+ * conflicts against.
+ */
+base: string, 
+/**
+ * Who opened it, by their GitHub login. Empty where GitHub named nobody,
+ * which is what a deleted account leaves behind.
+ */
+author: string, 
+/**
+ * The Conversation already holding this pull request, where one does —
+ * any state, Done and Closed included, because a pull request stays on a
+ * Conversation's record once it is recorded there.
+ *
+ * `null` is a pull request nothing has taken up. What a held row does
+ * instead of loading is lead to the Conversation holding it: there is one
+ * Conversation per piece of work, and a second one over the same branch
+ * would be two wrap-ups pushing to it.
+ */
+conversation_id: number | null, };
+
+/**
+ * One Repo's open pull requests, as the *Wrap up a pull request* level lists
+ * them.
+ *
+ * Grouped by Repo for the reason the abandoned roadmaps are — a number is a
+ * fact about a repository, and `#41` says something different in each of them,
+ * so a flat list would be one whose rows could not be told apart without
+ * carrying the repository anyway.
+ *
+ * Nothing here is stored. Every field is read off GitHub through the host's
+ * `gh` at the moment the level is drawn, which is why a pull request somebody
+ * has since merged simply stops appearing rather than having to be taken off
+ * anything.
+ *
+ * A Repo Verkstead could not ask about — no GitHub remote, no `gh`, nobody
+ * logged in, a GitHub that would not answer — contributes no group at all
+ * rather than an empty one or a failure: what Verkstead does not know is not
+ * an empty list, but it is not a broken page either.
+ */
+export type OpenPullRequestRepo = { 
+/**
+ * Which Repo, by the id a Conversation is started against.
+ */
+repo_id: number, 
+/**
+ * And what it is called, which is what each row says it is in.
+ */
+repo: string, 
+/**
+ * The open pull requests in it, in the order GitHub listed them. Never
+ * empty: a Repo with nothing open contributes no group at all.
+ */
+pull_requests: Array<OpenPullRequest>, };
+
+/**
  * One Option as the page draws it: the number a Response answers by, its text
  * already rendered, and whether the agent recommended it.
  *
