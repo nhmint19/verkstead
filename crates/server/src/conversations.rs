@@ -9,11 +9,14 @@
 //!
 //! Starting the grilling is where a Conversation stops being a record and gets
 //! somewhere to work — see [`start_grilling`] — and where the session that does
-//! the work is launched in it. Adopting is the same moment by the other door:
+//! the work is launched in it. Adopting is the same moment by the second door:
 //! a roadmap Verkstead did not write has its next stage started here, with the
 //! human's press standing in for the predecessor that would otherwise have
-//! started it — see [`adopt`]. Closing is where both are given back: the
-//! session ends, and then the worktree goes.
+//! started it — see [`adopt`]. Taking one up is the third, at the far end of
+//! the pipeline: a pull request Verkstead did not open has its head branch
+//! checked out and its wrap-up started, the work on it being built already —
+//! see [`take_up`]. Closing is where all three are given back: the session
+//! ends, and then the worktree goes.
 
 use std::path::{Path, PathBuf};
 
@@ -23,7 +26,8 @@ use verkstead_render::{
     Adopted, Attached, AttachmentOrigin, AttachmentRemoved, AttachmentView, BaseRecorded,
     BranchRenamed, BriefSaved, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
     CompanionMode, CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationClosed,
-    GrillingStarted, PairingView, PickedView, RepoPairingsView, RepoSwitched, Started, Worktree,
+    GrillingStarted, PairingView, PickedView, RepoPairingsView, RepoSwitched, Started, TakenUp,
+    Worktree,
 };
 use verkstead_schema::{Direction, Nudge};
 
@@ -96,6 +100,42 @@ pub(crate) async fn start_adopting(
                     fix(state, id, base).await;
                 }
 
+                prefill(state, id, repo_id).await;
+                Started::Started { id }
+            }
+            None => Started::NoSuchRepo,
+        },
+    )
+}
+
+/// Start a Conversation to wrap `pull_request` up in a registered Repo with.
+///
+/// [`start_adopting`]'s sibling over the other kind of thing that can be taken
+/// up, and the same start underneath: a Draft with the pull request written
+/// beside it, which is what draws the page that names one. The branch name is
+/// the server's here too and is discarded at the take-up — the Conversation's
+/// name is the pull request's own head branch — so what it does until then is
+/// stand in the record for a branch nobody has named.
+///
+/// Nothing about the pull request is checked here, and nothing about the
+/// repository is touched. Whether the head branch is still where GitHub said it
+/// was, and whether anything is standing on it, are questions about a repository
+/// *now*: they are the take-up's, and asking them at the moment a row was
+/// pressed would answer them a page too early.
+///
+/// No base is fixed either, unlike an adoption's. The base commit a taken-up
+/// Conversation gets is the pull request's head at take-up, so there is nothing
+/// to record until then.
+pub(crate) async fn start_wrapping_up(
+    state: &AppState,
+    repo_id: i64,
+    pull_request: &store::AdoptedPullRequest,
+) -> Result<Started> {
+    Ok(
+        match store::start_pull_request_adoption(&state.pool, repo_id, &branch_name(), pull_request)
+            .await?
+        {
+            Some(id) => {
                 prefill(state, id, repo_id).await;
                 Started::Started { id }
             }
@@ -790,13 +830,14 @@ pub(crate) async fn set_base_branch(
 /// nothing has been checked out to ask git about. The two refusals that matter
 /// are the ones saying something *has* been settled elsewhere: a worktree, which
 /// the store answers off the row it wrote, and an adoption, whose repository was
-/// settled by the roadmap rather than by the human.
+/// settled by the roadmap — or by the pull request — rather than by the human.
 pub(crate) async fn switch_repo(pool: &SqlitePool, id: i64, repo_id: i64) -> Result<RepoSwitched> {
     Ok(match store::switch_repo(pool, id, repo_id).await? {
         store::Switched::Switched => RepoSwitched::Switched,
         store::Switched::NoSuchConversation => RepoSwitched::NoSuchConversation,
         store::Switched::NotDrafting => RepoSwitched::NotDrafting,
         store::Switched::Adopting => RepoSwitched::Adopting,
+        store::Switched::HoldingPullRequest => RepoSwitched::HoldingPullRequest,
         store::Switched::NoSuchRepo => RepoSwitched::NoSuchRepo,
     })
 }
@@ -1171,7 +1212,7 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
                 companion: None,
                 repo,
                 path: path.clone(),
-                branch: Some(branch.clone()),
+                holds: Holds::Cut(branch.clone()),
                 commit: commit.clone(),
             }];
 
@@ -1334,13 +1375,70 @@ struct Checkout {
     /// Where the checkout goes, under the Data Directory.
     path: PathBuf,
 
-    /// The branch to cut, or `None` for a detached checkout — which is what a
-    /// read-only companion gets, having nothing to commit and no business
-    /// taking a name in somebody else's repository.
-    branch: Option<String>,
+    /// What the checkout holds: a branch to cut, one that is already there, or
+    /// no branch at all.
+    holds: Holds,
 
     /// The commit its base resolved to.
     commit: String,
+}
+
+/// What one checkout holds, which is the one thing the three ways of making one
+/// differ over.
+///
+/// Four cases rather than an `Option` and a flag beside it, because they are
+/// four different git calls and two different answers to *what does unwinding
+/// this take away* — see [`Self::cut`], which is the whole reason a branch that
+/// was already there is a case of its own.
+enum Holds {
+    /// A branch to cut, off the commit beside it. Every checkout a start makes
+    /// for work of its own.
+    Cut(String),
+
+    /// A branch to cut off origin's copy of it, named rather than resolved so
+    /// that git sets the new branch's upstream — see [`worktrees::add`]. What a
+    /// take-up cuts where the pull request's head branch is not local yet.
+    Track {
+        branch: String,
+
+        /// Origin's copy of it, by name.
+        upstream: String,
+    },
+
+    /// A branch that is already there, checked out where it stands and pointed
+    /// at origin's copy of it. The one kind an unwinding leaves behind: it was
+    /// somebody's branch before this press, with a pull request open on it.
+    ///
+    /// The upstream is set rather than inherited, which is the whole of what
+    /// separates this from [`Self::Track`] above. A branch git cuts off a
+    /// remote-tracking one is given its upstream as it is cut; a branch that
+    /// was already local has whatever whoever made it left it — often none, a
+    /// `git branch` off a commit setting none — and a worktree on one of those
+    /// is a worktree every wrap-up session's `git push` is refused in. See
+    /// [`worktrees::track`].
+    Standing {
+        branch: String,
+
+        /// Origin's copy of it, by name.
+        upstream: String,
+    },
+
+    /// No branch at all — git's detached checkout, which is what a read-only
+    /// companion gets, having nothing to commit and no business taking a name
+    /// in somebody else's repository.
+    Detached,
+}
+
+impl Holds {
+    /// The branch an unwinding takes away with the directory, which is only
+    /// ever one this press cut: a branch that was already there holds work
+    /// somebody did, and a start that refused is no reason to delete it.
+    fn cut(&self) -> Option<&str> {
+        match self {
+            Holds::Cut(branch) | Holds::Track { branch, .. } => Some(branch),
+            Holds::Standing { .. } | Holds::Detached => None,
+        }
+    }
 }
 
 impl Checkout {
@@ -1394,6 +1492,15 @@ impl Unmade {
         match self {
             Unmade::Own => Adopted::WorktreeRefused,
             Unmade::Companion { repo, why } => Adopted::Companion { repo, why },
+        }
+    }
+
+    /// And to the press that takes a pull request up, which makes its checkouts
+    /// by the same rules and is refused for them in the same words.
+    fn taking_up(self) -> TakenUp {
+        match self {
+            Unmade::Own => TakenUp::WorktreeRefused,
+            Unmade::Companion { repo, why } => TakenUp::Companion { repo, why },
         }
     }
 }
@@ -1472,7 +1579,10 @@ fn plan(
         companion: Some((companion.repo.id, companion.repo.name)),
         repo,
         path,
-        branch: cut,
+        holds: match cut {
+            Some(branch) => Holds::Cut(branch),
+            None => Holds::Detached,
+        },
         commit,
     })
 }
@@ -1487,11 +1597,24 @@ fn plan(
 /// worth keeping.
 fn make(planned: &[Checkout]) -> Result<(), Unmade> {
     for (nth, checkout) in planned.iter().enumerate() {
-        let made = match &checkout.branch {
-            Some(branch) => {
+        let made = match &checkout.holds {
+            Holds::Cut(branch) => {
                 worktrees::add(&checkout.repo, &checkout.path, branch, &checkout.commit)
             }
-            None => worktrees::add_detached(&checkout.repo, &checkout.path, &checkout.commit),
+            Holds::Track { branch, upstream } => {
+                worktrees::add(&checkout.repo, &checkout.path, branch, upstream)
+            }
+            // Two git calls and one act: a worktree on somebody's branch that
+            // cannot push is one the wrap-up has no use for, so a tracking git
+            // would not set is this checkout failing — unwound the way any
+            // other refused one is, and the branch left where it was.
+            Holds::Standing { branch, upstream } => {
+                worktrees::check_out(&checkout.repo, &checkout.path, branch)
+                    && worktrees::track(&checkout.repo, branch, upstream)
+            }
+            Holds::Detached => {
+                worktrees::add_detached(&checkout.repo, &checkout.path, &checkout.commit)
+            }
         };
 
         if made {
@@ -1504,7 +1627,7 @@ fn make(planned: &[Checkout]) -> Result<(), Unmade> {
         // order they were made in reversed — nothing turns on it, no two of
         // these being in one repository, but a list is undone backwards.
         for done in planned[..=nth].iter().rev() {
-            worktrees::unmake(&done.repo, &done.path, done.branch.as_deref());
+            worktrees::unmake(&done.repo, &done.path, done.holds.cut());
         }
 
         return Err(checkout.refused());
@@ -1734,7 +1857,7 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
                 companion: None,
                 repo,
                 path,
-                branch: Some(branch.clone()),
+                holds: Holds::Cut(branch.clone()),
                 commit,
             }];
 
@@ -1907,6 +2030,341 @@ fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<
     }
 
     crate::stages::stacks_at(repo, commit).then(|| named.to_owned())
+}
+
+/// Take up a pull request Verkstead did not open: one press, and a drafting
+/// Conversation becomes that pull request's, on its head branch, with the
+/// ordinary wrap-up running over it.
+///
+/// [`adopt`]'s sibling over the other kind of thing a Draft holds, and the same
+/// shape underneath — the roles checked, origin fetched, git asked everything
+/// the press turns on, the checkouts made and only then the record. What differs
+/// is where it lands and what the branch is: an adoption cuts a name out of a
+/// roadmap and starts a session on it, and this one takes a branch that is
+/// already somebody's, with a review already on it, and starts no session at
+/// all. The wrap-up's watchers are what run from here, exactly as they do when a
+/// finish step opens the pull request itself.
+///
+/// **Every refusal is named, and they are checked cheap-first**, which is
+/// [`adopt`]'s order and for its reason: each of them is something different for
+/// the human to go and do, and the record's own state and its Profiles are
+/// answered before anything that costs a git call.
+///
+/// **Two roles rather than three.** The work on a pull request is built, so
+/// there is no round for a grilling to open and no grilling picker on the page
+/// — see [`unready_to_wrap`].
+///
+/// **The head branch is settled against origin, and origin is fetched first.**
+/// A pull request lives on the remote, so what the branch *is* is what origin
+/// holds: with no local branch one is cut off origin's, tracking it; with a
+/// local one standing behind origin's, that branch is fast-forwarded on to it;
+/// and one that is ahead, or that has gone its own way, is refused rather than
+/// moved — those commits are somebody's, and Verkstead is not the thing to
+/// decide what becomes of them. A branch already checked out somewhere is
+/// refused naming the place, git holding one checkout per branch.
+///
+/// **The base recorded is the head at take-up, with GitHub's base branch beside
+/// it.** Which is not the pair any other start writes, and deliberately: what a
+/// base is *for* here is drawing the line between what was already on the pull
+/// request and what Verkstead adds, so the commit is the branch's own tip and
+/// the Timeline starts empty. The name beside it is the branch the pull request
+/// merges into, which is what a conflict is measured against.
+///
+/// **Then git, and then the store**, which is [`adopt`]'s order for [`adopt`]'s
+/// reason. Nothing made before a refusal outlives it — a worktree made is
+/// unmade, with the branch it cut — with the one exception the fast-forward is:
+/// a branch moved on to origin's own copy of it is a branch that has caught up,
+/// which is nothing to undo.
+///
+/// **And the pull request is recorded last, because recording it is the move.**
+/// [`store::record_pull_request`] writes the row, the Event and the state in one
+/// transaction, which is how every wrapping Conversation gets there; a take-up
+/// is that ending reached by the other door.
+pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
+    let pool = &state.pool;
+
+    let Some(conversation) = store::load_conversation(pool, id).await? else {
+        return Ok(TakenUp::NoSuchConversation);
+    };
+
+    if conversation.state != store::Lifecycle::Draft {
+        return Ok(TakenUp::NotDrafting);
+    }
+
+    // Taking one up is how the wrap-up *started*, so it is not a thing to do
+    // twice — and what says it has happened is the worktree, the take-up being
+    // what made one.
+    if conversation.worktree.is_some() {
+        return Ok(TakenUp::NotDrafting);
+    }
+
+    // What GitHub said when the row was pressed, and the whole of what makes
+    // this Conversation a take-up. The branch is read out of the repository
+    // below; what is taken from here is the two facts git cannot answer — what
+    // the pull request is called and where it is — and the branch it merges
+    // into, which is GitHub's own.
+    let Some(held) = conversation.adopting_pull_request.clone() else {
+        return Ok(TakenUp::NotHoldingOne);
+    };
+
+    // Read as rows rather than judged off the ids, exactly as a grill start
+    // reads them: a Profile whose pair has gone is not one to run a session
+    // under, and the id alone cannot say so.
+    let implementation =
+        crate::profiles::pairing(conversation.implementation_pairing.clone()).await?;
+    let review = crate::profiles::picked(conversation.review_pairing.clone()).await?;
+
+    if let Some(refusal) = unready_to_wrap(implementation.as_ref(), &review) {
+        return Ok(refusal.taking_up());
+    }
+
+    let path = worktrees::worktree_path(&state.data_dir, id, &conversation.repo.name, &held.head);
+
+    // Everything git has to be asked, off the runtime's threads: fetching,
+    // resolving, moving a ref and making a worktree all block.
+    let made = tokio::task::spawn_blocking({
+        let repo = conversation.repo.path.clone();
+        let path = path.clone();
+        let head = held.head.clone();
+        let data_dir = state.data_dir.clone();
+        let companions = conversation.companions.clone();
+        let checkouts = state.checkouts.clone();
+
+        move || {
+            // Before anything resolves, for the reason a grill start fetches
+            // first: a remote-tracking ref is only as fresh as the last fetch,
+            // and the whole of what a pull request is lives on the remote. The
+            // human is at this button, so being offline is theirs to go and fix.
+            if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo) {
+                tracing::error!(
+                    said,
+                    repo = %repo.display(),
+                    "fetching a Repo's remotes failed, so its pull request is not being taken up",
+                );
+
+                return Err(TakenUp::FetchFailed);
+            }
+
+            let (holds, commit) = settled(&repo, &head)?;
+
+            let mut planned = vec![Checkout {
+                companion: None,
+                repo,
+                path,
+                holds,
+                commit: commit.clone(),
+            }];
+
+            // And the companions beside it, by the same [`plan`] both other
+            // presses use: a Conversation holding a pull request drafts like any
+            // other, so its setup card put those rows there like any other's.
+            for companion in companions {
+                let beside =
+                    plan(&data_dir, id, &head, companion, &planned).map_err(Unmade::taking_up)?;
+
+                planned.push(beside);
+            }
+
+            // Held from the first directory this makes to the record naming it,
+            // as both other presses hold it and for their reason — see
+            // [`crate::AppState::checkouts`].
+            let making = checkouts.blocking_lock_owned();
+
+            make(&planned).map_err(Unmade::taking_up)?;
+
+            Ok((commit, recorded(&planned), making))
+        }
+    })
+    .await?;
+
+    let (commit, checkouts, making) = match made {
+        Ok(made) => made,
+        Err(refusal) => return Ok(refusal),
+    };
+
+    // And now the store, in the order the record is read in: the branch it is
+    // on, where its work is, and what it came off — and then the move.
+    let base = store::Base {
+        commit: &commit,
+        named: Some(&held.base),
+    };
+
+    match store::take_up(pool, id, &held.head, base, &path, &checkouts).await? {
+        store::Taking::Recorded => {}
+        store::Taking::NoSuchConversation => return Ok(TakenUp::NoSuchConversation),
+        store::Taking::NotDrafting => return Ok(TakenUp::NotDrafting),
+    }
+
+    // Which is what moves it: the row, the Event and the state in one
+    // transaction, the same one a finish step's pull request comes through.
+    let pull_request = store::PullRequest {
+        number: held.number,
+        title: held.title.clone(),
+        url: held.url.clone(),
+        repo: None,
+    };
+
+    match store::record_pull_request(pool, id, conversation.repo.id, &pull_request).await? {
+        store::Wrapping::Started => {}
+        store::Wrapping::NoSuchConversation => return Ok(TakenUp::NoSuchConversation),
+        store::Wrapping::NothingToWrap => return Ok(TakenUp::NotDrafting),
+    }
+
+    // Recorded, so the sweep would keep them. What follows is a Timeline and
+    // some watchers, and none of them makes a directory.
+    drop(making);
+
+    if let Err(error) = store::note(pool, id, &taken(&held)).await {
+        tracing::error!(error = ?error, conversation_id = id, "recording what was taken up failed");
+    }
+
+    tracing::info!(
+        conversation_id = id,
+        number = held.number,
+        branch = held.head,
+        "a pull request was taken up, so the Conversation is wrapping it up",
+    );
+
+    // A Conversation moved, so every page drawing it says so without being
+    // reloaded: its own, and the row it has in the sidebar.
+    //
+    // **Not the level under the compose box**, which has one row fewer free in
+    // it and goes on saying otherwise until it is opened again. That is the
+    // viewer's own decision and a deliberate one — the level is a `gh` per
+    // registered Repo, so a Nudge that re-read it would be a call out to GitHub
+    // every time anything anywhere moved, and it is read on open and reopen
+    // instead. See `Compose.tsx`, where it is taken. What a stale row leads to
+    // is a take-up refused by name rather than a second wrap-up over the same
+    // branch: the head branch is checked out by then, and git holds one
+    // checkout per branch.
+    state
+        .nudges
+        .announce(Nudge::Conversation { conversation: id });
+
+    // And the wrap-up itself, exactly as the finish step starts it: nobody has
+    // read this branch, whatever has been said on the pull request is waiting to
+    // be read, and the checks are whatever GitHub last ran.
+    crate::wrapping::watching(state, id, crate::wrapping::Reviewing::AsFound);
+
+    Ok(TakenUp::TakenUp)
+}
+
+/// What the pull request's head branch is here, and what its tip comes to.
+///
+/// The rules the grilling settled, in one place because they are one question:
+/// *what does this checkout hold, and what does it hold now*. Origin is the
+/// authority throughout — a pull request is a branch on the remote, and this
+/// repository's copy of it is a copy.
+///
+/// - **No local branch**: one is cut off origin's, by name rather than by
+///   commit, so that git sets its upstream — see [`worktrees::add`].
+/// - **A local branch behind origin's**: moved on to origin's tip and then
+///   checked out where it stands. Safe because nothing has it checked out —
+///   that is the question just above this one — and written as a compare-and-set
+///   so that anything which touched it in between refuses the write.
+/// - **Level with origin's**: checked out where it stands, nothing moved.
+/// - **Ahead, or gone its own way**: refused. Those commits are somebody's and
+///   what becomes of them is theirs to say.
+///
+/// Of the three that a local branch can be, *checked out somewhere* is asked
+/// first, because it holds whatever that branch stands at: git allows one
+/// checkout per branch, so a branch somebody is standing on is not one to move
+/// *or* to check out, and the refusal names where they are standing.
+fn settled(repo: &Path, head: &str) -> Result<(Holds, String), TakenUp> {
+    let upstream = format!("origin/{head}");
+
+    let Some(origin) = worktrees::resolve(repo, &upstream) else {
+        return Err(TakenUp::NoHeadBranch);
+    };
+
+    // Asked with the fail-safe reading, for the reason a grill start asks the
+    // same question with it: a git that would not answer is not a git saying
+    // the name is free, and cutting a second branch over somebody's would be
+    // the one mistake here that pressing the button again cannot undo.
+    if !worktrees::branch_taken(repo, head) {
+        return Ok((
+            Holds::Track {
+                branch: head.to_owned(),
+                upstream,
+            },
+            origin,
+        ));
+    }
+
+    if let Some(at) = worktrees::checked_out_at(repo, head) {
+        return Err(TakenUp::CheckedOutElsewhere {
+            at: at.display().to_string(),
+        });
+    }
+
+    let Some(local) = worktrees::resolve(repo, head) else {
+        // A branch `for-each-ref` listed and `rev-parse` will not resolve is a
+        // repository answering two ways about the same name, which is a
+        // repository to leave alone.
+        return Err(TakenUp::BranchDiverged);
+    };
+
+    if local == origin {
+        return Ok((standing(head, upstream), origin));
+    }
+
+    // Whether origin's tip has this branch's own in its history, which is the
+    // whole of *behind*. `Some(false)` is a branch with commits origin has not
+    // got, and which of the two that is comes from asking the same question the
+    // other way round; a git that would not say reads as diverged, which is the
+    // reading that never takes a branch it should not.
+    match worktrees::merged(repo, &local, &upstream) {
+        Some(true) => {}
+        Some(false) if worktrees::merged(repo, &origin, head) == Some(true) => {
+            return Err(TakenUp::BranchAhead);
+        }
+        _ => return Err(TakenUp::BranchDiverged),
+    }
+
+    if !worktrees::fast_forward(repo, head, &local, &origin) {
+        tracing::error!(
+            repo = %repo.display(),
+            head,
+            "moving a pull request's head branch on to origin's failed",
+        );
+
+        return Err(TakenUp::FastForwardFailed);
+    }
+
+    Ok((standing(head, upstream), origin))
+}
+
+/// The local head branch checked out where it stands, with origin's copy of it
+/// to be pointed at.
+///
+/// Both ways [`settled`] arrives at a branch that was already here — level with
+/// origin, and moved on to it — and the upstream rides along either way. What a
+/// local branch was left tracking is whoever made it's business and is often
+/// nothing at all, and the wrap-up sessions push with a bare `git push`: it is
+/// the implementing session's `push -u` that gives an ordinary Conversation its
+/// upstream, and a take-up never runs one of those.
+fn standing(head: &str, upstream: String) -> Holds {
+    Holds::Standing {
+        branch: head.to_owned(),
+        upstream,
+    }
+}
+
+/// What a taken-up Conversation's Timeline is told: which pull request was taken
+/// up, and what the wrap-up is reading it against.
+///
+/// [`adopted`]'s job at the other door, and shorter for the reason the page is:
+/// a pull request is pinned on this Timeline already, as its own card with its
+/// number and its title on it, so what is worth saying here is the thing the
+/// card cannot — that everything on the branch already is the pull request's own
+/// and the record starts from here.
+fn taken(held: &store::AdoptedPullRequest) -> String {
+    format!(
+        "Pull request #{} — *{}* — was taken up for wrapping. The work carries on `{}`, and what \
+         this Timeline records starts at that branch's head: the commits already on the pull \
+         request are its own, and `{}` is what it merges into.",
+        held.number, held.title, held.head, held.base,
+    )
 }
 
 /// Stop a Conversation wherever it has got to: its session ended, its worktree
@@ -2247,6 +2705,45 @@ impl Unready {
             Unready::ProfileBroken => Adopted::ProfileBroken,
         }
     }
+
+    /// And to the press that takes a pull request up, which has no word for a
+    /// grilling because it never asks about one — see [`unready_to_wrap`], the
+    /// only thing that makes one of these for it.
+    fn taking_up(self) -> TakenUp {
+        match self {
+            Unready::NoImplementationProfile | Unready::NoGrillingProfile => {
+                TakenUp::NoImplementationProfile
+            }
+            Unready::NoReviewProfile => TakenUp::NoReviewProfile,
+            Unready::ProfileBroken => TakenUp::ProfileBroken,
+        }
+    }
+}
+
+/// What is wrong with the two Profiles a wrap-up runs under, or nothing at all.
+///
+/// [`unready`]'s reading with the grilling taken out of it, which is the whole
+/// of the difference between a take-up and every other press: the work on a pull
+/// request is built, there is no round for a grilling to open, and the picker is
+/// drawn nowhere for one to have been chosen on. What is left is the Profile the
+/// fixes run under and the Profile the review reads under, judged exactly as
+/// they are beside a grilling.
+fn unready_to_wrap(implementation: Option<&PairingView>, review: &PickedView) -> Option<Unready> {
+    let Some(implementation) = implementation.filter(|pairing| pairing.model.is_some()) else {
+        return Some(Unready::NoImplementationProfile);
+    };
+
+    let review = match review {
+        PickedView::Skipped => None,
+        PickedView::Under(pairing) if pairing.model.is_some() => Some(pairing),
+        _ => return Some(Unready::NoReviewProfile),
+    };
+
+    [Some(implementation), review]
+        .into_iter()
+        .flatten()
+        .any(|pairing| pairing.profile.broken.is_some())
+        .then_some(Unready::ProfileBroken)
 }
 
 /// The Brief the round a Conversation is in started from.

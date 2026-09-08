@@ -21,17 +21,20 @@ import type {
   Adopted,
   Created,
   DirectoryListing,
+  OpenPullRequestRepo,
   ProfileEntry,
   RepoEntry,
   RepoPairingsView,
   RepoView,
   SettingsView,
+  TakenUp,
 } from "../src/api/types";
 import menu from "../src/Menu.module.css";
 import pill from "../src/Attaching.module.css";
 import composer from "../src/workbench/Composer.module.css";
 import sidebar from "../src/workbench/Conversations.module.css";
 import setup from "../src/workbench/Setup.module.css";
+import takeUp from "../src/workbench/TakeUp.module.css";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
 import { ATTACH_REFUSAL } from "../src/workbench/Composer";
 import { BRANCH_REFUSAL } from "../src/workbench/Setup";
@@ -62,6 +65,7 @@ import { browse, held, listingAt } from "./fields";
 import { actionRows, offered, opened, pick, press, rows, showing } from "./pickers";
 import { askedFor, hangs, json, serving, whenever } from "./serving";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
+import pulls from "./fixtures/open-pull-requests.json" with { type: "json" };
 import listing from "./fixtures/directories.json" with { type: "json" };
 import made from "./fixtures/repo.json" with { type: "json" };
 import told from "./fixtures/settings.json" with { type: "json" };
@@ -69,6 +73,12 @@ import told from "./fixtures/settings.json" with { type: "json" };
 /// The roadmaps nothing is driving, as the server answers for them: three of
 /// them in one repo, the last found on a branch that has not merged.
 const ABANDONED = abandoned as AbandonedRepo[];
+
+/// And the pull requests open across them, as the server answers for them: two
+/// repositories, one of the four listed already taken up by a Conversation, and
+/// the fork among them already left out — see
+/// `crates/server/tests/pull_requests.rs`, which writes this.
+const OPEN_PULLS = pulls as OpenPullRequestRepo[];
 
 /// What the page put on the wire when it wrote to `path`, and how often it did.
 ///
@@ -1225,10 +1235,11 @@ describe("making a repo from the Repo dropdown", () => {
 /// the composer and started from it.
 ///
 /// This is where the sidebar's New-conversation menu ended up. What was a group
-/// of rows under the repos is a dropdown under the box, and what a press does is
-/// the difference worth asking about: the menu created a conversation on the
-/// spot, and this creates nothing until one of the two presses under the box.
-describe("adopting a roadmap from the compose page", () => {
+/// of rows under the repos is a level of the *Other actions* menu under the box,
+/// and what a press does is the difference worth asking about: the menu created
+/// a conversation on the spot, and this creates nothing until one of the two
+/// presses under the box.
+describe("continuing a roadmap from the compose page", () => {
   beforeEach(() => {
     localStorage.clear();
     leaveRefusals(0, []);
@@ -1254,12 +1265,34 @@ describe("adopting a roadmap from the compose page", () => {
     );
   }
 
-  /// The dropdown under the box, dropped — and the rows it holds.
+  /// The menu under the box, dropped.
+  async function otherActions(container: ParentNode): Promise<HTMLElement> {
+    fireEvent.click(
+      await drawn(container, `.${composer.actions} > .${menu.trigger}`),
+    );
+    return screen.getByRole("menuitem", { name: CONTINUE });
+  }
+
+  /// And the level that holds the roadmaps, opened — and the rows it holds.
+  ///
+  /// Waited on rather than pressed straight away: the menu is drawn before the
+  /// roadmaps have been read, and the level ungreys as they land. Which is what
+  /// greying it is for — the control is there from the first paint, and what it
+  /// offers settles under the hand rather than the control arriving.
   async function roadmapRows(
     container: ParentNode,
   ): Promise<HTMLButtonElement[]> {
+    await otherActions(container);
     fireEvent.click(
-      await drawn(container, `.${composer.adopt} > .${menu.trigger}`),
+      await waitFor(() => {
+        const level = container.querySelector<HTMLButtonElement>(
+          `.${menu.nested}`,
+        );
+        if (!level || level.disabled) {
+          throw new Error(`${CONTINUE} is still greyed`);
+        }
+        return level;
+      }),
     );
     await drawn(container, `.${composer.roadmapRow}`);
     return [
@@ -1275,7 +1308,10 @@ describe("adopting a roadmap from the compose page", () => {
     await drawn(container, `.${composer.loaded}`);
   }
 
-  /// Every roadmap there is to adopt, flat, in the order the rows come down.
+  /// What the level reads as, and what the way back out of it says.
+  const CONTINUE = "Continue a roadmap";
+
+  /// Every roadmap there is to continue, flat, in the order the rows come down.
   const flat = ABANDONED.flatMap((held) =>
     held.roadmaps.map((roadmap) => ({ repo: held.repo, roadmap })),
   );
@@ -1302,33 +1338,43 @@ describe("adopting a roadmap from the compose page", () => {
     expect(rows[0]!.textContent).not.toContain("on ");
   });
 
-  /// Nothing to adopt is nothing to offer, and a brief already being written is
-  /// nothing to replace: the dropdown loads what would stand in the box, and
-  /// one offering to replace a half-written brief would be offering to lose it.
-  it("is drawn only with roadmaps to adopt and an empty box", async () => {
+  /// Nothing to continue is a level greyed rather than a menu gone: what there
+  /// is to do here is not a list the human can see, so a control that came and
+  /// went with one would change shape between one visit and the next.
+  it("draws the menu with nothing to continue, and greys the level", async () => {
     theWorkbench();
     const { container } = mount("/compose");
 
     // The bench serves no roadmaps at all, which is what a workbench whose
     // repositories are all being driven looks like.
     await composing(container);
-    expect(container.querySelector(`.${composer.adopt}`)).toBeNull();
+    const level = await otherActions(container);
+
+    expect((level as HTMLButtonElement).disabled).toBe(true);
+
+    // And it opens nothing: the card is still on its first level.
+    fireEvent.click(level);
+    expect(container.querySelector(`.${composer.roadmapRow}`)).toBeNull();
+    expect(screen.getByRole("menuitem", { name: CONTINUE })).toBeTruthy();
   });
 
+  /// A brief already being written is nothing to replace: a row loads what would
+  /// stand in the box, and a menu offering to replace a half-written brief would
+  /// be offering to lose it.
   it("goes when a brief is being written, and comes back when it is cleared", async () => {
     adopting();
     const { container } = mount("/compose");
     const box = await composing(container);
 
-    await drawn(container, `.${composer.adopt}`);
+    await drawn(container, `.${composer.actions}`);
 
     fireEvent.input(box, { target: { value: "Make the widget" } });
     await waitFor(() =>
-      expect(container.querySelector(`.${composer.adopt}`)).toBeNull(),
+      expect(container.querySelector(`.${composer.actions}`)).toBeNull(),
     );
 
     fireEvent.input(box, { target: { value: "" } });
-    await drawn(container, `.${composer.adopt}`);
+    await drawn(container, `.${composer.actions}`);
   });
 
   /// Loading one creates nothing: the row is written into what this device is
@@ -1344,8 +1390,10 @@ describe("adopting a roadmap from the compose page", () => {
     expect(card.textContent).toContain(ABANDONED[0]!.roadmaps[0]!.name);
     expect(card.textContent).toContain(ABANDONED[0]!.roadmaps[0]!.stage_title);
 
-    // No field left to write in, and nothing on the wire.
+    // No field left to write in, no menu over a box that is holding something,
+    // and nothing on the wire.
     expect(container.querySelector(`.${composer.box} textarea`)).toBeNull();
+    expect(container.querySelector(`.${composer.actions}`)).toBeNull();
     expect(writes(fetching, "/api/ui/adoptions")).toBe(0);
   });
 
@@ -1609,9 +1657,469 @@ describe("adopting a roadmap from the compose page", () => {
     await waitFor(() =>
       expect(
         screen.getByText(
-          `The stage could not be adopted: ${ADOPT_REFUSAL.NoGrillingProfile}`,
+          `The stage could not be started: ${ADOPT_REFUSAL.NoGrillingProfile}`,
         ),
       ).toBeTruthy(),
+    );
+  });
+});
+
+/// The other level of that menu: the pull requests open across the registered
+/// Repos, which is work already somewhere else waiting to be wrapped up.
+///
+/// What is asked here is the level rather than the reading — which pull requests
+/// GitHub is asked about, which of them come back and which are left out is the
+/// server's, and `crates/server/tests/pull_requests.rs` is where that is pinned.
+/// This is fed the payload that suite writes.
+describe("wrapping up a pull request from the compose page", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    leaveRefusals(0, []);
+  });
+
+  /// The workbench with pull requests open in it, `answered` being what
+  /// `/api/ui/open-pull-requests` says.
+  function withOpen(
+    answered = json(OPEN_PULLS),
+    ...answers: Parameters<typeof serving>
+  ) {
+    return theWorkbench(
+      whenever("/api/ui/open-pull-requests", answered),
+      ...answers,
+    );
+  }
+
+  /// What the level reads as, and what the way back out of it says.
+  const WRAP = "Wrap up a pull request";
+
+  /// The menu under the box, dropped — and the level that lists the pull
+  /// requests, which is the second of the two rows in it.
+  async function wrapLevel(container: ParentNode): Promise<HTMLButtonElement> {
+    fireEvent.click(
+      await drawn(container, `.${composer.actions} > .${menu.trigger}`),
+    );
+    return screen.getByRole("menuitem", { name: WRAP }) as HTMLButtonElement;
+  }
+
+  /// And that level opened, and the rows it holds.
+  async function pullRows(container: ParentNode): Promise<HTMLButtonElement[]> {
+    fireEvent.click(await wrapLevel(container));
+    await drawn(container, `.${composer.pullRow}`);
+    return [
+      ...container.querySelectorAll<HTMLButtonElement>(`.${composer.pullRow}`),
+    ];
+  }
+
+  /// Every open pull request there is, flat, in the order the rows come down.
+  const flat = OPEN_PULLS.flatMap((held) =>
+    held.pull_requests.map((pull) => ({ repo: held.repo, pull })),
+  );
+
+  it("names each pull request, its repo and number, its branches and its author", async () => {
+    withOpen();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const rows = await pullRows(container);
+    expect(rows.length).toBe(flat.length);
+
+    for (const [n, { repo, pull }] of flat.entries()) {
+      const said = rows[n]!.textContent!;
+      expect(said).toContain(repo);
+      expect(said).toContain(`#${pull.number}`);
+      expect(said).toContain(pull.title);
+      expect(said).toContain(pull.head);
+      expect(said).toContain(pull.base);
+      expect(said).toContain(pull.author);
+    }
+  });
+
+  /// One a Conversation already holds is listed all the same, says so, and goes
+  /// there: there is one Conversation per piece of work, and a second one over
+  /// the same branch would be two wrap-ups pushing to it.
+  it("says which pull requests are taken, and leads to the conversation holding one", async () => {
+    withOpen();
+    const { container, history } = mount("/compose");
+
+    await composing(container);
+    const rows = await pullRows(container);
+
+    const taken = flat.findIndex(({ pull }) => pull.conversation_id !== null);
+    expect(taken, "the fixture holds one that is taken").toBeGreaterThan(-1);
+
+    expect(rows[taken]!.textContent).toContain("already in a conversation");
+
+    fireEvent.click(rows[taken]!);
+
+    const held = flat[taken]!.pull.conversation_id!;
+    await waitFor(() =>
+      expect(history.get().startsWith(`/conversations/${held}`)).toBe(true),
+    );
+  });
+
+  /// The level is a `gh` per registered Repo, each a call out to GitHub, so it
+  /// is often still going when the menu is opened. Greying it then would be
+  /// saying *nothing to wrap up* about a list nobody has read yet.
+  it("opens to a line saying it is reading, rather than greying", async () => {
+    withOpen(hangs());
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const level = await wrapLevel(container);
+    expect(level.disabled).toBe(false);
+
+    fireEvent.click(level);
+    await drawn(container, `.${composer.reading}`);
+    expect(container.querySelector(`.${composer.pullRow}`)).toBeNull();
+  });
+
+  /// And once the reading is back with nothing in it, the level greys — which
+  /// is what the roadmap level beside it does with nothing to continue.
+  it("greys the level once the reading is back empty", async () => {
+    withOpen(json([]));
+    const { container } = mount("/compose");
+
+    await composing(container);
+
+    const level = await waitFor(async () => {
+      const row = await wrapLevel(container);
+      if (!row.disabled) throw new Error(`${WRAP} is not greyed yet`);
+      return row;
+    });
+
+    // And it opens nothing: the card is still on its first level.
+    fireEvent.click(level);
+    expect(container.querySelector(`.${composer.pullRow}`)).toBeNull();
+    expect(container.querySelector(`.${composer.reading}`)).toBeNull();
+  });
+
+  /// A free row loads it into the box — which is where this parts company with
+  /// a roadmap row. A roadmap locks a card over the box; a pull request brings
+  /// words of its own, so the box stays a box and is prefilled with them.
+  it("prefills the box with the title and the description", async () => {
+    withOpen();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const free = await freeRow(container);
+    fireEvent.click(free.row);
+
+    const band = await drawn(container, `.${takeUp.held}`);
+    expect(band.textContent).toContain(free.repo);
+    expect(band.textContent).toContain(`#${free.pull.number}`);
+    expect(band.textContent).toContain(free.pull.head);
+    expect(band.textContent).toContain(free.pull.base);
+
+    // The box is still a box, and what is in it is the pull request's own words.
+    const filled = await composing(container);
+    await waitFor(() =>
+      expect(filled.value).toBe(
+        `# ${free.pull.title}\n\n${free.pull.body.trim()}\n`,
+      ),
+    );
+
+    // And the menu is gone with the load: there is one thing in the box at a
+    // time, and the way to another is to clear the one that is in it.
+    expect(container.querySelector(`.${composer.actions}`)).toBeNull();
+  });
+
+  /// Held on the device like everything else on this page: a reload lands on the
+  /// pull request that was loaded, with the box as it was left.
+  it("keeps the loaded pull request on this device", async () => {
+    withOpen();
+    const first = mount("/compose");
+
+    await composing(first.container);
+    const free = await freeRow(first.container);
+    fireEvent.click(free.row);
+    await drawn(first.container, `.${takeUp.held}`);
+    first.unmount();
+
+    withOpen();
+    const again = mount("/compose");
+    const band = await drawn(again.container, `.${takeUp.held}`);
+    expect(band.textContent).toContain(`#${free.pull.number}`);
+
+    const box = await composing(again.container);
+    expect(box.value).toContain(free.pull.title);
+  });
+
+  /// And put down again, which gives the box back the text the pull request was
+  /// loaded over: a pull request fills the box rather than locking a card over
+  /// it, so what was being written is stowed with it and comes back when it
+  /// goes.
+  ///
+  /// Seeded on the device rather than typed, exactly as the roadmap's own clear
+  /// is: the state a clear restores is a page holding both at once, and it is a
+  /// state this file can write down.
+  it("puts the text it was loaded over away, and gives it back on clear", async () => {
+    const one = OPEN_PULLS[0]!;
+    const free = one.pull_requests[0]!;
+
+    keep({
+      ...blank(),
+      brief: `# ${free.title}\n\n${free.body}\n`,
+      pull: {
+        repo_id: one.repo_id,
+        repo: one.repo,
+        number: free.number,
+        title: free.title,
+        url: free.url,
+        head: free.head,
+        base: free.base,
+        stowed: "Make the widget",
+      },
+    });
+    withOpen();
+    const { container } = mount("/compose");
+
+    // The pull request is over the box, and the box is holding its words rather
+    // than what was being written.
+    const box = await composing(container);
+    await drawn(container, `.${takeUp.held}`);
+    expect(box.value).toContain(free.title);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: `Clear #${free.number}` }),
+    );
+
+    await waitFor(() =>
+      expect(container.querySelector(`.${takeUp.held}`)).toBeNull(),
+    );
+    await waitFor(() =>
+      expect(
+        (
+          container.querySelector(
+            `.${composer.box} textarea`,
+          ) as HTMLTextAreaElement
+        ).value,
+      ).toBe("Make the widget"),
+    );
+  });
+
+  /// The repo is the pull request's and settled, its branch is the head branch
+  /// and its base is that branch's own head at take-up — so neither field is
+  /// drawn. Nor is the grilling picker: the work is built, and the take-up moves
+  /// it straight into the wrap-up.
+  it("fixes the repo and draws no branch, base or grilling picker", async () => {
+    withOpen();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const free = await freeRow(container);
+    fireEvent.click(free.row);
+    await drawn(container, `.${takeUp.held}`);
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${setup.repoOption} .${setup.optionValue}`)
+          ?.textContent,
+      ).toBe(free.repo),
+    );
+
+    await openRepo(container);
+    expect((screen.getByLabelText("Repo") as HTMLSelectElement).disabled).toBe(
+      true,
+    );
+    expect(container.querySelector("#branch")).toBeNull();
+    expect(screen.queryByLabelText("Base branch")).toBeNull();
+    expect(screen.queryByLabelText("Grilling")).toBeNull();
+
+    // The three that are still the human's to settle.
+    expect(screen.getByLabelText("Works alongside")).toBeTruthy();
+    expect(screen.getByLabelText("Implementation")).toBeTruthy();
+    expect(screen.getByLabelText("Review")).toBeTruthy();
+  });
+
+  /// The press: the Conversation started against the repo and the pull request,
+  /// the edited Brief saved on it, and the touched pickers replayed. Neither the
+  /// branch nor the base is sent — the pull request answers both.
+  it("creates a draft holding it, with the edited brief on it", async () => {
+    const fetching = withOpen(
+      json(OPEN_PULLS),
+      ...REMEMBERED,
+      whenever(
+        "/api/ui/pull-request-adoptions",
+        json({ Started: { id: OPEN.id } }),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/review-pairing`,
+        json("Chosen"),
+        "POST",
+      ),
+      json(null),
+    );
+    const { container, history } = mount("/compose");
+
+    await composing(container);
+    const free = await freeRow(container);
+    fireEvent.click(free.row);
+    await drawn(container, `.${takeUp.held}`);
+
+    const box = await composing(container);
+    fireEvent.input(box, { target: { value: "# Rate limiting\n\nAnd my own note.\n" } });
+
+    pick("Review", "No review");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save as draft" }));
+
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/pull-request-adoptions")).toEqual({
+        repo_id: free.repo_id,
+        number: free.pull.number,
+        title: free.pull.title,
+        url: free.pull.url,
+        head: free.pull.head,
+        base: free.pull.base,
+      }),
+    );
+    await waitFor(() =>
+      expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/brief`)).toEqual({
+        markdown: "# Rate limiting\n\nAnd my own note.\n",
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/review-pairing`),
+      ).toEqual({ pairing: null }),
+    );
+
+    // The two the pull request answers for itself, and the grilling it never
+    // has.
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/branch`)).toBe(0);
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/base`)).toBe(0);
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(0);
+
+    await waitFor(() =>
+      expect(history.get().startsWith(`/conversations/${OPEN.id}`)).toBe(true),
+    );
+    await waitFor(() => expect(localStorage.getItem(COMPOSING)).toBeNull());
+  });
+
+  /// *Start work* creates the same Conversation and takes the pull request up,
+  /// which is the kickoff under the third of its three names: a roadmap is
+  /// adopted, work of the human's own is grilled, and a pull request is taken
+  /// up — the work on it being built already.
+  it("takes the pull request up once the draft is made", async () => {
+    const fetching = withOpen(
+      json(OPEN_PULLS),
+      ...REMEMBERED,
+      whenever(
+        "/api/ui/pull-request-adoptions",
+        json({ Started: { id: OPEN.id } }),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/brief`,
+        json("Saved"),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/take-up`,
+        json("TakenUp" satisfies TakenUp),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const free = await freeRow(container);
+    fireEvent.click(free.row);
+    await drawn(container, `.${takeUp.held}`);
+
+    // Both roles the wrap-up runs under, which is the whole of what the press
+    // waits on: a pull request has no grilling to answer for.
+    for (const role of ["Implementation", "Review"]) {
+      await waitFor(() => expect(showing(role)).not.toBe("Not chosen"));
+    }
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    await waitFor(() =>
+      expect(writes(fetching, "/api/ui/pull-request-adoptions")).toBe(1),
+    );
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/take-up`),
+      ).toEqual({}),
+    );
+
+    // And neither of the other two kickoffs, each of which is for a different
+    // kind of draft.
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(0);
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/adopt`)).toBe(0);
+  });
+
+  /// And the quieter press still stops at the draft: *Save as draft* creates the
+  /// Conversation holding the pull request and leaves the take-up on its own
+  /// page.
+  it("leaves the take-up alone when it is only saved as a draft", async () => {
+    const fetching = withOpen(
+      json(OPEN_PULLS),
+      ...REMEMBERED,
+      whenever(
+        "/api/ui/pull-request-adoptions",
+        json({ Started: { id: OPEN.id } }),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const free = await freeRow(container);
+    fireEvent.click(free.row);
+    await drawn(container, `.${takeUp.held}`);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save as draft" }));
+
+    await waitFor(() =>
+      expect(writes(fetching, "/api/ui/pull-request-adoptions")).toBe(1),
+    );
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/take-up`)).toBe(0);
+  });
+
+  /// The first free row of the fixture, with everything a test needs to say
+  /// which one it pressed.
+  async function freeRow(container: ParentNode): Promise<{
+    row: HTMLButtonElement;
+    repo_id: number;
+    repo: string;
+    pull: OpenPullRequestRepo["pull_requests"][number];
+  }> {
+    const rows = await pullRows(container);
+    const at = flat.findIndex(({ pull }) => pull.conversation_id === null);
+    expect(at, "the fixture holds one nothing has taken up").toBeGreaterThan(-1);
+
+    const held = OPEN_PULLS.find((group) =>
+      group.pull_requests.includes(flat[at]!.pull),
+    )!;
+
+    return {
+      row: rows[at]!,
+      repo_id: held.repo_id,
+      repo: flat[at]!.repo,
+      pull: flat[at]!.pull,
+    };
+  }
+
+  /// Read when the page opens and again on each reopen, and held nowhere:
+  /// GitHub owns this list, and a copy in the browser would be one this page had
+  /// to work out when to stop believing.
+  it("reads the list again every time the page is opened", async () => {
+    const fetching = withOpen();
+
+    const first = mount("/compose");
+    await composing(first.container);
+    await waitFor(() =>
+      expect(askedFor(fetching, "/api/ui/open-pull-requests")).toBe(1),
+    );
+    first.unmount();
+
+    const again = mount("/compose");
+    await composing(again.container);
+    await waitFor(() =>
+      expect(askedFor(fetching, "/api/ui/open-pull-requests")).toBe(2),
     );
   });
 });
@@ -1877,6 +2385,7 @@ describe("what a device holds between visits", () => {
       implementation: "2:fable",
       review: null,
       adopting: null,
+      pull: null,
     };
 
     keep(held);

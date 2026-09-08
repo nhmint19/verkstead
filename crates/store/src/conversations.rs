@@ -271,6 +271,15 @@ pub struct Conversation {
     /// what is stored about the roadmap — see [`start_adoption`].
     pub adopting: Option<String>,
 
+    /// And which pull request it is holding, where it is holding one.
+    ///
+    /// `None` for every Conversation but one started off the *Wrap up a pull
+    /// request* level, and never `Some` alongside [`Self::adopting`]: a
+    /// Conversation adopts one thing or none. What is inside is GitHub's own
+    /// reading of the pull request as it was listed — see
+    /// [`start_pull_request_adoption`].
+    pub adopting_pull_request: Option<AdoptedPullRequest>,
+
     /// The other registered Repos this Conversation works alongside, by the
     /// Repo's name — see [`super::companions`].
     ///
@@ -817,6 +826,24 @@ pub enum Staged {
     NotDrafting,
 }
 
+/// And what became of putting a Draft on the branch of the pull request it is
+/// holding.
+///
+/// [`Staged`]'s two refusals, one door along and for their reason: everything
+/// else a take-up is refused for is settled against git before the record is
+/// written, and the move that follows this is the pull request being recorded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Taking {
+    /// Recorded: the branch, the base commit, the base branch and the worktree.
+    Recorded,
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+
+    /// It is past drafting, so something has taken it up already.
+    NotDrafting,
+}
+
 /// What became of a direction picked on a wrap-up proposal.
 ///
 /// Driven by a Response arriving rather than by anything the human pressed, so
@@ -1150,6 +1177,32 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .await
     .context("creating the adoptions table")?;
 
+    // And which pull request a drafting Conversation is holding, where it is
+    // holding one. Beside the adoptions rather than inside them, for the reason
+    // both are beside `conversations`: a roadmap and a pull request are adopted
+    // the same way and are not the same thing, and one table for the two would
+    // be a table with half its columns null in every row.
+    //
+    // Five short facts, every one of them GitHub's: what the pull request is
+    // called, where it is, the branch the work is on and the branch it goes
+    // into. Written down rather than read again for what a re-read costs — the
+    // list they came off is a `gh` per registered Repo — and superseded the
+    // moment the take-up records the pull request properly, which is the move
+    // out of Draft.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS pull_request_adoptions (
+             conversation_id INTEGER PRIMARY KEY REFERENCES conversations(id),
+             number          INTEGER NOT NULL,
+             title           TEXT NOT NULL,
+             url             TEXT NOT NULL,
+             head            TEXT NOT NULL,
+             base            TEXT NOT NULL
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the pull request adoptions table")?;
+
     collapse_the_direction_state(pool).await?;
 
     Ok(())
@@ -1241,7 +1294,7 @@ pub async fn start_conversation(
     repo_id: i64,
     branch: &str,
 ) -> Result<Option<i64>> {
-    started(pool, repo_id, branch, Named::Settled, None).await
+    started(pool, repo_id, branch, Named::Settled, Adopts::Nothing).await
 }
 
 /// The same, on a name Verkstead invented rather than one anybody settled on.
@@ -1255,7 +1308,7 @@ pub async fn start_unnamed_conversation(
     repo_id: i64,
     branch: &str,
 ) -> Result<Option<i64>> {
-    started(pool, repo_id, branch, Named::Prefilled, None).await
+    started(pool, repo_id, branch, Named::Prefilled, Adopts::Nothing).await
 }
 
 /// Start a Conversation adopting `roadmap` against a registered Repo, on
@@ -1276,7 +1329,90 @@ pub async fn start_adoption(
     branch: &str,
     roadmap: &str,
 ) -> Result<Option<i64>> {
-    started(pool, repo_id, branch, Named::Prefilled, Some(roadmap)).await
+    started(
+        pool,
+        repo_id,
+        branch,
+        Named::Prefilled,
+        Adopts::Roadmap(roadmap),
+    )
+    .await
+}
+
+/// Start a Conversation holding `pull_request` against a registered Repo, on
+/// `branch`, with an empty Brief already in its Timeline.
+///
+/// The roadmap start's sibling, and the same Conversation underneath: a Draft
+/// with one thing more written about it, which is what puts its page on the
+/// shape that names a pull request instead of asking for a branch. What is
+/// written down is what GitHub said when the row was listed — see
+/// [`AdoptedPullRequest`] — and it is written down rather than read again
+/// because reading it again is a `gh` per registered Repo.
+///
+/// Whether the branch is still there, whether it has moved and whether anything
+/// else is standing on it are questions about a repository *now*, and the
+/// take-up is where they are asked. Nothing here touches git at all.
+pub async fn start_pull_request_adoption(
+    pool: &SqlitePool,
+    repo_id: i64,
+    branch: &str,
+    pull_request: &AdoptedPullRequest,
+) -> Result<Option<i64>> {
+    started(
+        pool,
+        repo_id,
+        branch,
+        Named::Prefilled,
+        Adopts::PullRequest(pull_request),
+    )
+    .await
+}
+
+/// The pull request a drafting Conversation is holding, as it was listed.
+///
+/// GitHub's own five facts and nothing of Verkstead's: this is what a row off
+/// the *Wrap up a pull request* level said, carried through the create and kept
+/// until the take-up records the pull request properly — see
+/// [`super::take_up`], which reads the head branch out of git rather than out
+/// of here. What the take-up does take from this is the two facts git cannot
+/// answer: what the pull request is called and where it is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdoptedPullRequest {
+    /// The number GitHub gave it, which is what everybody calls it by — in this
+    /// repository and nowhere else.
+    pub number: i64,
+
+    /// Its title, which is the heading the Brief was prefilled with.
+    pub title: String,
+
+    /// The whole URL, so the card can lead out to GitHub without a repository
+    /// name being guessed at.
+    pub url: String,
+
+    /// The branch the work is on, which is the branch the take-up checks out.
+    pub head: String,
+
+    /// And the branch it goes into, which is what the wrap-up watches for
+    /// conflicts against.
+    pub base: String,
+}
+
+/// What a Conversation is being started to adopt, where it is being started to
+/// adopt anything.
+///
+/// Three cases rather than two `Option`s, because a Conversation adopts one
+/// thing or none: a pair of arguments would let a caller ask for both, and the
+/// row that came back would be a Draft drawn on two pages at once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Adopts<'a> {
+    /// The ordinary Conversation, which begins with a Brief and a grilling.
+    Nothing,
+
+    /// A roadmap, by its directory name under `docs/roadmaps/`.
+    Roadmap(&'a str),
+
+    /// Or a pull request that is already open, as GitHub listed it.
+    PullRequest(&'a AdoptedPullRequest),
 }
 
 /// Whose the branch name a Conversation is started on is.
@@ -1307,7 +1443,7 @@ async fn started(
     repo_id: i64,
     branch: &str,
     named: Named,
-    adopts: Option<&str>,
+    adopts: Adopts<'_>,
 ) -> Result<Option<i64>> {
     let mut tx = super::writing(pool, "starting a Conversation").await?;
 
@@ -1358,13 +1494,32 @@ async fn started(
     .await
     .with_context(|| format!("writing the Brief of Conversation {id}"))?;
 
-    if let Some(roadmap) = adopts {
-        sqlx::query("INSERT INTO adoptions (conversation_id, roadmap) VALUES (?, ?)")
+    match adopts {
+        Adopts::Nothing => {}
+        Adopts::Roadmap(roadmap) => {
+            sqlx::query("INSERT INTO adoptions (conversation_id, roadmap) VALUES (?, ?)")
+                .bind(id)
+                .bind(roadmap)
+                .execute(&mut *tx)
+                .await
+                .with_context(|| format!("recording what Conversation {id} is adopting"))?;
+        }
+        Adopts::PullRequest(pull_request) => {
+            sqlx::query(
+                "INSERT INTO pull_request_adoptions
+                     (conversation_id, number, title, url, head, base)
+                 VALUES (?, ?, ?, ?, ?, ?)",
+            )
             .bind(id)
-            .bind(roadmap)
+            .bind(pull_request.number)
+            .bind(&pull_request.title)
+            .bind(&pull_request.url)
+            .bind(&pull_request.head)
+            .bind(&pull_request.base)
             .execute(&mut *tx)
             .await
-            .with_context(|| format!("recording what Conversation {id} is adopting"))?;
+            .with_context(|| format!("recording the pull request Conversation {id} is holding"))?;
+        }
     }
 
     tx.commit().await.context("starting a Conversation")?;
@@ -1716,6 +1871,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         worktree: worktree(pool, id).await?,
         direction: direction(pool, id).await?,
         adopting: adopting(pool, id).await?,
+        adopting_pull_request: adopted_pull_request(pool, id).await?,
         companions: super::companions(pool, id).await?,
     }))
 }
@@ -2011,6 +2167,36 @@ pub async fn adopting(pool: &SqlitePool, id: i64) -> Result<Option<String>> {
             .with_context(|| format!("reading what Conversation {id} is adopting"))?;
 
     Ok(row.map(|(roadmap,)| roadmap))
+}
+
+/// And the pull request a Conversation is holding, where it is holding one.
+///
+/// A read of its own beside the row for [`adopting`]'s reason, and one more:
+/// the two are mutually exclusive, so almost every Conversation answers `None`
+/// to both.
+pub async fn adopted_pull_request(
+    pool: &SqlitePool,
+    id: i64,
+) -> Result<Option<AdoptedPullRequest>> {
+    let row: Option<(i64, String, String, String, String)> = sqlx::query_as(
+        "SELECT number, title, url, head, base
+         FROM pull_request_adoptions
+         WHERE conversation_id = ?",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| format!("reading which pull request Conversation {id} is holding"))?;
+
+    Ok(
+        row.map(|(number, title, url, head, base)| AdoptedPullRequest {
+            number,
+            title,
+            url,
+            head,
+            base,
+        }),
+    )
 }
 
 /// Which of the three roles a Pairing is being chosen for.
@@ -3100,6 +3286,11 @@ pub enum Switched {
     /// roadmap.
     Adopting,
 
+    /// It is holding a pull request, and a pull request is a branch in the
+    /// repository it was opened in: moving the work would leave it holding a
+    /// number that means something else over there, or nothing at all.
+    HoldingPullRequest,
+
     /// There is no Repo with that id on the registry.
     NoSuchRepo,
 }
@@ -3147,6 +3338,15 @@ pub async fn switch_repo(pool: &SqlitePool, id: i64, repo_id: i64) -> Result<Swi
 
     if adopting(pool, id).await?.is_some() {
         return Ok(Switched::Adopting);
+    }
+
+    // And the same fact about the other thing a Draft adopts. A pull request is
+    // a number in one repository — `#41` names something else in the next one
+    // along, or nothing — so which repository it is in was settled by the row
+    // that started the Conversation rather than by the human, exactly as a
+    // roadmap's was.
+    if adopted_pull_request(pool, id).await?.is_some() {
+        return Ok(Switched::HoldingPullRequest);
     }
 
     // On the registry rather than merely in the table, for the reason a
@@ -3615,6 +3815,19 @@ pub async fn start_implementing(pool: &SqlitePool, id: i64) -> Result<Implementi
 /// built. The checks and the comments need no such thing: both are asked of
 /// GitHub on every poll, so they settle from the answers the second wrap gets.
 ///
+/// **And the direction is written where there is none**, which is what a
+/// Conversation that never picked one needs of this move. A wrap-up reached by
+/// taking somebody else's pull request up has no direction on its record — the
+/// work was built elsewhere, and there was no round to pick in — so this is the
+/// moment it acquires one: a review answered into splitting work out has made
+/// the work a backlog, and a backlog is the task-list direction. `DO NOTHING`
+/// rather than an upsert, for [`steer_conversation`]'s reason: a direction
+/// already picked is the human's own answer to how their work is built.
+///
+/// Without it the Conversation would go back to Implementing with nothing saying
+/// how, which is the record a pressed Resume refuses on by name — so a run that
+/// stopped mid-backlog could never be started again.
+///
 /// One transaction, as every move is: a Conversation that says Implementing
 /// always has the move on its Timeline to say when it got there.
 pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
@@ -3635,6 +3848,16 @@ pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
     }
 
     super::wrap_up::unsettle(&mut tx, id, super::WaitingOn::Review).await?;
+
+    sqlx::query(
+        "INSERT INTO directions (conversation_id, direction) VALUES (?, ?)
+         ON CONFLICT (conversation_id) DO NOTHING",
+    )
+    .bind(id)
+    .bind(direction_stored(Direction::TaskList))
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("recording how Conversation {id}'s split-out work is built"))?;
 
     sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
         .bind(Lifecycle::Implementing.stored())
@@ -3904,6 +4127,13 @@ pub async fn resolve_conflicts(pool: &SqlitePool, id: i64) -> Result<Resolving> 
 /// only: nothing here takes a companion away, puts one back to read-only, or
 /// writes an add over a row that is already there.
 ///
+/// **And the review, where the steer lands in Wrapping**: back to being
+/// something the wrap-up waits on, in the same transaction as the move. A steer
+/// into Wrapping reads the branch afresh — which is the one thing the resolve
+/// press below deliberately does not do — so a settle carried in from the round
+/// that reached Done is a wrap-up nothing would read the branch for. See
+/// [`resolve_conflicts`] for the other side of it.
+///
 /// Nothing about the run is touched, and what has to stop running is stopped
 /// before this is called — see the server's `steering` module, which is the only
 /// caller.
@@ -4069,6 +4299,22 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
     // [`super::wrap_up::forget_the_round`].
     if target == Lifecycle::Grilling {
         super::wrap_up::forget_the_round(&mut tx, id).await?;
+    }
+
+    // And a steer into Wrapping reads the branch afresh, so the review goes back
+    // to being something the wrap-up waits on. *Settled once and stays settled*
+    // is a rule about one look at the branch — see [`super::WaitingOn::Review`] —
+    // and a steer is the human saying look at it again: without this a Done
+    // Conversation steered back into Wrapping would arrive carrying the settle it
+    // was carried to Done on, and nothing would read the branch at all.
+    //
+    // Which is the whole difference between this and [`resolve_conflicts`], the
+    // one press that lands in Wrapping and deliberately leaves the settle
+    // standing. The review alone: the checks, what has been said and the merge
+    // are asked of GitHub on every poll, so they settle themselves from the
+    // answers this wrap-up's own watchers get.
+    if target == Lifecycle::Wrapping {
+        super::wrap_up::unsettle(&mut tx, id, super::WaitingOn::Review).await?;
     }
 
     moved(&mut tx, id, target).await?;
@@ -4472,6 +4718,87 @@ pub async fn start_stage<'a>(
     tx.commit().await.context("starting a stage")?;
 
     Ok(Staged::Started)
+}
+
+/// Put a Draft holding a pull request on that pull request's branch: the branch
+/// it is on, the head it was taken up at, the branch GitHub says it goes into,
+/// and where the whole of it is checked out.
+///
+/// [`start_stage`]'s sibling over the other kind of thing a Draft takes up, and
+/// it stops one step short of it: the state is left alone here, because
+/// recording the pull request is what moves this Conversation — see
+/// [`super::record_pull_request`], which is the very next thing the take-up
+/// does. A Conversation that arrived in Wrapping by its own finish step was
+/// moved by that same record, and a take-up is that ending reached by the other
+/// door rather than a second kind of move.
+///
+/// `base` is the pull request's head at take-up with GitHub's base branch beside
+/// it, which is deliberately not the pair every other start writes. The commit
+/// is the branch's own tip rather than what it came off, so that the sweep draws
+/// only what Verkstead adds from here — the pull request's own commits are the
+/// pull request's record. The name beside it is the branch the pull request
+/// merges into, which is what a conflict is measured against.
+///
+/// No direction is written, unlike a stage's. There is no backlog and no inline
+/// run here: the work is built, and what follows this is a wrap-up.
+///
+/// `companions` is where the companion repos the human configured while this
+/// drafted were checked out, in this transaction for [`start_stage`]'s reason.
+pub async fn take_up<'a>(
+    pool: &SqlitePool,
+    id: i64,
+    branch: &str,
+    base: impl Into<Base<'a>>,
+    worktree: &Path,
+    companions: &[super::CompanionWorktree],
+) -> Result<Taking> {
+    let base = base.into();
+    let worktree = super::repos::text(worktree)?;
+
+    let mut tx = super::writing(pool, "taking up a pull request").await?;
+
+    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("reading the state of Conversation {id}"))?;
+
+    let Some((state,)) = row else {
+        return Ok(Taking::NoSuchConversation);
+    };
+
+    if Lifecycle::read(&state)? != Lifecycle::Draft {
+        return Ok(Taking::NotDrafting);
+    }
+
+    // The branch is settled rather than invented, which is the one thing this
+    // writes that a stage's start does not have to: a stage is worked on a name
+    // read out of a roadmap, and this one is worked on the branch the pull
+    // request is already on. So `naming` stays where it is — nobody is waiting
+    // for a better name for a branch that has a review on it.
+    sqlx::query(
+        "UPDATE conversations SET named_branch = ?, base_commit = ?, base_ref = ? WHERE id = ?",
+    )
+    .bind(branch)
+    .bind(base.commit)
+    .bind(base.named)
+    .bind(id)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("putting Conversation {id} on the pull request's branch"))?;
+
+    sqlx::query("INSERT INTO worktrees (conversation_id, path) VALUES (?, ?)")
+        .bind(id)
+        .bind(worktree)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("recording the worktree of Conversation {id}"))?;
+
+    super::companions::record_worktrees(&mut tx, id, companions).await?;
+
+    tx.commit().await.context("taking up a pull request")?;
+
+    Ok(Taking::Recorded)
 }
 
 /// What a stage Conversation's branch was made on top of, where it is a stage

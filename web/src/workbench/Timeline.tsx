@@ -1994,7 +1994,7 @@ function Brief(props: {
               when={props.conversation.adopting}
               fallback={<>Nothing was written.</>}
             >
-              Nothing written yet — adopting the stage is what puts its brief
+              Nothing written yet — starting the stage is what puts its brief
               here.
             </Show>
           </Empty>

@@ -209,6 +209,92 @@ pub struct AbandonedRoadmap {
     pub base: String,
 }
 
+/// One Repo's open pull requests, as the *Wrap up a pull request* level lists
+/// them.
+///
+/// Grouped by Repo for the reason the abandoned roadmaps are — a number is a
+/// fact about a repository, and `#41` says something different in each of them,
+/// so a flat list would be one whose rows could not be told apart without
+/// carrying the repository anyway.
+///
+/// Nothing here is stored. Every field is read off GitHub through the host's
+/// `gh` at the moment the level is drawn, which is why a pull request somebody
+/// has since merged simply stops appearing rather than having to be taken off
+/// anything.
+///
+/// A Repo Verkstead could not ask about — no GitHub remote, no `gh`, nobody
+/// logged in, a GitHub that would not answer — contributes no group at all
+/// rather than an empty one or a failure: what Verkstead does not know is not
+/// an empty list, but it is not a broken page either.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct OpenPullRequestRepo {
+    /// Which Repo, by the id a Conversation is started against.
+    pub repo_id: i64,
+
+    /// And what it is called, which is what each row says it is in.
+    pub repo: String,
+
+    /// The open pull requests in it, in the order GitHub listed them. Never
+    /// empty: a Repo with nothing open contributes no group at all.
+    pub pull_requests: Vec<OpenPullRequest>,
+}
+
+/// One open pull request, as a row of that level draws it.
+///
+/// Any author, because whose pull request it is says nothing about whether it is
+/// worth wrapping up — what the pipeline takes up is the branch rather than the
+/// person. Forks are the one exclusion, and they are excluded for what taking
+/// one up would have to do rather than out of taste: a head branch in another
+/// repository cannot be pushed to over `origin`, so a wrap-up that fixed a red
+/// check would have nowhere to put the fix.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct OpenPullRequest {
+    /// The number GitHub gave it, which is what everybody calls it by — in
+    /// this repository and nowhere else.
+    pub number: i64,
+
+    /// Its title, which is the line a row leads with.
+    pub title: String,
+
+    /// The whole URL, so a row can lead out to GitHub without a repository
+    /// name being guessed at.
+    pub url: String,
+
+    /// The branch the work is on, which is the branch taking it up checks out.
+    pub head: String,
+
+    /// And the branch it goes into, which is what the wrap-up watches for
+    /// conflicts against.
+    pub base: String,
+
+    /// Who opened it, by their GitHub login. Empty where GitHub named nobody,
+    /// which is what a deleted account leaves behind.
+    pub author: String,
+
+    /// What it says about itself: the description as it was written, raw
+    /// markdown. Empty where nobody wrote one.
+    ///
+    /// Never drawn on the row — a row is a line, and this is a document — but
+    /// carried on it all the same, because loading a pull request prefills the
+    /// box with the title as a heading and this under it. Raw rather than
+    /// rendered, unlike every other piece of markdown crossing this wire: what
+    /// it becomes is a Brief the human edits, and a field cannot be filled from
+    /// HTML.
+    pub body: String,
+
+    /// The Conversation already holding this pull request, where one does —
+    /// any state, Done and Closed included, because a pull request stays on a
+    /// Conversation's record once it is recorded there.
+    ///
+    /// `null` is a pull request nothing has taken up. What a held row does
+    /// instead of loading is lead to the Conversation holding it: there is one
+    /// Conversation per piece of work, and a second one over the same branch
+    /// would be two wrap-ups pushing to it.
+    pub conversation_id: Option<i64>,
+}
+
 /// What a Conversation is adopting, as its own page draws it: the roadmap it
 /// was started for, and the stage adopting would start.
 ///
@@ -236,6 +322,36 @@ pub struct AdoptionView {
     /// gone, or its next stage is somebody else's already. The press says which
     /// of those it is; this is only what the page can name.
     pub stage: Option<AdoptedStage>,
+}
+
+/// The pull request a drafting Conversation is holding, as its own page names
+/// it: which one, what it is called, and the two branches it sits between.
+///
+/// Kept rather than read off GitHub every time the page is drawn, which is where
+/// this parts company with [`AdoptionView`] beside it. A roadmap is a document
+/// in the Conversation's own repository and costs a file read; a pull request is
+/// a call out to GitHub, and a page that made one every time it was opened would
+/// be a page waiting on somebody else's server to say what it is about. What is
+/// authoritative is asked again at the take-up, which is the one moment it
+/// matters.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct AdoptedPullRequestView {
+    /// The number GitHub gave it, which is what everybody calls it by — in the
+    /// Conversation's own Repo and nowhere else.
+    pub number: i64,
+
+    /// Its title, as it read when the row was listed.
+    pub title: String,
+
+    /// The whole URL, so the card can lead out to GitHub.
+    pub url: String,
+
+    /// The branch the work is on, which is the branch the take-up checks out.
+    pub head: String,
+
+    /// And the branch it goes into.
+    pub base: String,
 }
 
 /// The stage an adoption would start, named.
@@ -442,6 +558,16 @@ pub struct ConversationView {
     /// and its stage named, both Profiles and the base commit to fix, and one
     /// Adopt press — no Brief to write and no grilling to start.
     pub adopting: Option<AdoptionView>,
+
+    /// And the pull request it is holding, where it is holding one.
+    ///
+    /// `null` alongside [`Self::adopting`] on every ordinary Conversation, and
+    /// never both at once: a Draft adopts one thing or none. `Some` is one
+    /// started off the *Wrap up a pull request* level, and it is what puts the
+    /// page on that shape — the pull request named over a Brief the human still
+    /// writes, the two Pairings that will run the wrap-up, and no branch, base
+    /// or grilling to settle.
+    pub adopting_pull_request: Option<AdoptedPullRequestView>,
 
     /// The worktree the grilling was given to work in, once there is one.
     ///
@@ -2618,6 +2744,30 @@ pub struct NewAdoption {
     pub base: Option<String>,
 }
 
+/// And starting one to wrap a pull request up with: which Repo, and the row off
+/// the *Wrap up a pull request* level that was pressed.
+///
+/// The whole row rather than a number, unlike [`NewAdoption`] beside it. A
+/// roadmap is a document in the Conversation's own repository and is read back
+/// off it wherever it is wanted; a pull request is somebody else's server, and
+/// a server that had only the number would have to make a `gh` call of its own
+/// to draw the card the human has already been looking at. So the five facts
+/// travel, and the take-up is where GitHub is asked again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct NewPullRequestAdoption {
+    pub repo_id: i64,
+    pub number: i64,
+    pub title: String,
+    pub url: String,
+
+    /// The branch the work is on, which is the branch the take-up checks out.
+    pub head: String,
+
+    /// And the branch it goes into.
+    pub base: String,
+}
+
 /// The order the human has just dragged the sidebar into: every Conversation
 /// they can see, by id, top first.
 ///
@@ -2887,6 +3037,13 @@ pub enum RepoSwitched {
     /// different one under the same name. What is the human's here is putting
     /// the roadmap down, not carrying it across.
     Adopting,
+
+    /// The Conversation is holding a pull request, which is a branch and a
+    /// number in the Repo it was opened in: `#41` names something else in the
+    /// next repository along, or nothing at all. Which repository it is in was
+    /// settled by the row that started the Conversation, exactly as an
+    /// adoption's was.
+    HoldingPullRequest,
 
     /// There is no registered Repo with that id — taken off the registry between
     /// the panel listing it and the press that picked it.
@@ -3705,6 +3862,101 @@ pub enum Adopted {
     /// exactly as a grill start does. Which is why this is
     /// [`GrillingStarted::Companion`] word for word: the same four questions
     /// asked of the same repositories at the other door.
+    Companion {
+        /// The Repo's registered name.
+        repo: String,
+
+        why: CompanionRefusal,
+    },
+}
+
+/// What became of pressing the take-up on a Draft holding a pull request.
+///
+/// [`Adopted`]'s sibling over the other kind of thing a Draft takes up, and
+/// named the same way for the same reason: a human is at the workbench pressing
+/// the button, and each of these is something different for them to go and do.
+///
+/// The refusals it does not share with [`Adopted`] are the ones about a branch
+/// that is already there. A stage's branch is a name nothing has yet, so what
+/// refuses an adoption is a name being *taken*; a pull request's head branch is
+/// the whole point, so what refuses a take-up is that branch holding something
+/// origin does not, or somebody else standing on it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum TakenUp {
+    /// The worktree is on the pull request's head branch, the pull request is
+    /// recorded, and the Conversation is wrapping it up.
+    TakenUp,
+
+    NoSuchConversation,
+
+    /// It is past drafting, so it has been taken up once already — or closed.
+    NotDrafting,
+
+    /// It is holding no pull request, which is every Conversation that began
+    /// with a Brief and a grilling. There is nothing here to wrap up.
+    NotHoldingOne,
+
+    /// No Agent Profile is chosen for the implementation, which is what a red
+    /// check and a conflict are fixed under.
+    ///
+    /// The grilling is not among these, unlike an adoption's: the work on a
+    /// pull request is built, there is no round for a grilling to open, and the
+    /// picker is not drawn.
+    NoImplementationProfile,
+
+    /// Nor for the review, which is what reads the branch and what has been
+    /// said on it.
+    NoReviewProfile,
+
+    /// A chosen Profile's pair is not where it was left, so there is no account
+    /// to run the session under.
+    ProfileBroken,
+
+    /// Git would not fetch from the Repo's remote, so what origin holds on the
+    /// head branch cannot be known. Refused rather than taken up against refs
+    /// that may be a week old.
+    FetchFailed,
+
+    /// Origin has no branch by the name GitHub gave as the pull request's head
+    /// — deleted since it was listed, or never pushed to this remote.
+    NoHeadBranch,
+
+    /// There is a local branch by that name, and it holds commits origin does
+    /// not. Pushing them is the human's, and Verkstead moving the branch under
+    /// them would be Verkstead throwing work away.
+    BranchAhead,
+
+    /// There is a local branch by that name and it has gone its own way: each
+    /// of the two holds commits the other does not. Reconciling them is the
+    /// human's, for the reason above — and a git that would not say how the two
+    /// stand reads as this, which is the reading that never takes a branch it
+    /// should not.
+    BranchDiverged,
+
+    /// Git would not move the local branch on to origin's, though it stands
+    /// behind it. The reason is in the server's log.
+    FastForwardFailed,
+
+    /// The head branch is checked out somewhere already — the human's own
+    /// checkout, or another worktree — and git holds one checkout per branch.
+    /// Which place it is, is the whole of what the human needs.
+    CheckedOutElsewhere {
+        /// Where it is checked out, as git named it.
+        at: String,
+    },
+
+    /// Git would not make the worktree. The reason is in the server's log —
+    /// this is the one refusal with nothing for the human to correct.
+    WorktreeRefused,
+
+    /// A companion repo could not be checked out beside the head branch, and
+    /// this is which one and why.
+    ///
+    /// A Conversation holding a pull request drafts like any other, so its
+    /// setup card configures companions like any other — and the take-up is the
+    /// press that takes this Draft past drafting, so it checks them out exactly
+    /// as a grill start does.
     Companion {
         /// The Repo's registered name.
         repo: String,

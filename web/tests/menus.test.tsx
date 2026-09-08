@@ -630,7 +630,7 @@ describe("what every menu is drawn with", () => {
   /// away from the shared one.
   it("leaves no menu a shadow of its own", () => {
     const callers: [string, string][] = [
-      ['.adopt > [role="menu"]', composer],
+      ['.actions > [role="menu"]', composer],
       ['.conversationActions > [role="menu"]', actions],
       ['.standing > [role="menu"]', standing],
     ];

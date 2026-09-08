@@ -29,20 +29,21 @@ use axum::routing::{delete, get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    Adopted, Attached, AttachmentRemoved, Author, BaseBranchChoice, BranchRename, BriefEdit,
-    BuildCacheView, CheckRollup, CleanupStepView, CleanupView, CommentedOn, CompanionAdded,
-    CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode, CompanionModeChoice,
-    CompanionModeChosen, CompanionRemoved, CompanionView, CompileCaching, ConflictResolutionEdit,
-    ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
-    ConversationStopped, ConversationUnarchived, ConversationView, Creation, Cursor,
-    GrillingStarted, IgnoreRule, IgnoredCommentsEdit, Lifecycle, Locked, Merging, MissedOut,
-    NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry,
-    PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved,
-    Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress, SetReading, SetView,
-    SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit,
-    SharedConversation, ShowArchived, ShowingArchived, Standing, SteerOpened, SteerSubmission,
-    Submitted, Subscribed, Subscription, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved,
-    UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    Adopted, AdoptedPullRequestView, Attached, AttachmentRemoved, Author, BaseBranchChoice,
+    BranchRename, BriefEdit, BuildCacheView, CheckRollup, CleanupStepView, CleanupView,
+    CommentedOn, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
+    CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView, CompileCaching,
+    ConflictResolutionEdit, ConversationArchived, ConversationClosed, ConversationEntry,
+    ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Creation,
+    Cursor, GrillingStarted, IgnoreRule, IgnoredCommentsEdit, Lifecycle, Locked, Merging,
+    MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption,
+    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView,
+    RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused,
+    ServeEdit, ServePress, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
+    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
+    ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription,
+    TakenUp, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe,
+    UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -113,11 +114,24 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // rather than under a Repo, because that is where it is read: what it
         // offers is another way to start work.
         .route("/api/ui/abandoned-roadmaps", get(abandoned_roadmaps))
+        // And the pull requests open in them, which is the other thing offered
+        // under that box: work that is already somewhere else, waiting to be
+        // wrapped up. Read off GitHub rather than out of the store, so it sits
+        // beside the roadmaps rather than under a Repo for the same reason.
+        .route("/api/ui/open-pull-requests", get(open_pull_requests))
         // And starting one to adopt a roadmap with, which is what clicking a
         // roadmap in that notice does. Its own endpoint rather than a field on
         // the one above: adopting is the other way into the pipeline, and what
         // it starts is a Conversation with no Brief to write.
         .route("/api/ui/adoptions", post(start_adoption))
+        // And starting one to wrap a pull request up with, which is what
+        // pressing a free row of that level does. Its own endpoint beside the
+        // one above for the same reason, over the other kind of thing there is
+        // to take up.
+        .route(
+            "/api/ui/pull-request-adoptions",
+            post(start_pull_request_adoption),
+        )
         .route("/api/ui/conversations/{id}", get(conversation))
         // And the same Conversation as one file to send somebody: the share
         // build of the viewer with this record inside it, answered as a
@@ -286,6 +300,7 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // grilling start's sibling: what the human presses on an adopting
         // Conversation, there being no Brief to write and no grilling to run.
         .route("/api/ui/conversations/{id}/adopt", post(adopt))
+        .route("/api/ui/conversations/{id}/take-up", post(take_up))
         .route("/api/ui/conversations/{id}/close", post(close))
         // And the two of those joined, which is one row of the menu rather than
         // two pressed in turn: the close and the archive are one intention often
@@ -901,6 +916,45 @@ async fn abandoned_roadmaps(State(state): State<AppState>) -> HttpResponse {
     Json(crate::stages::abandoned(repos).await).into_response()
 }
 
+/// `GET /api/ui/open-pull-requests` — every open pull request in the registered
+/// Repos, grouped by Repo, each saying which Conversation already holds it.
+///
+/// The other way work gets into the pipeline: a pull request Verkstead did not
+/// open is a branch with a review on it and nothing driving the wrap-up, and
+/// this is what the *Wrap up a pull request* level under the compose box lists.
+///
+/// Read off GitHub through the host's `gh` every time it is asked for, like the
+/// roadmaps above and for a stronger version of their reason: GitHub owns this
+/// list, and a copy Verkstead kept would be wrong the moment somebody pressed
+/// *Merge*.
+///
+/// **Nothing here is an error.** A Repo with no GitHub remote, a machine with no
+/// `gh`, a login that has expired and a GitHub that timed out are all
+/// repositories this list has no news about — see [`crate::pull_requests::open`],
+/// where each of them contributes no rows and no failure. The one thing that can
+/// go wrong is the registry itself, which is Verkstead's own database.
+async fn open_pull_requests(State(state): State<AppState>) -> HttpResponse {
+    let repos = match store::registered_repos(&state.pool).await {
+        Ok(repos) => repos,
+        Err(error) => {
+            tracing::error!(error = ?error, "reading the registered Repos failed");
+            return unavailable("the registered Repos could not be read");
+        }
+    };
+
+    // Which pull requests are already in the pipeline, read once for the whole
+    // list — see [`store::held_pull_requests`].
+    let held = match store::held_pull_requests(&state.pool).await {
+        Ok(held) => held,
+        Err(error) => {
+            tracing::error!(error = ?error, "reading which pull requests are already held failed");
+            return unavailable("the open pull requests could not be read");
+        }
+    };
+
+    Json(crate::pull_requests::open(&state.github, repos, &held).await).into_response()
+}
+
 /// `GET /api/ui/conversations` — the sidebar, newest first.
 ///
 /// Three facts ride out on every row beyond what the store holds: whether a
@@ -1028,6 +1082,34 @@ async fn start_adoption(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "starting a Conversation to adopt a roadmap failed");
+            unavailable("the Conversation could not be started")
+        }
+    }
+}
+
+/// `POST /api/ui/pull-request-adoptions` — start a Conversation to wrap a pull
+/// request up with.
+///
+/// What pressing a free row of the *Wrap up a pull request* level does. It
+/// records and opens: nothing about the repository is touched and nothing is
+/// checked out until the human presses the take-up on the page this puts them
+/// on.
+async fn start_pull_request_adoption(
+    State(state): State<AppState>,
+    Json(new): Json<NewPullRequestAdoption>,
+) -> HttpResponse {
+    let pull_request = store::AdoptedPullRequest {
+        number: new.number,
+        title: new.title,
+        url: new.url,
+        head: new.head,
+        base: new.base,
+    };
+
+    match crate::conversations::start_wrapping_up(&state, new.repo_id, &pull_request).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "starting a Conversation to wrap a pull request up failed");
             unavailable("the Conversation could not be started")
         }
     }
@@ -1401,6 +1483,28 @@ pub(crate) async fn conversation_view(
         _ => None,
     };
 
+    // And the pull request it is holding, where it is holding one and has not
+    // taken it up yet. Read straight off the record rather than off GitHub: the
+    // roadmap above is a document in this Repo and costs a file read, where this
+    // would be a call out to somebody else's server every time the page was
+    // opened. What GitHub says *now* is what the take-up asks for, which is the
+    // one moment it decides anything.
+    //
+    // A worktree says the take-up has happened, exactly as it says an adoption
+    // has: what follows it is a wrap-up, and the pull request is on the record
+    // properly by then.
+    let adopting_pull_request = conversation
+        .adopting_pull_request
+        .clone()
+        .filter(|_| worktree.is_none())
+        .map(|held| AdoptedPullRequestView {
+            number: held.number,
+            title: held.title,
+            url: held.url,
+            head: held.head,
+            base: held.base,
+        });
+
     // Whether driving has stopped, however it stopped: the stop says the
     // Conversation is stopped now, and the Notice it points at says what stopped
     // and why. One question about one thing — an account out of window stops a
@@ -1616,6 +1720,7 @@ pub(crate) async fn conversation_view(
         stop_asked,
         ready_to_continue,
         adopting,
+        adopting_pull_request,
         grilling_pairing,
         implementation_pairing,
         review_pairing,
@@ -3158,7 +3263,28 @@ async fn adopt(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "adopting a roadmap stage failed");
-            unavailable("the stage could not be adopted")
+            unavailable("the stage could not be started")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/take-up` — put the Conversation on the
+/// branch of the pull request it is holding and start wrapping it up.
+///
+/// The adoption's sibling over the other kind of thing a Draft holds, and
+/// checked the same way: what the page named was read off GitHub a moment ago,
+/// and a branch somebody has pushed to, taken or checked out since is answered
+/// here rather than there.
+async fn take_up(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(TakenUp::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::take_up(&state, id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "taking a pull request up failed");
+            unavailable("the pull request could not be taken up")
         }
     }
 }
