@@ -210,9 +210,9 @@ fn installed(look: impl Fn(&str) -> Option<PathBuf>) -> String {
 /// it is actually installed.
 ///
 /// The server's own `PATH` because that is what *installed* means here, and
-/// because it is the `PATH` a Windows session is given — `servers_path` in
-/// [`crate::sandbox`] is the Windows arm of that same question, and answers it
-/// out of the same variable.
+/// because it is the `PATH` a Windows session is given — `started_with` in
+/// [`crate::sandbox`] is that same variable, read there once and handed to a
+/// session on this platform as it stands.
 fn on_the_path(program: &str) -> Option<PathBuf> {
     crate::sandbox::open::found(
         OsStr::new(program),

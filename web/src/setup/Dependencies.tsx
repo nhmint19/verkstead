@@ -5,7 +5,25 @@
 //! `git`, the four harnesses and `gh` — and so is every state on them. What this
 //! side adds is the words: what each row is for, why three of the seven hold
 //! nothing up, and the instruction under the ones that are not there yet. A row
-//! that is present says so and nothing else; there is nothing to do about it.
+//! that is present has no instruction under it; there is nothing to do about
+//! it.
+//!
+//! **A row that is there says which file it is**, and a row that is not says
+//! where the name was seen — the two halves this step gained when a session's
+//! `PATH` became the human's own. A stale `claude` in `/usr/bin` shadowing the
+//! current one under `~/.local/bin` is a tick either way and two different
+//! programs, and a `claude` on the server's `PATH` that no session's holds is a
+//! `PATH` to fix rather than a program to install. See [`Where`] and [`Seen`]
+//! below, which are the words for each.
+//!
+//! **And where a session looks is the server's list**, drawn above the rows on
+//! every platform: a session's `PATH` is composed out of the one Verkstead was
+//! started with, so no sentence written here could say which directories those
+//! are. **Read once, at startup** — which is the other half of that and the one
+//! thing somebody who has just installed something has to be told, so [`RESTART`]
+//! is under the list on every tab. It was Windows' own note when a session's
+//! `PATH` was a fixed list of system directories everywhere else; it holds on all
+//! three platforms now.
 //!
 //! **Which instruction is a tab rather than a fact.** The detected OS opens and
 //! the other seven are a press away — see
@@ -38,6 +56,7 @@ import type {
   DependencyView,
   Distro,
   OnboardingView,
+  Seen as SeenSomewhere,
 } from "../api/types";
 import { Note } from "../notices";
 import { Mark, type Standing } from "./Mark";
@@ -73,6 +92,26 @@ const WHY: Record<Dependency, string> = {
 /// And what a row reads instead, where this platform has no such thing to have:
 /// the Windows sandbox row, whose whole answer is the note under it.
 const MOOT = "Not applicable";
+
+/// What the list of directories above the rows is.
+///
+/// The server's own, rather than a sentence about where a session looks on this
+/// kind of machine: a session's `PATH` is composed out of the one Verkstead was
+/// started with, so the list is a fact about this box and nothing written here
+/// could stand in for it.
+const LOOKS = "Where a session looks for a program, in order:";
+
+/// And that the list is one reading rather than a live one.
+///
+/// Verkstead reads its `PATH` when it starts and composes every session's out of
+/// it, so a directory put on a shell's `PATH` after that is a directory no
+/// session has — which is the whole of what somebody whose fresh install has not
+/// ticked needs to know. Said once here rather than eight times over: it is a
+/// fact about Verkstead rather than about any one machine.
+const RESTART =
+  "Verkstead reads that PATH once, when it starts. A directory added to it " +
+  "since — the one a new install landed in — is one no session has until " +
+  "Verkstead is started again from a shell whose PATH names it.";
 
 /// Which rows are a harness, so that the row wears the same mark the rest of the
 /// app draws that backend with.
@@ -129,7 +168,22 @@ export function Dependencies(props: {
         </For>
       </div>
 
-      <Note>{guide().landing}</Note>
+      <Show when={props.reading.path.length > 0}>
+        <div class={styles.looks}>
+          <p class={styles.looking}>{LOOKS}</p>
+          <ol class={styles.path}>
+            <For each={props.reading.path}>
+              {(entry) => (
+                <li>
+                  <code>{entry}</code>
+                </li>
+              )}
+            </For>
+          </ol>
+        </div>
+      </Show>
+
+      <Note class={styles.restart}>{RESTART}</Note>
 
       <ul class={styles.rows}>
         <For each={props.reading.dependencies}>
@@ -176,6 +230,23 @@ function Row(props: {
     return said.state === "Absent" ? said.trouble : null;
   };
 
+  /// Which file a row that is there found, where it named one at all.
+  const found = (): Found | null => {
+    const said = state();
+
+    return said.state === "Present" && said.at
+      ? { at: said.at, target: said.target }
+      : null;
+  };
+
+  /// And where the name was seen, where a row that is not there saw one: a
+  /// program on this machine that no session can open.
+  const seen = (): SeenSomewhere | null => {
+    const said = state();
+
+    return said.state === "Absent" ? said.seen : null;
+  };
+
   return (
     <li
       class={styles.row}
@@ -200,8 +271,12 @@ function Row(props: {
         {(said) => <pre class={styles.trouble}>{said()}</pre>}
       </Show>
 
-      {/* Nothing under a row that is already there: what is left to say about a
-          program a session would find is nothing. */}
+      <Show when={found()}>{(file) => <Where of={file()} />}</Show>
+
+      <Show when={seen()}>{(where) => <Seen at={where()} />}</Show>
+
+      {/* No instruction under a row that is already there: what to install is
+          all an instruction says, and this one is installed. */}
       <Show when={state().state !== "Present"}>
         <Instructed of={props.instruction} />
       </Show>
@@ -209,7 +284,81 @@ function Row(props: {
   );
 }
 
+/// Which file a present row found: the path the name resolved to, and what it
+/// lands on where that path is a link.
+///
+/// A row that named no file has none of this — the sandbox on a Mac and on
+/// Windows is not a program anybody went looking for.
+type Found = {
+  at: string;
+  target: string | null;
+};
+
+/// That file, under the row.
+///
+/// The second path only where the two differ, which the server has already
+/// decided: a program that is no link has one path and would read as two.
+function Where(props: { of: Found }): JSX.Element {
+  return (
+    <p class={styles.where} data-where>
+      <code data-at>{props.of.at}</code>
+      <Show when={props.of.target}>
+        {(target) => (
+          <span class={styles.into}>
+            {" "}
+            links to <code data-target>{target()}</code>
+          </span>
+        )}
+      </Show>
+    </p>
+  );
+}
+
+/// And where a row that is *not* there saw the name: a program the human has
+/// that no session can open.
+///
+/// Three sentences for the three ways that happens, because they are three
+/// different things to do about it — a directory to put on the `PATH` Verkstead
+/// is started with, an install to move somewhere a session can reach, and a
+/// link left behind by an install that has gone. A row with none of them saw
+/// the name nowhere at all, and what it says is the instruction under it.
+function Seen(props: { at: SeenSomewhere }): JSX.Element {
+  return (
+    <Note class={styles.seen}>
+      <span data-seen={props.at.seen}>
+        <Show when={props.at.seen === "Beyond"}>
+          Found at <code>{props.at.at}</code>, which is not on the PATH a session
+          gets — so a session cannot open it.
+        </Show>
+
+        <Show when={props.at.seen === "Leading" ? props.at : null}>
+          {(leading) => (
+            <>
+              <code>{leading().at}</code> is a link to{" "}
+              <code>{leading().target}</code>, which a session cannot reach.
+            </>
+          )}
+        </Show>
+
+        <Show when={props.at.seen === "Dangling"}>
+          <code>{props.at.at}</code> is a link with nothing at the end of it.
+        </Show>
+      </span>
+    </Note>
+  );
+}
+
+/// The word over an instruction's alternative, which is the whole of what has
+/// to be said about it: the two are the same program, and which one a machine
+/// wants is the reader's to decide.
+const OR = "Or, from this machine's own package manager:";
+
 /// What to run, where to get it, and what neither says for itself.
+///
+/// Once more under itself where the instruction keeps an alternative, which goes
+/// one level deep and no further: the second install is a command with a note
+/// exactly as the first is, so it is drawn by the same function rather than by a
+/// smaller copy of it.
 function Instructed(props: { of: Instruction }): JSX.Element {
   return (
     <div class={styles.instruction}>
@@ -235,6 +384,18 @@ function Instructed(props: { of: Instruction }): JSX.Element {
       </Show>
 
       <Show when={props.of.note}>{(note) => <Note>{note()}</Note>}</Show>
+
+      {/* And the other way to get the same program, under the one that leads:
+          Claude Code's row is the vendor's installer with this machine's own
+          package kept beneath it. */}
+      <Show when={props.of.alternative}>
+        {(other) => (
+          <div class={styles.alternative}>
+            <p class={styles.or}>{OR}</p>
+            <Instructed of={other()} />
+          </div>
+        )}
+      </Show>
     </div>
   );
 }

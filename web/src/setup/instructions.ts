@@ -9,12 +9,21 @@
 //! Build is a link on all eight tabs.
 //!
 //! **Every instruction says where the binary has to land**, because installing
-//! one is only half of it: a session resolves its programs on the sandbox's own
-//! `PATH` (`crates/server/src/sandbox.rs`'s `LINUX_PATH` and `APPLE_PATH`)
-//! rather than on the shell's, so an agent under `~/.local/bin` is a program
-//! that runs perfectly in a terminal and is not there at all for a session.
-//! Claude Code's own installer puts one exactly there, which is why the caveat
-//! is on its row on every tab.
+//! one is only half of it: a session resolves its programs on the `PATH` the
+//! server itself was started with, composed for a session — see
+//! `crates/server/src/sandbox.rs`'s `composed`. Which directories those are is a
+//! fact about the machine rather than about the tab, so the wizard draws the
+//! server's own list above the rows and nothing here says it: see
+//! `OnboardingView.path`, which is where that list comes from. And that the
+//! `PATH` is read once, at startup, is the one sentence every tab would carry
+//! word for word, so it is drawn above the rows too — see `Dependencies.tsx`'s
+//! `RESTART`.
+//!
+//! **A row may lead with one install and keep another under it.** Claude Code is
+//! the row that does, on every tab but the Mac's: the vendor's own installer
+//! first, because a distribution's package can be too old to connect at all —
+//! Ubuntu's under WSL was — and the packaged one under it for the machine that
+//! would rather have that. See [`Instruction`]'s `alternative`.
 //!
 //! **Eight tabs and not one**, because the detection is a guess. It comes off
 //! `/etc/os-release`'s `ID` and then `ID_LIKE`, so a derivative names its parent
@@ -42,23 +51,32 @@ export type Instruction = {
   link?: string;
 
   /// And what the command does not say for itself: where the program has to
-  /// land, what else it wants installed first, and what would put it somewhere
-  /// no session can see.
+  /// land, what else it wants installed first, and what a machine has to be
+  /// told before the binary is one a session can open.
   note?: string;
+
+  /// Or the other way to get the same program, drawn under the first with a
+  /// note of its own.
+  ///
+  /// Two instructions rather than one whose note names a second command: the
+  /// second is a line to paste exactly as much as the first is, and a line to
+  /// paste is a line with a copy button beside it.
+  alternative?: Instruction;
 };
 
-/// One operating system's answers: what the tab is called, where a session
-/// looks on it, and an instruction for each of the seven rows.
+/// One operating system's answers: what the tab is called, and an instruction
+/// for each of the seven rows.
+///
+/// Where a session looks is not among them. That was a sentence per tab naming
+/// the fixed list a session's `PATH` used to be; a session's `PATH` is now the
+/// server's own, so the wizard draws the real list from the wire above the rows
+/// — see `Dependencies.tsx`.
 export type Guide = {
   /// What the tab is called.
   title: string;
 
-  /// Where a session's `PATH` goes on this machine, said once above the rows
-  /// rather than seven times inside them.
-  landing: string;
-
-  /// And one instruction per row. Every row, on every OS: a tab with a gap in
-  /// it is a row somebody is left staring at.
+  /// One instruction per row. Every row, on every OS: a tab with a gap in it is
+  /// a row somebody is left staring at.
   rows: Record<Dependency, Instruction>;
 };
 
@@ -76,45 +94,38 @@ export const DISTROS: readonly Distro[] = [
   "OtherLinux",
 ];
 
-/// Where a session looks on a Linux machine, which is the machine's own
-/// directories and not the shell's.
+/// Claude Code the way Anthropic installs it, which is what every Linux tab
+/// leads with.
 ///
-/// `LINUX_PATH` in `crates/server/src/sandbox.rs`, said in words. `~/.local/bin`
-/// and `~/.nix-profile/bin` are the two an install is most likely to land in and
-/// neither is on it, which is what the caveats below are about.
-const LINUX_LANDS =
-  "A session's PATH is /run/current-system/sw/bin, " +
-  "/nix/var/nix/profiles/default/bin, /usr/local/bin, /usr/bin and /bin — the " +
-  "machine's own directories rather than your shell's. A program installed " +
-  "under your home directory runs in your terminal and is not there for a " +
-  "session at all.";
-
-/// And on a Mac, where Homebrew's own prefix is the first thing on it.
-const APPLE_LANDS =
-  "A session's PATH is /opt/homebrew/bin, /usr/local/bin, /usr/bin and /bin, " +
-  "and nix's directories after them. Homebrew installs into the first of " +
-  "those on Apple silicon and into /usr/local/bin on an Intel Mac, so " +
-  "anything brew put there is somewhere a session looks.";
-
-/// And on Windows, where there is no list to write down: a session gets the
-/// `PATH` the server was started with.
-const WINDOWS_LANDS =
-  "A session on Windows runs on the PATH the server itself was started with, " +
-  "so anywhere on the machine's PATH will do. A PATH that changed while " +
-  "Verkstead was running is one it has not read: restart the server once the " +
-  "install has landed.";
-
-/// What Claude Code's own installer does, which is the one caveat that belongs
-/// on a row rather than under the tab.
+/// **The packaged ones go stale, and this one does not.** A distribution's
+/// `claude` can be too old to connect at all — Ubuntu's under WSL was — so the
+/// install that stays current is the one to offer first, and it is the one most
+/// people already have.
 ///
-/// `~/.local/bin` is on nobody's sandbox `PATH` — see [`LINUX_LANDS`] — so the
-/// native installer leaves a `claude` that works in a terminal and cannot be
-/// launched by a session. Said on every tab, because the installer is the same
-/// one everywhere and it is the way most people already have it.
-const CLAUDE_ELSEWHERE =
-  "Claude's own installer — curl -fsSL https://claude.ai/install.sh | bash — " +
-  "puts the binary in ~/.local/bin, which is not on the PATH a session gets. " +
-  "Install it the way above instead, or symlink it into /usr/local/bin.";
+/// It lands in `~/.local/bin`, which a session reaches whenever the `PATH`
+/// Verkstead was started with names it: the entry is kept and the directory
+/// bound read-only, and the link into the versions directory is followed. See
+/// `crates/server/src/sandbox.rs`'s `composed`. So what the note has to say is
+/// the one thing nobody can read off the command — which shell's `PATH` has to
+/// name it, and that Verkstead has to be started again after.
+const CLAUDE_NATIVE: Instruction = {
+  command: "curl -fsSL https://claude.ai/install.sh | bash",
+  note:
+    "Anthropic's own installer, and the one that stays current. It puts claude " +
+    "in ~/.local/bin, so that directory has to be on the PATH of the shell " +
+    "Verkstead is started from, with Verkstead started again once it is.",
+};
+
+/// The same installer on Windows, where it is the PowerShell one and the home
+/// directory is spelled differently.
+const CLAUDE_NATIVE_WINDOWS: Instruction = {
+  command: "irm https://claude.ai/install.ps1 | iex",
+  note:
+    "Anthropic's own installer, and the one that stays current. It puts " +
+    "claude.exe in %USERPROFILE%\\.local\\bin, so that directory has to be on " +
+    "the PATH of the shell Verkstead is started from, with Verkstead started " +
+    "again once it is.",
+};
 
 /// Grok Build, which is a link on every tab.
 ///
@@ -127,8 +138,8 @@ const GROK_UNIX: Instruction = {
   link: "https://x.ai/cli",
   note:
     "xAI's own installer puts grok in ~/.grok/bin and symlinks it into " +
-    "/usr/local/bin where it can. That home directory is not on the PATH a " +
-    "session gets, so check the symlink is there. The grok-cli packaged by " +
+    "/usr/local/bin where it can. Where it could not, ~/.grok/bin has to be on " +
+    "the PATH of the shell Verkstead is started from. The grok-cli packaged by " +
     "nixpkgs and the one on npm are other people's projects rather than xAI's " +
     "grok.",
 };
@@ -144,14 +155,16 @@ const GROK_WINDOWS: Instruction = {
 /// A harness from npm, installed for the whole machine rather than for a user.
 ///
 /// `-g` under the distribution's own node lands the binary in `/usr/local/bin`
-/// or `/usr/bin` — both of them directories a session looks in — where an
-/// npm prefix set to somewhere under `$HOME` would not.
+/// or `/usr/bin`, both of them on the floor under every Linux session's `PATH`
+/// — so this one needs nothing said about the `PATH` Verkstead was started
+/// with, where an npm prefix pointed at somewhere under `$HOME` would.
 function npm(pkg: string, node: string): Instruction {
   return {
     command: `sudo npm install -g ${pkg}`,
     note:
-      "An -g install lands the binary in /usr/local/bin or /usr/bin, both of " +
-      `which a session looks in. Where there is no npm yet: ${node}.`,
+      "An -g install lands the binary in /usr/local/bin or /usr/bin, a system " +
+      "directory a session reaches with nothing else to set. Where there is no " +
+      `npm yet: ${node}.`,
   };
 }
 
@@ -160,23 +173,19 @@ function windowsNpm(pkg: string): Instruction {
   return {
     command: `npm install -g ${pkg}`,
     note:
-      "Where there is no npm yet: winget install --id OpenJS.NodeJS. Restart " +
-      "Verkstead after the first install, so that the server reads the PATH " +
-      "npm was added to.",
+      "An -g install lands the binary in %APPDATA%\\npm, which Node's own " +
+      "installer puts on your PATH. Where there is no npm yet: winget install " +
+      "--id OpenJS.NodeJS.",
   };
 }
 
-/// The same instruction with one more thing said under it.
+/// The vendor's installer with this machine's own package kept under it.
 ///
-/// What Claude Code's row has everywhere: where npm or brew puts the binary is
-/// as true as it was, and [`CLAUDE_ELSEWHERE`] is the sentence about the
-/// installer most people already used. Two notes rather than one replacing the
-/// other, because dropping the first would take the landing with it.
-function caveat(instruction: Instruction, said: string): Instruction {
-  return {
-    ...instruction,
-    note: instruction.note ? `${instruction.note} ${said}` : said,
-  };
+/// Claude Code's row on the seven tabs that are not the Mac's: what leads is
+/// the install that stays current, and what is under it is the one a machine
+/// with a package manager may prefer.
+function orElse(lead: Instruction, packaged: Instruction): Instruction {
+  return { ...lead, alternative: packaged };
 }
 
 /// Everything a NixOS machine installs, which is a line in the system
@@ -187,21 +196,20 @@ function nixos(attribute: string, note?: string): Instruction {
     note:
       (note ? `${note} ` : "") +
       "In configuration.nix, then sudo nixos-rebuild switch. A nix profile " +
-      "install goes to ~/.nix-profile/bin, which is not on the PATH a session " +
-      "gets.",
+      "install goes to ~/.nix-profile/bin instead, which has to be on the PATH " +
+      "of the shell Verkstead is started from.",
   };
 }
 
 /// The eight tabs' own answers.
 ///
 /// Written out one tab at a time rather than composed out of a package manager
-/// and a table of names: what the caveat under a row says is as much of the
+/// and a table of names: what the note under a row says is as much of the
 /// instruction as the command is, and half of them are about the one machine
 /// they are on.
 export const GUIDES: Record<Distro, Guide> = {
   MacOs: {
     title: "macOS",
-    landing: APPLE_LANDS,
     rows: {
       Sandbox: {
         note:
@@ -214,13 +222,16 @@ export const GUIDES: Record<Distro, Guide> = {
           "Xcode's command line tools carry a git as well — xcode-select " +
           "--install — and either of the two is somewhere a session looks.",
       },
-      Claude: caveat(
-        {
-          command: "brew install --cask claude-code",
-          note: "A cask rather than a formula.",
-        },
-        CLAUDE_ELSEWHERE,
-      ),
+      Claude: {
+        command: "brew install --cask claude-code",
+        note:
+          "A cask rather than a formula, and the install a Mac session finds " +
+          "whichever way Verkstead was started. Anthropic's own installer — " +
+          "curl -fsSL https://claude.ai/install.sh | bash — puts claude in " +
+          "~/.local/bin instead, and an app started from the Dock has " +
+          "launchd's PATH rather than a shell's, so it never names that " +
+          "directory. Homebrew's prefix it always names.",
+      },
       Codex: {
         command: "brew install --cask codex",
         note: "A cask rather than a formula.",
@@ -233,7 +244,6 @@ export const GUIDES: Record<Distro, Guide> = {
 
   Windows: {
     title: "Windows",
-    landing: WINDOWS_LANDS,
     rows: {
       Sandbox: {
         note:
@@ -242,7 +252,10 @@ export const GUIDES: Record<Distro, Guide> = {
           "to install: it is how the sandbox works on Windows.",
       },
       Git: { command: "winget install --id Git.Git" },
-      Claude: caveat(windowsNpm("@anthropic-ai/claude-code"), CLAUDE_ELSEWHERE),
+      Claude: orElse(
+        CLAUDE_NATIVE_WINDOWS,
+        windowsNpm("@anthropic-ai/claude-code"),
+      ),
       Codex: windowsNpm("@openai/codex"),
       Grok: GROK_WINDOWS,
       OpenCode: windowsNpm("opencode-ai"),
@@ -252,7 +265,6 @@ export const GUIDES: Record<Distro, Guide> = {
 
   NixOs: {
     title: "NixOS",
-    landing: LINUX_LANDS,
     rows: {
       Sandbox: nixos(
         "bubblewrap",
@@ -262,7 +274,7 @@ export const GUIDES: Record<Distro, Guide> = {
           "own PATH: what a session looks along is the machine's profile.",
       ),
       Git: nixos("git"),
-      Claude: caveat(nixos("claude-code"), CLAUDE_ELSEWHERE),
+      Claude: orElse(CLAUDE_NATIVE, nixos("claude-code")),
       Codex: nixos("codex"),
       Grok: GROK_UNIX,
       OpenCode: nixos("opencode"),
@@ -272,13 +284,12 @@ export const GUIDES: Record<Distro, Guide> = {
 
   Ubuntu: {
     title: "Ubuntu",
-    landing: LINUX_LANDS,
     rows: {
       Sandbox: { command: "sudo apt install bubblewrap" },
       Git: { command: "sudo apt install git" },
-      Claude: caveat(
+      Claude: orElse(
+        CLAUDE_NATIVE,
         npm("@anthropic-ai/claude-code", "sudo apt install nodejs npm"),
-        CLAUDE_ELSEWHERE,
       ),
       Codex: npm("@openai/codex", "sudo apt install nodejs npm"),
       Grok: GROK_UNIX,
@@ -289,13 +300,12 @@ export const GUIDES: Record<Distro, Guide> = {
 
   Fedora: {
     title: "Fedora",
-    landing: LINUX_LANDS,
     rows: {
       Sandbox: { command: "sudo dnf install bubblewrap" },
       Git: { command: "sudo dnf install git" },
-      Claude: caveat(
+      Claude: orElse(
+        CLAUDE_NATIVE,
         npm("@anthropic-ai/claude-code", "sudo dnf install nodejs npm"),
-        CLAUDE_ELSEWHERE,
       ),
       Codex: npm("@openai/codex", "sudo dnf install nodejs npm"),
       Grok: GROK_UNIX,
@@ -306,13 +316,12 @@ export const GUIDES: Record<Distro, Guide> = {
 
   Debian: {
     title: "Debian",
-    landing: LINUX_LANDS,
     rows: {
       Sandbox: { command: "sudo apt install bubblewrap" },
       Git: { command: "sudo apt install git" },
-      Claude: caveat(
+      Claude: orElse(
+        CLAUDE_NATIVE,
         npm("@anthropic-ai/claude-code", "sudo apt install nodejs npm"),
-        CLAUDE_ELSEWHERE,
       ),
       Codex: npm("@openai/codex", "sudo apt install nodejs npm"),
       Grok: GROK_UNIX,
@@ -323,13 +332,12 @@ export const GUIDES: Record<Distro, Guide> = {
 
   Arch: {
     title: "Arch",
-    landing: LINUX_LANDS,
     rows: {
       Sandbox: { command: "sudo pacman -S bubblewrap" },
       Git: { command: "sudo pacman -S git" },
-      Claude: caveat(
+      Claude: orElse(
+        CLAUDE_NATIVE,
         npm("@anthropic-ai/claude-code", "sudo pacman -S npm"),
-        CLAUDE_ELSEWHERE,
       ),
       Codex: npm("@openai/codex", "sudo pacman -S npm"),
       Grok: GROK_UNIX,
@@ -342,7 +350,6 @@ export const GUIDES: Record<Distro, Guide> = {
   /// command that would be wrong on the machine it was pasted into.
   OtherLinux: {
     title: "Other Linux",
-    landing: LINUX_LANDS,
     rows: {
       Sandbox: {
         note:
@@ -351,12 +358,12 @@ export const GUIDES: Record<Distro, Guide> = {
           "ship switched off.",
       },
       Git: { note: "Install your distribution's git package." },
-      Claude: caveat(
+      Claude: orElse(
+        CLAUDE_NATIVE,
         npm(
           "@anthropic-ai/claude-code",
           "install your distribution's nodejs and npm",
         ),
-        CLAUDE_ELSEWHERE,
       ),
       Codex: npm("@openai/codex", "install your distribution's nodejs and npm"),
       Grok: GROK_UNIX,

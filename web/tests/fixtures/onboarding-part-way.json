@@ -6,49 +6,62 @@
     {
       "dependency": "Sandbox",
       "state": {
-        "state": "Present"
+        "state": "Present",
+        "at": "/machine/bin/bwrap",
+        "target": null
       }
     },
     {
       "dependency": "Git",
       "state": {
-        "state": "Present"
+        "state": "Present",
+        "at": "/machine/bin/git",
+        "target": null
       }
     },
     {
       "dependency": "Claude",
       "state": {
-        "state": "Present"
+        "state": "Present",
+        "at": "/machine/bin/claude",
+        "target": "/home/you/.local/share/claude/versions/0.0.0/claude"
       }
     },
     {
       "dependency": "Codex",
       "state": {
         "state": "Absent",
-        "trouble": null
+        "trouble": null,
+        "seen": null
       }
     },
     {
       "dependency": "Grok",
       "state": {
         "state": "Absent",
-        "trouble": null
+        "trouble": null,
+        "seen": null
       }
     },
     {
       "dependency": "OpenCode",
       "state": {
         "state": "Absent",
-        "trouble": null
+        "trouble": null,
+        "seen": null
       }
     },
     {
       "dependency": "Gh",
       "state": {
         "state": "Absent",
-        "trouble": null
+        "trouble": null,
+        "seen": null
       }
     }
+  ],
+  "path": [
+    "/machine/bin"
   ],
   "accounts": [
     {

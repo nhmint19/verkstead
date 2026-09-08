@@ -1669,7 +1669,23 @@ export type Dependency = "Sandbox" | "Git" | "Claude" | "Codex" | "Grok" | "Open
  * Flat on the wire — `{"state": "Absent", "trouble": "…"}` — so the viewer
  * narrows on a field rather than unwrapping a variant name.
  */
-export type DependencyState = { "state": "Present" } | { "state": "Absent", 
+export type DependencyState = { "state": "Present", 
+/**
+ * The path the name resolved to on a session's `PATH`: the entry it
+ * was found in with the name on the end of it.
+ *
+ * Nothing on the sandbox row of the two platforms where a sandbox is
+ * no program to find — Apple's own, and the identity a Windows session
+ * runs under. Every other present row has one.
+ */
+at: string | null, 
+/**
+ * And the file that path finally lands on, where it is a link and the
+ * two are not the same file. Claude's native installer leaves
+ * `~/.local/bin/claude` pointing into its versions directory, and
+ * which version is about to run is the half worth reading.
+ */
+target: string | null, } | { "state": "Absent", 
 /**
  * What the machine said about it, where anything was said at all: the
  * standard error of a `bwrap` that is installed and would not run,
@@ -1677,7 +1693,13 @@ export type DependencyState = { "state": "Present" } | { "state": "Absent",
  * says so in its own words. Nothing where the answer was simply that
  * no such program is on the sandbox's `PATH`.
  */
-trouble: string | null, } | { "state": "NotApplicable" };
+trouble: string | null, 
+/**
+ * And where the name *was* seen, where it was seen somewhere a session
+ * cannot use it — see [`Seen`]. Nothing where it is on no `PATH` at
+ * all, which is a row with nothing to say beyond *install one*.
+ */
+seen: Seen | null, } | { "state": "NotApplicable" };
 
 /**
  * One row of the dependencies step: a thing a session needs, and whether this
@@ -2012,6 +2034,22 @@ distro: Distro,
  * Every row of the dependencies step, in the order it is drawn.
  */
 dependencies: Array<DependencyView>, 
+/**
+ * And where a session looks for a program, in the order it looks: the
+ * `PATH` a session is given, as this server composed it out of its own.
+ *
+ * **The list rather than a sentence about one.** What a session searches
+ * is the server's own `PATH` ahead of the platform's floor — see
+ * `sandbox::composed` — so which directories those are is a fact about
+ * *this* machine rather than about the platform, and a tab of written-down
+ * prose could not say it. A wizard telling somebody where to put a binary
+ * has to name the directories a session really looks in, which is the
+ * whole of why this is on the wire.
+ *
+ * Verkstead's own directory is not on it, that being the one entry
+ * holding nothing a human installs.
+ */
+path: Array<string>, 
 /**
  * And every agent account already on this machine, in the order the
  * harnesses above are drawn. Empty on a machine that has none, which is
@@ -3010,6 +3048,39 @@ why: string, };
  * different width.
  */
 export type Screen = { repaint: string, columns: number, rows: number, };
+
+/**
+ * Where a program was seen that a session still cannot run.
+ *
+ * The half of *absent* that is worth a sentence. A name is missing in three
+ * ways that are not the same thing to do anything about, and a row saying only
+ * *absent* would send somebody to install what they have already got: a
+ * program on the server's own `PATH` and not on a session's is a shell profile
+ * and a restart rather than an install.
+ *
+ * Flat on the wire — `{"seen": "Beyond", "at": "…"}` — the way
+ * [`DependencyState`] is, so the viewer narrows on a field rather than
+ * unwrapping a variant name. The wording is the viewer's own, like the install
+ * commands beside it: what is here is what the machine is, and what to say
+ * about it is the same three sentences on every Verkstead.
+ */
+export type Seen = { "seen": "Beyond", 
+/**
+ * Where it was seen, with the name on the end of it.
+ */
+at: string, } | { "seen": "Leading", 
+/**
+ * The link, on a `PATH` entry a session has.
+ */
+at: string, 
+/**
+ * And what it points at, which is the part a session cannot open.
+ */
+target: string, } | { "seen": "Dangling", 
+/**
+ * The link that leads nowhere.
+ */
+at: string, };
 
 /**
  * Where the serve switch is being put.

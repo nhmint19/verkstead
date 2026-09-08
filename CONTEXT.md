@@ -183,7 +183,16 @@ directory and the Conversation's handoff directory writable, the Agent
 Profile's pair at `~/.claude` and `~/.claude.json`, the system, the Skills,
 the Conversation's **Attachments** and the Verkstead executable read-only in a
 directory of Verkstead's own, and nothing else of the machine at all — not
-even the checkout the Worktree was made from. Nothing at all stands where the
+even the checkout the Worktree was made from. The directories a session's own
+`PATH` names under the home of whoever runs the server are read-only inside
+with them, and so is the directory each program a session runs by name links
+into, where that too is under the home — which is how the harness a human
+installed for themselves is one a session can run, a native install being a
+link on the `PATH` into a versions directory no `PATH` names. A link leading
+anywhere else, or leading nowhere, is a name a session is not given at all,
+and nothing else of that home is. A Claude session is told not to update the
+install it runs, which is read-only inside and the human's own besides, so
+nothing a session does moves it. Nothing at all stands where the
 account's own skills would be found: they are hidden rather than merged with,
 and where the mechanism has no mount to hide one with it refuses the path
 instead. Each Companion Repo the Conversation was configured with is inside as
@@ -427,6 +436,18 @@ nowhere a session looks is a row that ticks and a session that cannot start. The
 GitHub token is not part of it — GitHub may not be in use at all, where git is
 not optional and its author is what git asks for.
 
+**A row says where, and not only whether.** One that is there carries the path
+the name resolved to and the file that path lands on, where it is a link: a
+distribution's `claude` too old to connect and the human's own under
+`~/.local/bin` are the same tick and two different programs. One that is not
+there says where the name was seen, where it was seen at all — on an entry of
+the server's own `PATH` that a session's is not composed with, or at the end of
+a link a session could not follow — because each of those is a `PATH` to fix
+rather than a program to install. A name on no list at all is absent with
+nothing said. And where a session looks is the composed list itself, drawn
+above the rows on every platform, a session's `PATH` being the server's own
+rather than anything the wizard could write down.
+
 **The verdict is reached once, at startup**, and the mode stays on until the
 wizard's last Continue takes it off. There is no skip and no re-entry: nothing
 inside a run puts it back on, so deleting the last Profile mid-run is the
@@ -442,7 +463,11 @@ machine nothing at all.
 human's to pick: an account is an account under a harness, and the harness has
 to be installed before there is one to log into; there is nothing to commit as
 until there is something to commit. The first names every dependency with this
-distro's own install command and where the binary has to land; the second offers
+distro's own install command and where the binary has to land — Claude Code's
+row leading with the vendor's own installer, a distribution's package being
+the one that can be too old to connect — and says once above the rows that the
+`PATH` was read at startup, so a directory an install has just made wants
+Verkstead started again from a shell that names it; the second offers
 the agent accounts already in the server's home as Profiles and holds its
 Continue until there is one, because a step that walked past a Profile would
 clear the mode onto the empty state a skip was rejected for; the third asks for

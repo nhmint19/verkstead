@@ -505,7 +505,11 @@ impl Agents {
 /// reason this is a mapping rather than a name written into the line. The type
 /// comes off the Pairing's Profile, so nothing has to be plumbed through to say
 /// which agent is being launched.
-pub(crate) fn binary(agent_type: store::AgentType) -> &'static str {
+///
+/// `const` so that the one list of the names a session is followed into can be
+/// built out of it rather than write them again — see
+/// [`crate::sandbox::PROGRAMS`].
+pub(crate) const fn binary(agent_type: store::AgentType) -> &'static str {
     match agent_type {
         store::AgentType::Claude => "claude",
         store::AgentType::Codex => "codex",

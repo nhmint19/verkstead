@@ -46,7 +46,7 @@ use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
     Dependency, DependencyState, DependencyView, Distro, OnboardingView, PrefillView,
-    ProfileAccount, Source,
+    ProfileAccount, Seen, Source,
 };
 use verkstead_server::github::Gh;
 use verkstead_server::onboarding::Machine;
@@ -129,8 +129,7 @@ fn served(dir: &Path, pool: &SqlitePool, programs: &[(&str, &str)]) -> Router {
 /// the server's own environment or out of the login the machine's `gh` has, and
 /// neither of those is a thing to ask the box the suite is running on.
 fn served_holding(dir: &Path, pool: &SqlitePool, programs: &[(&str, &str)], held: Held) -> Router {
-    let bin = dir.join("bin");
-    std::fs::create_dir_all(&bin).unwrap();
+    let bin = bin(dir);
 
     for (name, script) in programs {
         program(&bin.join(name), script);
@@ -139,6 +138,10 @@ fn served_holding(dir: &Path, pool: &SqlitePool, programs: &[(&str, &str)], held
     let machine = Machine::stated(
         Platform::Linux,
         OsString::from(bin.as_os_str()),
+        // The server's own `PATH` is that one directory and the one nothing
+        // composes in — an `/opt/foo/bin`, which is where a program a session
+        // cannot open is seen.
+        joined(&[&bin, &beyond(dir)]),
         None,
         Some(OS_RELEASE.to_owned()),
         &Environment {
@@ -183,6 +186,54 @@ fn host_gh(dir: &Path, held: Held) -> Gh {
 
     Gh::running(vec![path.to_string_lossy().into_owned()])
 }
+
+/// The one directory on a session's `PATH` here: where this suite's programs
+/// are, which is what a row that is there names.
+fn bin(dir: &Path) -> PathBuf {
+    let bin = dir.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+
+    bin
+}
+
+/// The directory on the server's own `PATH` that a session's is not composed
+/// with: where a program the human really has can be seen and no session can
+/// open it.
+///
+/// Made whether anything is put in it or not, a `PATH` entry naming nothing
+/// being a line in somebody's shell profile rather than an error.
+fn beyond(dir: &Path) -> PathBuf {
+    let beyond = dir.join("opt/foo/bin");
+    std::fs::create_dir_all(&beyond).unwrap();
+
+    beyond
+}
+
+/// Those two directories as one `PATH`.
+fn joined(entries: &[&Path]) -> OsString {
+    let written: Vec<String> = entries
+        .iter()
+        .map(|entry| entry.to_string_lossy().into_owned())
+        .collect();
+
+    OsString::from(written.join(":"))
+}
+
+/// Where a row that is there says the program is: the `PATH` entry this suite
+/// writes its programs into, with the name on the end of it.
+fn found(dir: &Path, program: &str) -> DependencyState {
+    DependencyState::Present {
+        at: Some(bin(dir).join(program).to_string_lossy().into_owned()),
+        target: None,
+    }
+}
+
+/// And what a row that is not there says where the name was seen nowhere at
+/// all.
+const MISSING: DependencyState = DependencyState::Absent {
+    trouble: None,
+    seen: None,
+};
 
 /// A script at `path`, executable.
 fn program(path: &Path, script: &str) {
@@ -370,6 +421,7 @@ async fn a_sandbox_that_will_not_run_is_a_start_in_onboarding_mode() {
         row(&reading, Dependency::Sandbox).state,
         DependencyState::Absent {
             trouble: Some(REFUSAL.to_owned()),
+            seen: None,
         },
         "the machine's own line, which is the one that names what to change"
     );
@@ -412,23 +464,66 @@ async fn a_machine_with_the_objective_met_comes_up_with_the_mode_off() {
 
     assert_eq!(
         row(&reading, Dependency::Sandbox).state,
-        DependencyState::Present,
-        "the `bwrap` on this machine made the namespace it was asked for"
+        found(dir.path(), "bwrap"),
+        "the `bwrap` on this machine made the namespace it was asked for, and \
+         the row says which one was run"
     );
     assert_eq!(
         row(&reading, Dependency::Claude).state,
-        DependencyState::Present,
-        "and one harness is what the objective asks for"
+        found(dir.path(), "claude"),
+        "and one harness is what the objective asks for — this one, at this path"
     );
     assert_eq!(
         row(&reading, Dependency::Codex).state,
-        DependencyState::Absent { trouble: None },
+        MISSING,
         "the three beside it are absent, and hold nothing up"
     );
     assert_eq!(
         row(&reading, Dependency::Gh).state,
-        DependencyState::Absent { trouble: None },
+        MISSING,
         "and `gh` is absent as well, GitHub being a choice rather than a dependency"
+    );
+
+    assert_eq!(
+        reading.path,
+        vec![dir.path().join("bin").to_string_lossy().into_owned()],
+        "and the step says where a session looks, which is the list a session \
+         was given rather than a sentence about one"
+    );
+}
+
+/// A harness on the `PATH` the server was started with, in a directory a
+/// session's own does not hold, reads absent with where it was seen.
+///
+/// The bug this whole feature is about, said in the row: the program is on the
+/// machine, nothing a session can open is, and what is wanted is a `PATH` and a
+/// restart rather than an install.
+#[tokio::test]
+async fn a_harness_a_session_cannot_reach_says_where_it_was_seen() {
+    let (dir, pool) = ready().await;
+
+    let out_of_reach = beyond(dir.path());
+    program(&out_of_reach.join("codex"), A_PROGRAM);
+
+    let app = served(dir.path(), &pool, EVERYTHING);
+    let reading = reading(&app).await;
+
+    assert_eq!(
+        row(&reading, Dependency::Codex).state,
+        DependencyState::Absent {
+            trouble: None,
+            seen: Some(Seen::Beyond {
+                at: out_of_reach.join("codex").to_string_lossy().into_owned(),
+            }),
+        },
+        "the row names the directory it was seen in, that being what there is \
+         to do something about"
+    );
+    assert_eq!(
+        row(&reading, Dependency::Grok).state,
+        MISSING,
+        "while a harness on neither list was seen nowhere, and has nothing \
+         said under it but what to install"
     );
 }
 
@@ -779,6 +874,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     an_account(dir.path(), AgentType::Claude);
     an_account(dir.path(), AgentType::Codex);
     let app = served(dir.path(), &pool, EVERYTHING);
+    natively_installed(dir.path());
     write("onboarding-part-way.json", &reading(&app).await, dir.path());
 
     // And the objective met, which is the reading that says the wizard is no
@@ -811,6 +907,23 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     written("onboarding-git-nothing.json", &prefill(&app).await);
 }
 
+/// The `claude` on this machine's `PATH` made into the install the vendor's own
+/// installer leaves: a link into the versions directory under the home.
+///
+/// Which is the install this whole feature is about, and the one shape a row
+/// has two paths to draw — the name a session resolved and the version it is
+/// really running. Made after the router is stood up, the rows being probed at
+/// every read rather than at startup.
+fn natively_installed(dir: &Path) {
+    let version = home(dir).join(".local/share/claude/versions/0.0.0");
+    std::fs::create_dir_all(&version).unwrap();
+    program(&version.join("claude"), A_PROGRAM);
+
+    let name = bin(dir).join("claude");
+    std::fs::remove_file(&name).unwrap();
+    std::os::unix::fs::symlink(version.join("claude"), name).unwrap();
+}
+
 /// One fixture that has no path in it, written as it stands.
 ///
 /// The git step's read is three values off a `git config` and an environment
@@ -828,20 +941,29 @@ fn written<T: serde::Serialize>(name: &str, payload: &T) {
 /// What a home reads as in a fixture, whoever ran the suite.
 const A_HOME: &str = "/home/you";
 
+/// And what the rest of the directory this run was given reads as: the `PATH`
+/// entry its programs are in, and the one nothing composes in beside it.
+const A_MACHINE: &str = "/machine";
+
 /// One fixture, as the server would have written it — with the one thing in it
 /// that is this run's own written back out as a home anybody would recognise.
 ///
-/// A detected account is a set of real paths: it has to be on disk to be found,
-/// so the home it was found in is a temporary directory whose name is different
-/// every run. What the viewer's tests are drawn over is the shape of a reading
-/// rather than this box's paths, so that one directory is written as
-/// [`A_HOME`] — which is what the same reading on somebody's own machine says.
+/// A detected account is a set of real paths and so is a program a row was
+/// found at: both have to be on disk, so both are under a temporary directory
+/// whose name is different every run. What the viewer's tests are drawn over is
+/// the shape of a reading rather than this box's paths, so the home is written
+/// as [`A_HOME`] and whatever else this run made is written under
+/// [`A_MACHINE`] — which is a reading anybody would recognise as their own.
+///
+/// The home first, it being inside the directory the run was given: what is
+/// left for the second pass is the `PATH` entry beside it.
 fn write(name: &str, reading: &OnboardingView, ran_in: &Path) {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(FIXTURES);
     std::fs::create_dir_all(&dir).unwrap();
 
     let pretty = serde_json::to_string_pretty(reading).unwrap();
-    let pretty = pretty.replace(&home(ran_in).to_string_lossy().into_owned(), A_HOME) + "\n";
+    let pretty = pretty.replace(&home(ran_in).to_string_lossy().into_owned(), A_HOME);
+    let pretty = pretty.replace(&ran_in.to_string_lossy().into_owned(), A_MACHINE) + "\n";
 
     std::fs::write(dir.join(name), pretty).unwrap();
 }
