@@ -49,8 +49,8 @@ import {
   keepDraft,
   storedDraft,
   unanswered,
-} from "./sheet";
-import type { Filled } from "./sheet";
+} from "./filling";
+import type { Filled } from "./filling";
 
 /// One question as the sheet holds on to it: the name it answers to, and
 /// whether it offered Options — which is what decides whether leaving it open is
