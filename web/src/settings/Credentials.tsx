@@ -561,7 +561,7 @@ export function GithubPane(props: {
                   <div class={styles.tokenActions}>
                     <button
                       type="button"
-                      class={styles.keep}
+                      class={`${styles.keep} secondary`}
                       onClick={() => {
                         setReplacing(false);
                         setToken("");

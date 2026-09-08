@@ -511,32 +511,49 @@ describe("the listbox with its label in the handle", () => {
 });
 
 /// The last thing a native dropdown kept for itself: its popup is the browser's
-/// and goes wherever it fits, and these rows are an element inside whatever
-/// clips the page. Every one of these controls stands in a box that clips —
-/// a pane scrolls its own content, the steer modal's card is capped at `80vh` —
-/// so a control low in one of those would drop its rows out of sight behind a
-/// backdrop that says nothing about where they went.
+/// own and goes wherever it fits on the screen, and these rows are an element of
+/// the page. They are put on the screen all the same — they are `position:
+/// fixed`, so nothing between them and the window clips them — which leaves the
+/// window as the one edge they can fall past, and where they go as something to
+/// be measured off the control's own box.
 ///
 /// Measured rather than styled, which is why it is asserted through the
 /// measurements: jsdom lays nothing out, so the boxes are the ones this file
 /// hands back and the answer is the arithmetic over them.
 describe("which way the rows come down", () => {
   /// A window of a known height, and boxes for the two elements that decide it:
-  /// the control wherever it is put, the rows however tall they are, and the
-  /// scrolling box around them wherever `clip` says.
+  /// the control wherever it is put, and the rows however tall they are.
+  ///
+  /// `clip` is the box of everything else on the page — the pane or the card
+  /// these stand inside. It decided which way the rows hung until the rows were
+  /// made fixed, and it is still laid here so that the one test about it is
+  /// asking something real.
+  ///
+  /// `across` is where the control's left edge is and `wide` how wide the rows
+  /// stand, which is the control's own width unless a caller has asked for more
+  /// — the compose page's pairing lists do, in `Setup.module.css`.
   function laid(at: {
     control: number;
     rows: number;
+    across?: number;
+    wide?: number;
     clip?: { top: number; bottom: number };
   }): void {
     const clip = at.clip ?? { top: 0, bottom: 1000 };
+    const across = at.across ?? 24;
 
     window.innerHeight = 1000;
+    window.innerWidth = 1000;
 
     vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
       function (this: Element): DOMRect {
         if (this.classList.contains(styles.drop!)) {
-          return { top: 0, bottom: at.rows, height: at.rows } as DOMRect;
+          return {
+            top: 0,
+            bottom: at.rows,
+            height: at.rows,
+            width: at.wide ?? 300,
+          } as DOMRect;
         }
 
         if (this.tagName === "BUTTON") {
@@ -544,18 +561,14 @@ describe("which way the rows come down", () => {
             top: at.control,
             bottom: at.control + 40,
             height: 40,
+            left: across,
+            width: 300,
           } as DOMRect;
         }
 
         return { top: clip.top, bottom: clip.bottom } as DOMRect;
       },
     );
-
-    // What the walk to the box that clips reads on the way up. jsdom applies no
-    // stylesheet, so the pane every one of these stands in has to be said here.
-    vi.spyOn(window, "getComputedStyle").mockReturnValue({
-      overflowY: "auto",
-    } as CSSStyleDeclaration);
   }
 
   afterEach(() => {
@@ -577,14 +590,83 @@ describe("which way the rows come down", () => {
     expect(opened(UNDER).classList.contains(styles.above!)).toBe(true);
   });
 
-  /// Against the box that clips rather than against the window: the steer
-  /// modal's card is capped at `80vh`, so rows that would fit on the screen can
-  /// still be rows that fall out of the card.
-  it("measures against the box that would clip it, not the window", () => {
+  /// Against the window rather than against the box the control stands in: the
+  /// rows are fixed, so the card capped at `80vh` and the pane that scrolls its
+  /// own content clip nothing, and rows that fit on the screen are rows there is
+  /// room for. Which is the whole of what being fixed bought — a browse near the
+  /// foot of the Open repo card had most of its list taken away by the card.
+  it("measures against the window, not the box the control stands in", () => {
     laid({ control: 400, rows: 250, clip: { top: 200, bottom: 500 } });
     picking();
 
-    expect(opened(UNDER).classList.contains(styles.above!)).toBe(true);
+    expect(opened(UNDER).classList.contains(styles.above!)).toBe(false);
+  });
+
+  /// And where they go is the control's own box, read off the window: a fixed
+  /// element has no anchor to hang from, so the anchor is measured instead.
+  it("puts them at the control's left edge, as wide as it is", () => {
+    laid({ control: 100, rows: 250 });
+    picking();
+
+    const rows = opened(UNDER);
+
+    expect(rows.style.left).toBe("24px");
+    expect(rows.style.width).toBe("300px");
+    // Under the control, which is where the gap in `picking.module.css` is taken
+    // off — the margin rather than this measure, so that the look stays in the
+    // sheet.
+    expect(rows.style.top).toBe("140px");
+    expect(rows.style.bottom).toBe("");
+  });
+
+  /// And off the other edge where they hang over it, which is the same
+  /// coordinate said from the bottom of the window.
+  it("puts them off the control's top edge where they hang over it", () => {
+    laid({ control: 800, rows: 250 });
+    picking();
+
+    const rows = opened(UNDER);
+
+    expect(rows.style.bottom).toBe("200px");
+    expect(rows.style.top).toBe("");
+  });
+
+  /// And pulled back onto the window where a list wider than its control would
+  /// otherwise run off the right of it. The pairing pickers on the compose page
+  /// are the ones this is for: their rows ask for 30rem against a trigger a
+  /// third of that, and the last picker of a row stands near the far edge. A
+  /// fixed box that fell past the window would be rows nothing could scroll to.
+  it("pulls a list wider than its control back onto the window", () => {
+    laid({ control: 100, rows: 250, across: 800, wide: 480 });
+    picking();
+
+    // Eight off the far edge: 1000 less the 480 the rows stand at, less the gap
+    // they keep so the shadow under them has somewhere to sit.
+    expect(opened(UNDER).style.left).toBe("512px");
+  });
+
+  /// And left where it is where it fits, which is every list the width of the
+  /// control it came out of.
+  it("leaves a list that fits at its control's left edge", () => {
+    laid({ control: 100, rows: 250, across: 600 });
+    picking();
+
+    expect(opened(UNDER).style.left).toBe("600px");
+  });
+
+  /// Measured again while they are down, because a fixed box does not move with
+  /// the anchor: the pane the control stands in scrolls under it, and the rows
+  /// would otherwise be left behind where the field used to be.
+  it("follows the control when something under it scrolls", () => {
+    laid({ control: 100, rows: 250 });
+    picking();
+
+    expect(opened(UNDER).style.top).toBe("140px");
+
+    laid({ control: 40, rows: 250 });
+    fireEvent.scroll(window);
+
+    expect(opened(UNDER).style.top).toBe("80px");
   });
 
   /// And where it fits neither side, the side that shows more of it — which is

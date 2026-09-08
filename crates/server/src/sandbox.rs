@@ -5458,11 +5458,8 @@ mod tests {
     /// is what makes it an image, and Windows has no such thing.
     #[cfg(unix)]
     fn image(dir: &Path, script: &str) -> Executable {
-        use std::os::unix::fs::PermissionsExt;
-
         let path = dir.join(VERKSTEAD);
-        std::fs::write(&path, format!("#!/bin/sh\n{script}\n")).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        crate::stand_ins::program(&path, &format!("#!/bin/sh\n{script}\n"));
 
         Executable::at(Platform::HERE, path, dir).expect("the file was just written")
     }

@@ -304,38 +304,30 @@
   margin-right: 0;
 }
 
-/* The secondary one: the shape of the start beside it and the paint of an
-   outline, because creating without starting is the smaller of the two acts and
-   a page of buttons all painted as the primary one says nothing about which of
-   them matters.
+/* The secondary one: the shape of the start beside it and the paint of the app's
+   quiet press, because creating without starting is the smaller of the two acts
+   and a page of buttons all painted as the primary one says nothing about which
+   of them matters. What it looks like is `.secondary` in `styles/base.css` —
+   this button is where that paint came from, and it gave up the accent on its
+   own label when the rest of the app took the rest of it. Not handed the app's
+   [`QuietButton`] either, which is a control with no disabled state at all.
 
-   Painted here rather than handed the app's [`QuietButton`], which is a control
-   with no disabled state: this one has to be able to say that there is nothing
-   to create yet. */
-.presses .draft {
-  padding: 0.5rem 1rem;
-  font: inherit;
-  font-weight: 600;
-  color: var(--accent);
-  background: var(--card);
-  border: 1px solid var(--edge);
-  border-radius: 0.4rem;
-  cursor: pointer;
-}
-
-/* The same two ways of not being pressable that the start beside it draws, and
-   drawn the same: a press already in flight, and nothing yet to create. The
-   second of them is only `aria-disabled`, so that a pointer can still reach the
-   `title` saying what is missing — see `Compose.tsx`. */
+   Because that is the one thing left to say here: it draws two ways of not being
+   pressable rather than one, as the start beside it does — a press already in
+   flight, and nothing yet to create. The second is only `aria-disabled`, so that
+   a pointer can still reach the `title` saying what is missing (see
+   `Compose.tsx`), and a shared rule keyed on `:disabled` cannot see it. */
 .presses .draft:disabled,
 .presses .draft.inert {
   opacity: 0.65;
 }
 
 @media (hover: hover) {
-  .presses .draft:not(:disabled):not(.inert):hover {
-    color: var(--accent-deep);
-    border-color: var(--accent-deep);
+  /* And nothing under the pointer while there is nothing to create. The shared
+     rule cannot see `.inert`, that being `aria-disabled` rather than `disabled`,
+     so the border is put back here. */
+  .presses .draft.inert:hover {
+    border-color: var(--edge);
   }
 
   /* The two quiet controls under the box deepen their accent the way the

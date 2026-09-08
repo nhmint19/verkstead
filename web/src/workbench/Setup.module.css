@@ -115,8 +115,14 @@
    Fable 5 — Work" and a quarter of the box is nothing like that, so the list is
    twice the width the trigger would give it. Capped against the window it comes
    down over, which is what wins on a phone: there the rows wrap as they always
-   did. Hung from the trigger's near edge, and from its far one for the last of
-   them, so a row of them never drops a list past the edge of the pane. */
+   did.
+
+   Where a list this wide is hung is not said here any more. The rows are fixed
+   and put where `dropping` measures — see `picking.tsx` — and that measure is
+   what keeps a list wider than its trigger on the window, the last picker of a
+   row being the one that would otherwise drop its rows off the right. A rule in
+   a sheet cannot pull back a coordinate written as a style, so this file asks
+   for the width and leaves the placing where the placing is done. */
 .optionPick > [role="listbox"] {
   min-width: 30rem;
   max-width: min(40rem, calc(100vw - 2.5rem));
@@ -128,11 +134,6 @@
 .repoSelectPick > [role="listbox"] {
   min-width: 12rem;
   max-width: min(20rem, calc(100vw - 2.5rem));
-}
-
-.options > :last-child .optionPick > [role="listbox"] {
-  right: 0;
-  left: auto;
 }
 
 /* The panel behind the Repo trigger: the branch, the base, what the work runs

@@ -741,7 +741,7 @@ function Compose(props: {
 
             <button
               type="button"
-              class={styles.draft}
+              class={`${styles.draft} secondary`}
               classList={{ [styles.inert!]: !ready() }}
               // Truly `disabled` for a press already in flight and nothing
               // else. Having no repo to create in is the other thing entirely:
