@@ -934,9 +934,9 @@ fn beneath(path: &OsStr, directory: &OsStr) -> bool {
 /// Whether a session could reach `path` at all, which is the one question a
 /// `PATH` entry is kept by and a followed link's target is found by.
 ///
-/// Two ways to be reachable and no third. **Under the home of whoever runs the
-/// server**, where a grant of Verkstead's own is what puts it inside — see
-/// [`per_user`] for the `PATH`'s own entries and [`installs`] for the
+/// Two ways to be reachable and no third. **Strictly under the home of whoever
+/// runs the server**, where a grant of Verkstead's own is what puts it inside —
+/// see [`per_user`] for the `PATH`'s own entries and [`installs`] for the
 /// directories a program's links land in, which are the two things that make
 /// this true rather than merely hoped. Or **under the platform's own floor**,
 /// which is the system every sandbox holds already — see [`system`].
@@ -945,8 +945,20 @@ fn beneath(path: &OsStr, directory: &OsStr) -> bool {
 /// says nothing of is a path a session opens and finds absent, so a `PATH`
 /// entry naming one is worth nothing and a link leading to one is a program
 /// that would fail to exec.
+///
+/// **Strictly, on the home's side, because that is what the two grants are.**
+/// Neither [`per_user`] nor [`holding`] will hand over a home itself — an entry
+/// that *is* one would grant the human's whole account read-only — so a path
+/// this said was reachable on the home's own account would be a `PATH` entry
+/// kept and never bound, and a name found in it that no session could then run.
+/// One rule read the one way by the three that ask it: [`beneath`] here as
+/// there.
+///
+/// The floor's side stays [`within`], and for the same reason turned around: a
+/// `PATH` entry that *is* `/usr` is a directory bound whole, so a session
+/// really does reach it.
 fn reachable(platform: Platform, path: &OsStr, home: Option<&Path>) -> bool {
-    home.is_some_and(|home| within(path, home.as_os_str()))
+    home.is_some_and(|home| beneath(path, home.as_os_str()))
         || system(platform)
             .iter()
             .any(|directory| within(path, OsStr::new(directory)))
@@ -4403,6 +4415,11 @@ mod tests {
     /// And an entry that *is* the home is not what any of this is for: granting
     /// it would hand a session the whole of the human's account, which is the
     /// one thing a boundary is about.
+    ///
+    /// So the composing does not keep one either, and a program in it is a name
+    /// no session has. The three readings are one rule: an entry kept and never
+    /// bound would be a row that ticked and a session that could not start.
+    #[cfg(unix)]
     #[test]
     fn the_servers_home_itself_is_never_what_a_path_entry_grants() {
         let home = tempfile::tempdir().unwrap();
@@ -4410,6 +4427,34 @@ mod tests {
         assert!(
             per_user(Platform::Linux, home.path().as_os_str(), home.path()).is_empty(),
             "a `PATH` entry that is the home is a whole account read-only",
+        );
+
+        let composed = composed(Platform::Linux, home.path().as_os_str(), Some(home.path()));
+
+        assert!(
+            !apart(&composed).any(|entry| same(entry, home.path().as_os_str())),
+            "so it is nowhere on the `PATH` a session is given either: {composed:?}",
+        );
+
+        // And a program sitting in it is a program no session can run, the
+        // entry it is in being one no session was given — which is what the row
+        // has to say rather than a tick. Under a name nothing on the machine
+        // this is running on could answer to, the floor under that composed
+        // `PATH` being the real one.
+        let only_here = "the-harness-nobody-elses-machine-has";
+        std::fs::write(home.path().join(only_here), "#!/bin/sh\n").unwrap();
+
+        assert_eq!(
+            install(
+                Platform::Linux,
+                only_here,
+                Some(&composed),
+                None,
+                Some(home.path()),
+            ),
+            None,
+            "a name in a directory nothing binds is one a session opens and \
+             finds absent",
         );
     }
 
