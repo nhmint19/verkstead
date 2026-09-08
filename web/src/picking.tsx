@@ -622,6 +622,15 @@ export function dropping(props: {
   /// browser will focus.
   anchor: () => HTMLElement;
 
+  /// And the box they are lined up with, where that is not the anchor itself.
+  ///
+  /// The browse field is the one that needs it: what the focus goes back to
+  /// there is the input, and what the rows are as wide as is the row the input
+  /// and its press stand in — a list that stopped short of the press would be a
+  /// list narrower than the control it came out of. The listbox's control fills
+  /// its own box, so it says nothing here and is measured as itself.
+  box?: () => HTMLElement;
+
   /// And the rows themselves, for the measure — `undefined` until they are on
   /// the page, being drawn only while they are down.
   dropped: () => HTMLElement | undefined;
@@ -777,8 +786,10 @@ export function dropping(props: {
   ///
   /// Both at once, because they are the one measure: the side is chosen by what
   /// there is room for, and the coordinates are that side's. The rows take the
-  /// anchor's own left edge and width, so a fixed box lines up with the field it
-  /// came out of exactly as an absolute one inside it used to.
+  /// control's own left edge and width, so a fixed box lines up with the field
+  /// it came out of exactly as an absolute one inside it used to — which is what
+  /// [`box`] is for on the browse field, whose control is a row rather than the
+  /// input the focus is handed back to.
   ///
   /// jsdom lays nothing out, so every box read here is zeros there and the
   /// arithmetic is harmless — which is what keeps the tests over these two
@@ -787,7 +798,7 @@ export function dropping(props: {
     const rows = props.dropped();
     if (!rows) return;
 
-    const anchor = props.anchor().getBoundingClientRect();
+    const anchor = (props.box?.() ?? props.anchor()).getBoundingClientRect();
     const drop = rows.getBoundingClientRect();
 
     // Over the anchor only where the rows do not fit under it, and then only

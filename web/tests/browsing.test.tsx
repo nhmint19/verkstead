@@ -45,6 +45,7 @@ import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PathField } from "../src/PathField";
+import fieldStyles from "../src/PathField.module.css";
 import type { DirectoryListing } from "../src/api/types";
 import chrome from "../src/picking.module.css";
 import {
@@ -595,5 +596,50 @@ describe("what a field shows of what came back", () => {
 
     expect(rows(WHERE)).toEqual(["Up to /home/ada", "assets", "verkstead"]);
     expect(leading(WHERE)).toEqual(["assets", "verkstead"]);
+  });
+});
+
+/// Where the rows are put, which is the one thing about them this component
+/// says rather than borrows whole: the listbox's control is its own box, and
+/// this one's is the input and the press beside it together.
+///
+/// jsdom lays nothing out, so the boxes are the ones this describe hands back
+/// and what is asserted is the arithmetic over them — the same way the
+/// listbox's own placing is asked about, in `picking.test.tsx`.
+describe("where the rows are put", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /// Off the row rather than off the input inside it: a list that stopped at the
+  /// input's edge would stop short of the press it was dropped from, and the
+  /// paths these rows read are long enough to want every pixel of the box.
+  it("takes the width of the row, not of the input inside it", async () => {
+    window.innerWidth = 1000;
+    window.innerHeight = 1000;
+
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: Element): DOMRect {
+        // The row: the whole of the control, press included.
+        if (this.classList.contains(fieldStyles.field!)) {
+          return { top: 100, bottom: 140, left: 24, width: 300 } as DOMRect;
+        }
+
+        // And the input, which is what is left of it after the press.
+        if (this.tagName === "INPUT") {
+          return { top: 100, bottom: 140, left: 24, width: 262 } as DOMRect;
+        }
+
+        return { top: 0, bottom: 0, height: 0, width: 0 } as DOMRect;
+      },
+    );
+
+    theFilesystem();
+    mounted("/home/ada/");
+    await browsed();
+
+    expect(listed(WHERE).style.width).toBe("300px");
+    expect(listed(WHERE).style.left).toBe("24px");
+    expect(listed(WHERE).style.top).toBe("140px");
   });
 });

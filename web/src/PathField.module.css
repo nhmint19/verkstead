@@ -12,9 +12,11 @@
 /* The input and its press, side by side. Takes the whole of the room the form
    gives it, the input taking the whole of what is left after the press.
 
-   Nothing is positioned from here: the rows are fixed and measured off the
-   input's own box — see `.drop` in `picking.module.css` — so what this row is
-   is a row. */
+   Nothing is positioned from here: the rows are fixed and put where the measure
+   in `picking.tsx` puts them — see `.drop` in `picking.module.css` — so what
+   this row is is a row. It is still the box they are lined up with, though, and
+   the whole of the control the eye sees: they are measured off it rather than
+   off the input inside it, so the list reaches the press it was dropped from. */
 .field {
   display: flex;
   flex: 1;

@@ -34,7 +34,7 @@
 //! ## What it is made of
 //!
 //! The chrome is [`Listbox`]'s, held rather than copied: the same keyboard walk,
-//! and the same rows put where the same measure of the anchor and the window
+//! and the same rows put where the same measure of the control and the window
 //! puts them, out of [`dropping`] in `picking.tsx` — and the same paint, out of
 //! `picking.module.css`. The two dropdowns the app draws for itself are one
 //! thing to the eye and one thing to the hand, and two copies of that would be
@@ -206,6 +206,11 @@ export function PathField(props: {
   // measured against it.
   let field!: HTMLInputElement;
 
+  // And the row the input and its press stand in, which is what the rows line up
+  // with: the control here is the pair of them, so a list as wide as the input
+  // alone would stop short of the press it was dropped from.
+  let row!: HTMLDivElement;
+
   // And the rows, for that measure.
   let dropped: HTMLDivElement | undefined;
 
@@ -233,6 +238,7 @@ export function PathField(props: {
   } = dropping({
       rows: () => rows().length,
       anchor: () => field,
+      box: () => row,
       dropped: () => dropped,
       opens: ["ArrowDown"],
       takes: ["Enter"],
@@ -389,7 +395,7 @@ export function PathField(props: {
   };
 
   return (
-    <div class={styles.field}>
+    <div ref={row} class={styles.field}>
       {/* The keyboard is the Repos' form's, which asked for a URL's before this
           component existed and now every path field has one: a path is typed
           with slashes in it, and nothing about it wants a capital. */}
@@ -453,7 +459,9 @@ export function PathField(props: {
         {/* Where the rows are put is measured rather than written, the listbox's
             rows being put the same way: they are fixed, so that the card or the
             pane this field stands in cannot cut the list short — see `.drop` in
-            `picking.module.css`. */}
+            `picking.module.css`. Off the row above rather than off the input,
+            which is what `box` says: the control here is the input and its
+            press together. */}
         <div
           ref={dropped}
           class={[chrome.drop, over() ? chrome.above : undefined]
