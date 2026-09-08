@@ -4127,6 +4127,13 @@ pub async fn resolve_conflicts(pool: &SqlitePool, id: i64) -> Result<Resolving> 
 /// only: nothing here takes a companion away, puts one back to read-only, or
 /// writes an add over a row that is already there.
 ///
+/// **And the review, where the steer lands in Wrapping**: back to being
+/// something the wrap-up waits on, in the same transaction as the move. A steer
+/// into Wrapping reads the branch afresh — which is the one thing the resolve
+/// press below deliberately does not do — so a settle carried in from the round
+/// that reached Done is a wrap-up nothing would read the branch for. See
+/// [`resolve_conflicts`] for the other side of it.
+///
 /// Nothing about the run is touched, and what has to stop running is stopped
 /// before this is called — see the server's `steering` module, which is the only
 /// caller.
@@ -4292,6 +4299,22 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
     // [`super::wrap_up::forget_the_round`].
     if target == Lifecycle::Grilling {
         super::wrap_up::forget_the_round(&mut tx, id).await?;
+    }
+
+    // And a steer into Wrapping reads the branch afresh, so the review goes back
+    // to being something the wrap-up waits on. *Settled once and stays settled*
+    // is a rule about one look at the branch — see [`super::WaitingOn::Review`] —
+    // and a steer is the human saying look at it again: without this a Done
+    // Conversation steered back into Wrapping would arrive carrying the settle it
+    // was carried to Done on, and nothing would read the branch at all.
+    //
+    // Which is the whole difference between this and [`resolve_conflicts`], the
+    // one press that lands in Wrapping and deliberately leaves the settle
+    // standing. The review alone: the checks, what has been said and the merge
+    // are asked of GitHub on every poll, so they settle themselves from the
+    // answers this wrap-up's own watchers get.
+    if target == Lifecycle::Wrapping {
+        super::wrap_up::unsettle(&mut tx, id, super::WaitingOn::Review).await?;
     }
 
     moved(&mut tx, id, target).await?;

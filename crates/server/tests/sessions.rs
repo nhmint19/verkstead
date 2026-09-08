@@ -20020,25 +20020,34 @@ async fn steering_into_implementing_carries_on_a_backlog_whose_worktree_has_gone
     );
 }
 
-/// Steering a halted wrap-up back into Wrapping does what that press does: the
-/// checks are watched again from no attempts spent, and the stop goes.
+/// Steering a halted wrap-up back into Wrapping does what that press does, and
+/// one thing more: the checks are watched again from no attempts spent, the stop
+/// goes, and the branch is read afresh.
 ///
 /// The same recompute rather than one of its own. A steer into Wrapping carries
-/// no payload — the wrap-up's four watchers work out for themselves what is left
-/// to do — so what it starts is what Resume starts, reused rather than forked.
+/// no payload — the wrap-up's watchers work out for themselves what is left to
+/// do — so what it starts is what Resume starts, reused rather than forked.
 /// A third fix session is what says the counters were forgotten: two is every
 /// one the branch was allowed.
+///
+/// **And a second review**, which is the one thing a steer adds to that press. A
+/// review is one look at the branch rather than a state of it, so the settle
+/// standing from before the stop is a look that has already happened — and a
+/// steer is the human saying look again. Without the settle going back the
+/// wrap-up would come up with its review over before it started, and the branch
+/// the human asked about would be read by nobody.
 ///
 /// And the stop the click wrote has to be gone for any of it to happen. Nothing
 /// advances past a stop, so a watcher dispatching at all is the stop taken away.
 #[tokio::test]
 async fn steering_a_halted_wrap_up_into_wrapping_watches_the_checks_afresh() {
-    let prompts = tempfile::tempdir().unwrap();
-    let written = prompts.path().join("fix-prompts");
+    let spill = tempfile::tempdir().unwrap();
+    let written = spill.path().join("fix-prompts");
+    let reviews = spill.path().join("review-prompts");
 
     let fixture = grilling_spilling(
-        prompts,
-        &a_backlog_then_fixes(&written),
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &written, REVIEW_AND_FIND_NOTHING),
         &gh_checking("FAILURE"),
     )
     .await;
@@ -20053,6 +20062,14 @@ async fn steering_a_halted_wrap_up_into_wrapping_watches_the_checks_afresh() {
         stopped.html,
     );
     assert_eq!(fixes(&fixture.view().await), 2, "having had both its goes");
+
+    let told = until_written_by(&reviews, 1).await;
+
+    assert_eq!(
+        prompts(&told).len(),
+        1,
+        "and the wrap-up it stopped in read the branch once: {told}",
+    );
 
     assert_eq!(
         fixture.steer().await,
@@ -20088,6 +20105,84 @@ async fn steering_a_halted_wrap_up_into_wrapping_watches_the_checks_afresh() {
     // stop, so one dispatching at all is the stop gone; and two attempts is
     // every one the branch was allowed, so a third is the count forgotten.
     fixture.until(|view| (fixes(view) > 2).then_some(())).await;
+
+    // And a second review, which is the settle from before the stop having gone
+    // back to being something this wrap-up waits on.
+    let told = until_written_by(&reviews, 2).await;
+
+    assert_eq!(
+        prompts(&told).len(),
+        2,
+        "the branch is read again rather than the wrap-up inheriting what the \
+         look before the stop made of it: {told}",
+    );
+}
+
+/// And a Conversation Verkstead has finished with reads the branch afresh too,
+/// which is the source that has nothing else to do.
+///
+/// The halted wrap-up above has red checks to try again whatever the review
+/// does; this one has a settled wrap-up and a pull request that is green, so the
+/// review is the whole of what the steer can start. Nothing about the record
+/// changed while it sat there — the human simply wants the branch looked at
+/// again — and a settle carried over from the round that reached Done would make
+/// the wrap-up they asked for over the moment it arrived, back to Done without a
+/// session anywhere in it.
+///
+/// Which is the difference between this and **Resolve conflicts**, the press
+/// that lands in the same state and deliberately leaves the settle standing —
+/// see [`pressing_resolve_on_a_conflicted_done_pull_request_gets_it_resolved`].
+#[tokio::test]
+async fn steering_a_done_conversation_into_wrapping_reads_the_branch_afresh() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let told = until_written_by(&reviews, 1).await;
+
+    assert_eq!(
+        prompts(&told).len(),
+        1,
+        "the wrap-up that carried it to Done read the branch once: {told}",
+    );
+
+    assert_eq!(
+        fixture.steer().await,
+        SteerOpened::Opened { working: false },
+        "everything had finished, so the click found nothing to interrupt",
+    );
+    assert_eq!(
+        fixture.steer_into("Wrapping", false).await,
+        ConversationSteered::Steered,
+    );
+
+    let told = until_written_by(&reviews, 2).await;
+
+    assert_eq!(
+        prompts(&told).len(),
+        2,
+        "and the wrap-up the steer lands in reads it again: {told}",
+    );
+
+    // And then goes on being a wrap-up: the review it has just had settles, the
+    // checks are green and nothing has been said, so it finishes the way every
+    // other one does.
+    fixture
+        .until(|view| (moves_into(view, Lifecycle::Done) > 1).then_some(()))
+        .await;
 }
 
 /// The same backlog and wrap-up, plus a session that plays the instruction a

@@ -1584,8 +1584,13 @@ session is opened on, and takes it *always*: an empty instruction carries the
 branch on and an empty brief grills the one already written, and there is
 nothing on the branch a follow-up could fall back on — it is something the human
 wanted rather than a step of the run. Wrapping takes nothing: its watchers
-recompute over whatever the branch now holds, the fix attempts forgotten. Done
-takes nothing at all, there being nothing to run in it.
+recompute over whatever the branch now holds, the fix attempts forgotten and the
+review put back to being something the wrap-up waits on, so the branch is read
+afresh from whatever state it was steered — the settle that carried a
+Conversation to Done is one look at the branch, and a steer is the human asking
+for another. **Resolve conflicts** is the one move into Wrapping that leaves it
+standing, which is why that is a press of its own. Done takes nothing at all,
+there being nothing to run in it.
 
 **And every target work goes on in takes the sandbox.** A companion section
 under all three of them — Grilling, Implementing and Wrapping — because what it
