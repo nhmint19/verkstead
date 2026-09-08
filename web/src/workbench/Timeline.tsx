@@ -145,6 +145,7 @@ import { Mark } from "./Mark";
 import marks from "./Mark.module.css";
 import { Conflict } from "./Merging";
 import { PaneHead } from "./PaneHead";
+import { RemoteBanner } from "./RemoteBanner";
 import { StatusButton } from "./StatusButton";
 import styles from "./Timeline.module.css";
 import { titled } from "./naming";
@@ -543,6 +544,18 @@ export function Timeline(props: {
           <StatusButton conversation={props.conversation} />
         </Show>
       </PaneSticky>
+
+      {/* And between the block that stays and the record that scrolls: the one
+          line that is about the workbench rather than about this Conversation —
+          answer the first questions from a phone, and here is where a phone is
+          let in from. Drawn in one window and dismissed for good, so most loads
+          have nothing here at all — see `RemoteBanner.tsx`.
+
+          Not in a share, which fetches nothing and is nobody's workbench to
+          reach. */}
+      <Show when={!props.readOnly}>
+        <RemoteBanner conversation={props.conversation} />
+      </Show>
 
       <ol class={styles.timeline} ref={record}>
         <For each={props.conversation.timeline}>

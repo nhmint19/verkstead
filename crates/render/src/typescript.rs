@@ -18,15 +18,16 @@ use ts_rs::TS;
 
 use crate::{
     AbandonedRepo, Adopted, Attached, AttachmentRemoved, BacklogPane, BaseBranchChoice,
-    BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefSaved, BrowseScope, Capture,
-    CommitPane, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionModeChoice,
+    BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefSaved, Capture, CommitPane,
+    CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionModeChoice,
     CompanionModeChosen, CompanionRemoved, ConflictResolutionEdit, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
     ConversationUnarchived, ConversationView, DirectoryListing, GrillingStarted, Locked,
-    NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice, ProfileChosen,
-    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
-    Registered, Registration, RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched,
-    RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, SetReading, SettingsEdit,
+    NewAdoption, NewCompanion, NewConversation, NewOrder, OnboardingView, PrefillView,
+    ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved,
+    PullRequestDetails, PushKey, Registered, Registration, RemoteBanner, RemoteView, RepoChoice,
+    RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed,
+    RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress, SetReading, SettingsEdit,
     SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedConversation,
     ShowingArchived, Shown, Started, SteerOpened, SteerSubmission, Submitted, Subscribed,
     Subscription, TerminalOpened, TerminalsView, TranscriptView, Unsubscribe, UpdateNotice,
@@ -277,14 +278,41 @@ fn the_viewers_types_are_written_from_these() {
     SettingsEdit::export_all(&config).unwrap();
     SettingsSaved::export_all(&config).unwrap();
 
-    // And what a path field browses with: one directory of the filesystem, and
-    // the scope the field asks in — which is what says whether the boundary is
-    // consulted. The listing writes the entries and their kinds with it.
-    BrowseScope::export_all(&config).unwrap();
+    // And what a path field browses with: one directory of the filesystem,
+    // asked for by path and nothing else. The listing writes the entries and
+    // their kinds with it.
     DirectoryListing::export_all(&config).unwrap();
 
     // Whether there is a newer Verkstead than the one serving the page.
     UpdateNotice::export_all(&config).unwrap();
+
+    // And what this machine's Tailscale is doing, which is the Remote access
+    // section's whole read: nothing stored, and nothing this page saves — the
+    // serve state it carries writes the state a phone is reached through with
+    // it.
+    RemoteView::export_all(&config).unwrap();
+
+    // And whether the human is done with the banner that points at that
+    // section, which is the one thing about it that is stored: read back off
+    // the server on every load, so a dismissal made anywhere holds everywhere.
+    RemoteBanner::export_all(&config).unwrap();
+
+    // And the one thing on that section that is pressed rather than read: the
+    // serve switch. What a press takes in, and the three answers it comes back
+    // with — the machine read again, the operator grant it wants first, or what
+    // went wrong in the machine's own words.
+    ServeEdit::export_all(&config).unwrap();
+    ServePress::export_all(&config).unwrap();
+
+    // And whether a fresh Verkstead can do anything yet: the mode the wizard
+    // runs in, the machine it is standing on, and what is missing from it. It
+    // writes the rows and the three steps' met-ness with it.
+    OnboardingView::export_all(&config).unwrap();
+
+    // And what that machine can offer the wizard's last step, which is a read
+    // of its own: the git author it commits as and a GitHub token it is
+    // already holding, each labelled with where it was found.
+    PrefillView::export_all(&config).unwrap();
 
     // How every one of them refuses. The same shape the agents' half refuses in,
     // so the viewer has one thing to read whichever half answered.

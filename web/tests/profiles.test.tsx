@@ -15,10 +15,10 @@
 //! `cargo test` renders the real endpoint and writes the file, so what these
 //! assertions read is what the server actually said.
 //!
-//! Whether a pair is really there, and whether it is inside the watched paths,
-//! are the server's to decide — the tests over in `crates/server` are what say
-//! so. This side's job is to send what was typed and say in words what came
-//! back.
+//! Whether a pair is really there, and whether it is an account of the shape its
+//! harness keeps, are the server's to decide — the tests over in `crates/server`
+//! are what say so. This side's job is to send what was typed and say in words
+//! what came back.
 //!
 //! And that the browse writes the same boxes the typing does. The fields are the
 //! shared one — how the dropdown itself behaves is `browsing.test.tsx`'s, where
@@ -37,7 +37,7 @@ import type {
   ProfileEdit,
   ProfileEntry,
 } from "../src/api/types";
-import { AGENT_NAME } from "../src/agents";
+import { AGENT_NAME, DEFAULT_PROFILE } from "../src/agents";
 import { KNOWN_MODELS, prettify } from "../src/models";
 // The four files a backend's brand mark is drawn out of, read as lobehub
 // published them — so that naming a mark here and drawing it in `HarnessMark`
@@ -161,6 +161,12 @@ function theCard(name: string): HTMLElement {
   return screen.getByText(name).closest(`.${styles.profile}`)!;
 }
 
+/// What a card is read by: the profile's name, and *Default* for the one nobody
+/// named — which is what the card draws, a list being read down by name.
+function named(profile: ProfileEntry): string {
+  return profile.name ?? DEFAULT_PROFILE;
+}
+
 /// Fill the form in, whichever profile it is about.
 ///
 /// The pair an account is, where it is a Claude one — which every fixture here
@@ -205,8 +211,8 @@ const CODEX: ProfileEntry = {
 /// pair here — the form draws them off the type, and this fills in what it
 /// drew. The picker is left where it opens, Claude being the type it opens on.
 function fillIn(profile: ProfileEdit) {
-  fireEvent.input(screen.getByLabelText("Name"), {
-    target: { value: profile.name },
+  fireEvent.input(screen.getByLabelText(/^Name/), {
+    target: { value: profile.name ?? "" },
   });
   for (const model of profile.models) {
     fireEvent.click(screen.getByLabelText(prettify(model)));
@@ -267,7 +273,7 @@ describe("the cards", () => {
     const fetching = theProfiles();
     const { container } = mountCards();
 
-    await waitFor(() => screen.getByText(FABLE.name));
+    await waitFor(() => screen.getByText(named(FABLE)));
 
     expect(fetching).toHaveBeenCalledWith(
       "/api/ui/profiles",
@@ -277,7 +283,7 @@ describe("the cards", () => {
       [...container.querySelectorAll(`.${styles.profile} .${styles.title}`)].map(
         (name) => name.textContent,
       ),
-    ).toEqual(SAVED.map((profile) => profile.name));
+    ).toEqual(SAVED.map(named));
   });
 
   /// The list is the whole of what the account can launch, so the card shows all
@@ -287,11 +293,11 @@ describe("the cards", () => {
     theProfiles();
     mountCards();
 
-    await waitFor(() => screen.getByText(OPUS.name));
+    await waitFor(() => screen.getByText(named(OPUS)));
 
     expect(OPUS.models.length).toBeGreaterThan(1);
     expect(
-      [...theCard(OPUS.name).querySelectorAll(`.${styles.model}`)].map(
+      [...theCard(named(OPUS)).querySelectorAll(`.${styles.model}`)].map(
         (model) => model.textContent,
       ),
     ).toEqual(OPUS.models);
@@ -304,9 +310,9 @@ describe("the cards", () => {
     theProfiles();
     mountCards();
 
-    await waitFor(() => screen.getByText(FABLE.name));
+    await waitFor(() => screen.getByText(named(FABLE)));
 
-    const face = theCard(FABLE.name);
+    const face = theCard(named(FABLE));
     expect(face.textContent).not.toContain(pair(FABLE.account).claude_dir);
     expect(face.textContent).not.toContain(pair(FABLE.account).config_file);
     expect(face.textContent).not.toContain(FABLE.account.agent_type);
@@ -319,9 +325,9 @@ describe("the cards", () => {
     theProfiles();
     const { open } = mountCards();
 
-    await waitFor(() => screen.getByText(FABLE.name));
+    await waitFor(() => screen.getByText(named(FABLE)));
 
-    const face = theCard(FABLE.name);
+    const face = theCard(named(FABLE));
     expect(face.getAttribute("role")).toBe("button");
     expect(face.getAttribute("aria-pressed")).toBe("false");
     expect(face.classList).not.toContain(card.open);
@@ -334,11 +340,11 @@ describe("the cards", () => {
     theProfiles();
     mountCards(FABLE.id);
 
-    await waitFor(() => screen.getByText(FABLE.name));
+    await waitFor(() => screen.getByText(named(FABLE)));
 
-    expect(theCard(FABLE.name).getAttribute("aria-pressed")).toBe("true");
-    expect(theCard(FABLE.name).classList).toContain(card.open);
-    expect(theCard(OPUS.name).classList).not.toContain(card.open);
+    expect(theCard(named(FABLE)).getAttribute("aria-pressed")).toBe("true");
+    expect(theCard(named(FABLE)).classList).toContain(card.open);
+    expect(theCard(named(OPUS)).classList).not.toContain(card.open);
   });
 
   /// The list is what stays in the pane. There is no form on it at all: adding
@@ -347,7 +353,7 @@ describe("the cards", () => {
     theProfiles();
     const { container } = mountCards();
 
-    await waitFor(() => screen.getByText(FABLE.name));
+    await waitFor(() => screen.getByText(named(FABLE)));
 
     expect(container.querySelector("form")).toBeNull();
     expect(container.querySelector("dialog")).toBeNull();
@@ -359,6 +365,22 @@ describe("the cards", () => {
     mountCards();
 
     await waitFor(() => screen.getByText("No agent profiles are saved yet."));
+  });
+
+  /// A profile may go unnamed — a name tells two accounts of one agent apart,
+  /// and the wizard's accounts step saves one nobody has typed a word for. A
+  /// card is a list read down by name, so this is one of the places a name has
+  /// to be shown whatever the profile holds.
+  it("reads a profile nobody named as Default", async () => {
+    serving(whenever("/api/ui/profiles", json([{ ...FABLE, name: null }])));
+    const { container } = mountCards();
+
+    await waitFor(() => screen.getByText(DEFAULT_PROFILE));
+
+    expect(
+      container.querySelector(`.${styles.profile} .${styles.title}`)!
+        .textContent,
+    ).toBe(DEFAULT_PROFILE);
   });
 });
 
@@ -416,7 +438,7 @@ describe("the pane a card opens", () => {
     mountPane(FABLE.id);
 
     await waitFor(() =>
-      expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
+      expect((screen.getByLabelText(/^Name/) as HTMLInputElement).value).toBe(
         FABLE.name,
       ),
     );
@@ -612,7 +634,7 @@ describe("the pane a card opens", () => {
     theProfiles(json("Saved"));
     const { done } = mountPane(FABLE.id);
 
-    await waitFor(() => screen.getByLabelText("Name"));
+    await waitFor(() => screen.getByLabelText(/^Name/));
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(done).toHaveBeenCalled());
@@ -625,7 +647,7 @@ describe("the pane a card opens", () => {
     theProfiles();
     const { container } = mountPane(FABLE.id);
 
-    await waitFor(() => screen.getByLabelText("Name"));
+    await waitFor(() => screen.getByLabelText(/^Name/));
 
     expect(container.querySelector("dialog")).toBeNull();
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
@@ -658,7 +680,7 @@ describe("the pane the plus opens", () => {
     theProfiles();
     const { container } = mountPane("new");
 
-    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText(/^Name/) as HTMLInputElement).value).toBe("");
     expect(ticked()).toEqual([]);
     expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
 
@@ -705,7 +727,7 @@ describe("the pane the plus opens", () => {
       const fetching = theProfiles(json("Saved"));
       mountPane("new");
 
-      fireEvent.input(screen.getByLabelText("Name"), {
+      fireEvent.input(screen.getByLabelText(/^Name/), {
         target: { value: profile.name },
       });
 
@@ -736,15 +758,13 @@ describe("the pane the plus opens", () => {
   it.each([
     ["DirMissing", /nothing at the claude directory/i],
     ["ConfigMissing", /nothing at the config file/i],
-    ["DirOutsideWatchedPaths", /claude directory is outside the watched paths/i],
-    ["ConfigOutsideWatchedPaths", /config file is outside the watched paths/i],
     ["NotADirectory", /not a directory/i],
     ["NotAFile", /not a file/i],
     ["DirNotAbsolute", /claude directory's absolute path/i],
     ["ConfigNotAbsolute", /config file's absolute path/i],
-    ["Nameless", /give the profile a name/i],
     ["Modelless", /at least one model/i],
     ["NameTaken", /another profile is called that already/i],
+    ["DefaultTaken", /already has a profile with no name/i],
   ])("says why %s was refused, in words", async (outcome, said) => {
     theProfiles(json(outcome));
     const { done } = mountPane("new");
@@ -757,9 +777,37 @@ describe("the pane the plus opens", () => {
     // wrong with it.
     await waitFor(() => screen.getByText(said));
     expect(done).not.toHaveBeenCalled();
-    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
+    expect((screen.getByLabelText(/^Name/) as HTMLInputElement).value).toBe(
       NEW.name,
     );
+  });
+
+  /// An empty box is *no name* rather than a name of no letters: the profile
+  /// goes down unnamed, which is what the null on the wire says.
+  it("sends no name at all where the box was left empty", async () => {
+    const fetching = theProfiles(json("Saved"));
+    mountPane("new");
+
+    fillIn({ ...NEW, name: null });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/profiles")).toEqual({
+        ...NEW,
+        name: null,
+      }),
+    );
+  });
+
+  /// And the box opens empty for one, rather than on the word the card is read
+  /// by: *Default* is what a name is shown as, not a name somebody typed.
+  it("opens the name box empty for a profile nobody named", async () => {
+    const unnamed = { ...FABLE, name: null };
+    serving(whenever("/api/ui/profiles", json([unnamed])));
+    mountPane(unnamed.id);
+
+    await waitFor(() => expect(ticked()).toEqual(unnamed.models));
+    expect((screen.getByLabelText(/^Name/) as HTMLInputElement).value).toBe("");
   });
 
   /// A server that could not answer at all, which is the one thing here that is
@@ -837,10 +885,6 @@ describe("a profile whose account has gone", () => {
     ["DirMissing", "Its claude directory is gone."],
     ["ConfigMissing", "Its config file is gone."],
     ["HomeMissing", "The home it kept its account under is gone."],
-    [
-      "OutsideWatchedPaths",
-      "Its account now points outside the watched paths.",
-    ],
   ])("says of %s what is wrong with it", async (broken, said) => {
     const gone: ProfileEntry[] = [
       { ...FABLE, broken: broken as ProfileEntry["broken"] },
@@ -848,9 +892,9 @@ describe("a profile whose account has gone", () => {
     serving(whenever("/api/ui/profiles", json(gone)));
     mountCards();
 
-    await waitFor(() => screen.getByText(FABLE.name));
+    await waitFor(() => screen.getByText(named(FABLE)));
 
-    const face = theCard(FABLE.name);
+    const face = theCard(named(FABLE));
     expect(face.classList).toContain(styles.broken);
     expect(face.querySelector(`.${styles.broken}`)!.textContent).toBe(said);
   });
@@ -859,9 +903,9 @@ describe("a profile whose account has gone", () => {
     theProfiles();
     mountCards();
 
-    await waitFor(() => screen.getByText(FABLE.name));
+    await waitFor(() => screen.getByText(named(FABLE)));
 
-    const face = theCard(FABLE.name);
+    const face = theCard(named(FABLE));
     expect(FABLE.broken).toBeNull();
     expect(face.classList).not.toContain(styles.broken);
     expect(face.querySelector(`.${styles.broken}`)).toBeNull();
@@ -1109,7 +1153,7 @@ describe("browsing for the account's paths", () => {
   const DIRECTORY = "Claude directory, mounted at ~/.claude";
   const CONFIG = "Config file, mounted at ~/.claude.json";
 
-  /// A watched root, and an account kept under it: a `.claude` beside a
+  /// The server's home, and an account kept under it: a `.claude` beside a
   /// `.claude.json`, which is what these fields exist to point at.
   ///
   /// Written here rather than taken from the fixtures the server's own tests
@@ -1117,9 +1161,9 @@ describe("browsing for the account's paths", () => {
   /// form does about a dotfile and about a file, and neither of those fixtures
   /// holds an account. The shape is the endpoint's own — directories first and
   /// then by name, dotfiles among them.
-  const ROOTS: DirectoryListing = {
+  const SERVERS_HOME: DirectoryListing = {
     Listed: {
-      path: null,
+      path: "/home/ada",
       entries: [
         { name: "accounts", path: "/home/ada/accounts", kind: "Directory" },
       ],
@@ -1168,17 +1212,17 @@ describe("browsing for the account's paths", () => {
   /// The list behind the pane, the levels this browse goes through, and whatever
   /// the save itself is answered by.
   ///
-  /// Every level in the watched scope, which is the one these fields are bounded
-  /// by: the server refuses an account outside the Watched Paths, so a dropdown
-  /// offering one would be offering a wasted press.
+  /// The empty field asks for no path, and what the server answers that with is
+  /// its own home — which is where an account most often is, and where these
+  /// fields begin.
   function theBrowse(...answers: Array<() => Promise<Response>>) {
     return serving(
       whenever("/api/ui/profiles", json(SAVED)),
-      whenever(listingAt(null, "watched"), json(ROOTS)),
-      whenever(listingAt("/home/ada/accounts", "watched"), json(ACCOUNTS)),
-      whenever(listingAt("/home/ada/accounts/work", "watched"), json(WORK)),
+      whenever(listingAt(null), json(SERVERS_HOME)),
+      whenever(listingAt("/home/ada/accounts"), json(ACCOUNTS)),
+      whenever(listingAt("/home/ada/accounts/work"), json(WORK)),
       whenever(
-        listingAt("/home/ada/accounts/work/.claude", "watched"),
+        listingAt("/home/ada/accounts/work/.claude"),
         json(CLAUDE),
       ),
       ...answers,
@@ -1197,7 +1241,7 @@ describe("browsing for the account's paths", () => {
   }
 
   /// Browse one of the fields down to the account, which is the two levels under
-  /// the watched root.
+  /// the home the empty field opens on.
   async function browsedToTheAccount(label: string): Promise<void> {
     browse(label);
 
@@ -1214,8 +1258,8 @@ describe("browsing for the account's paths", () => {
     await browsedToTheAccount(DIRECTORY);
 
     // The directories of the account, hidden ones included — and only the
-    // directories, this field naming one. The way back out is a row here and
-    // was not one at the root: above that is outside the boundary.
+    // directories, this field naming one. The way back out is a row here as it
+    // is at every level: nothing about this browse has a ceiling.
     await waitFor(() =>
       expect(browsed(DIRECTORY)).toEqual([
         "Up to /home/ada/accounts",
@@ -1252,7 +1296,7 @@ describe("browsing for the account's paths", () => {
     expect(
       askedFor(
         fetching,
-        listingAt("/home/ada/accounts/work/.claude.json", "watched"),
+        listingAt("/home/ada/accounts/work/.claude.json"),
       ),
     ).toBe(0);
   });
@@ -1264,7 +1308,7 @@ describe("browsing for the account's paths", () => {
     const fetching = theBrowse(json("Saved"));
     const { done } = mountPane("new");
 
-    fireEvent.input(screen.getByLabelText("Name"), {
+    fireEvent.input(screen.getByLabelText(/^Name/), {
       target: { value: "work" },
     });
     fireEvent.click(screen.getByLabelText(prettify("claude-sonnet-5")));
@@ -1292,7 +1336,7 @@ describe("browsing for the account's paths", () => {
   });
 
   /// And the home the types after the first keep everything under browses the
-  /// same way: one field, the dotfiles shown, and the same scope.
+  /// same way: one field, and the dotfiles shown.
   it("browses the home of a type that keeps one", async () => {
     theBrowse();
     mountPane("new");

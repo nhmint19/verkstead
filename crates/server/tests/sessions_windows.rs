@@ -70,7 +70,7 @@ use verkstead_server::sandbox::{Executable, Homes, Reachable, SandboxConfig};
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
 use verkstead_server::terminal::COLUMNS;
-use verkstead_server::{Agents, Gh, Pace, WatchedPaths, open_database, router_running_sessions};
+use verkstead_server::{Agents, Gh, Pace, open_database, router_running_sessions};
 
 /// The Brief every Conversation here is started from, and what the stand-in is
 /// primed with.
@@ -317,7 +317,7 @@ fn somewhere() -> tempfile::TempDir {
 struct Grilling {
     /// Dropped last, and only these keep the directories alive: a worktree that
     /// vanished mid-session would fail obscurely.
-    _watched: tempfile::TempDir,
+    _elsewhere: tempfile::TempDir,
     _scripts: tempfile::TempDir,
     state: tempfile::TempDir,
 
@@ -605,7 +605,7 @@ async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
         .await
         .expect("the suite's room is never closed");
 
-    let watched = somewhere();
+    let elsewhere = somewhere();
     let state = somewhere();
     let scripts = somewhere();
     let evidence = somewhere();
@@ -618,7 +618,7 @@ async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
     // The Agent Profile's account, made before the stand-in is written because
     // the stand-in is told where it is: what a session may reach of it is one
     // of the things this suite attempts from inside. See [`account`].
-    let account = account(watched.path());
+    let account = account(elsewhere.path());
 
     // And the home of whoever is running the server, with something private in
     // it that no description ever names. A directory of the fixture's own
@@ -637,7 +637,7 @@ async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
     // Where the Repo will be and where its git directory will be — both said
     // before either exists, because the stand-in is written first and the two
     // are a path rather than a thing. See [`repository`], which makes them.
-    let repo = watched.path().join("verkstead");
+    let repo = elsewhere.path().join("verkstead");
 
     let stand_in = scripts.path().join("agent.ps1");
     std::fs::write(
@@ -700,7 +700,6 @@ async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
 
     let app = router_running_sessions(
         pool,
-        WatchedPaths::resolve(&[watched.path().to_owned()]).unwrap(),
         state.path().to_owned(),
         agents,
         // Nothing here reaches a wrap-up, so nothing here asks GitHub anything
@@ -770,7 +769,7 @@ async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
     assert_eq!(grilling, GrillingStarted::Started);
 
     Grilling {
-        _watched: watched,
+        _elsewhere: elsewhere,
         _scripts: scripts,
         state,
         evidence,
@@ -790,8 +789,8 @@ async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
 /// profile joins in is the account of the Profile it was launched under, and
 /// every session in this file is the grilling one — so a second and a third
 /// would be directories nothing ever looked at.
-fn account(watched: &Path) -> PathBuf {
-    let account = watched.join("claude");
+fn account(elsewhere: &Path) -> PathBuf {
+    let account = elsewhere.join("claude");
 
     std::fs::create_dir_all(account.join(".claude")).unwrap();
     std::fs::write(account.join(".claude").join("marker.txt"), THE_ACCOUNTS).unwrap();
@@ -859,7 +858,7 @@ async fn profile(app: &Router, account: &Path, name: &str) -> i64 {
     let profiles: Vec<verkstead_render::ProfileEntry> = get(app, "/api/ui/profiles").await;
     profiles
         .into_iter()
-        .find(|profile| profile.name == name)
+        .find(|profile| profile.name.as_deref() == Some(name))
         .expect("the Profile just saved should be on the list")
         .id
 }

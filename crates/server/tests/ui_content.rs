@@ -36,8 +36,10 @@ use verkstead_schema::{
     Answer, Liveness, Question, QuestionOption, QuestionSet, RepoDiff, Response, SetCreated,
     Subquestion,
 };
+use verkstead_server::key::WorkbenchKey;
+use verkstead_server::remote::Tailscale;
 use verkstead_server::{
-    Gh, WatchedPaths, open_database, router, router_asking_github, router_watching, store,
+    Gh, open_database, router, router_asking_github, router_reading_tailscale, store,
 };
 
 /// The Conversation every Set in this file is asked from.
@@ -1682,8 +1684,8 @@ async fn the_viewers_own_tests_are_fed_from_here() {
 
     // The Repo list: two registrations, put in through the store rather than
     // through the endpoint, because what is being written here is the shape of a
-    // row — and going in the front way would mean building a git repository
-    // inside a Watched Path, which is `repos.rs`'s subject and not this one's.
+    // row — and going in the front way would mean building a git repository on
+    // disk, which is `repos.rs`'s subject and not this one's.
     let (_dir, pool, app) = empty_app().await;
     for (path, name, branch) in [
         ("/srv/repos/verkstead", "verkstead", "main"),
@@ -1854,8 +1856,8 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // The workbench: the sidebar, and one Conversation opened — a Brief written,
     // a branch named, and the base commit overridden, which is the whole of what
     // a drafting Conversation carries. Put in through the store for the reason
-    // the Repos are: going in the front way means a git repository inside a
-    // Watched Path, which is `conversations.rs`'s subject and not this one's.
+    // the Repos are: going in the front way means a git repository on disk,
+    // which is `conversations.rs`'s subject and not this one's.
     let (_dir, pool, app) = empty_app().await;
     let mut repos = Vec::new();
     for (path, name, branch) in [
@@ -1893,7 +1895,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             store::create_profile(
                 &pool,
                 &store::ProfileFacts {
-                    name: name.to_owned(),
+                    name: Some(name.to_owned()),
                     account: store::Account::Claude {
                         claude_dir: std::path::PathBuf::from(format!("{home}/.claude")),
                         config_file: std::path::PathBuf::from(format!("{home}/.claude.json")),
@@ -2593,7 +2595,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
              Git had nothing pending, or the repository would not answer.\n\n\
              ### What the last session said\n\n\
              It said nothing at all.\n",
-            profiles[1].name,
+            profiles[1].name.as_deref().unwrap(),
         ),
         // The words the display drew, which is what a stop carries: `3pm` stays
         // `3pm`, and the page draws it beside Resume rather than counting down
@@ -2985,17 +2987,16 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             // what `settings-unset.json` already carries.
             "share_on_done": true,
 
-            // And the paths this Verkstead was told about, which come back
+            // And the binds this Verkstead was told about, which come back
             // labelled as the settings' own — the router behind this fixture was
             // started with none of its own, the way a standalone install is.
             //
-            // None of them is on the machine writing the fixture, so each comes
-            // back unresolved, which is the row the page has the most to draw:
-            // an entry that is saved, is in the file, and does nothing until the
+            // Neither is on the machine writing the fixture, so each comes back
+            // unresolved, which is the row the page has the most to draw: an
+            // entry that is saved, is in the file, and does nothing until the
             // directory is there. Fixed paths rather than a temporary
             // directory's, because a fixture that changed with the machine that
             // wrote it would be a diff on every run.
-            "watched_paths": ["/home/ada/src"],
             "sandbox_binds": ["/var/cache/verkstead-node", "verkstead=/var/cache/verkstead-cargo"],
 
             // And one comment nobody wants addressed, for the reason the size
@@ -3025,9 +3026,12 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // A real directory, made fresh on every run, because a listing is read off
     // the filesystem and nothing else — there is no store behind this endpoint
     // at all. It is made under a temporary directory and put back to
-    // `/home/ada/src` afterwards, which is the Watched Path the settings
-    // fixtures above name: the two fixtures are then the same Verkstead, seen
-    // from its settings page and from a dropdown on it.
+    // `/home/ada/src` afterwards, so that the fixture reads as the home the
+    // settings fixtures above belong to rather than as a path off this machine.
+    //
+    // Only the one, and none for the field standing empty: what that opens on
+    // is the server's own home, which is a different directory on every machine
+    // that runs this and nothing a fixture could be pinned to.
     let made = tempfile::tempdir().unwrap();
     let root = made.path().join("src");
     std::fs::create_dir_all(root.join("assets")).unwrap();
@@ -3035,14 +3039,14 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     std::fs::create_dir_all(root.join(".config")).unwrap();
     std::fs::write(root.join("README.md"), "# a directory\n").unwrap();
 
-    let (_dir, app) = browsing_app(&root).await;
+    let (_dir, app) = browsing_app().await;
 
     write(
         "directories.json",
         &pin_under(
             &get(
                 &app,
-                &format!("/api/ui/directories?scope=watched&path={}", root.display()),
+                &format!("/api/ui/directories?path={}", root.display()),
             )
             .await,
             made.path(),
@@ -3050,34 +3054,172 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         ),
     );
 
-    // And where a browse bounded by the Watched Paths begins: the roots
-    // themselves, which is the one listing with no directory above it.
+    // And what the Remote access section reads: what this machine's Tailscale
+    // is doing. One fixture per state the pane draws differently, because each
+    // of them is a different sentence in front of the human — a machine with
+    // nothing installed, one whose daemon is not answering, one that is up and
+    // serving the workbench, and one that is up and serving nothing.
+    //
+    // Read through a `tailscale` that is a shell script, for the reason the
+    // settings above go through a `gh` that is one: what the real command would
+    // say here is a fact about the machine writing the fixture, and the pane has
+    // four machines to describe. See `tests/remote.rs`, whose subject these
+    // shapes are.
+    let (_dir, absent) = tailscale_app(NO_TAILSCALE).await;
+    write("remote-absent.json", &get(&absent, "/api/ui/remote").await);
+
+    let (_dir, down) = tailscale_app(NO_DAEMON).await;
+    write("remote-down.json", &get(&down, "/api/ui/remote").await);
+
+    let (_dir, serving) = tailscale_app(SERVING).await;
     write(
-        "directories-roots.json",
-        &pin_under(
-            &get(&app, "/api/ui/directories?scope=watched").await,
-            made.path(),
-            "/home/ada",
-        ),
+        "remote-serving.json",
+        &get(&serving, "/api/ui/remote").await,
+    );
+
+    let (_dir, off) = tailscale_app(NOT_SERVING).await;
+    write("remote-off.json", &get(&off, "/api/ui/remote").await);
+
+    // And one whose serve state could not be read at all, which is the machine
+    // the switch is not drawn over: *cannot tell* under a control offering to
+    // turn *off* on would be the one sentence this section must never say.
+    let (_dir, strange) = tailscale_app(UNREADABLE_SERVE).await;
+    write(
+        "remote-serve-unreadable.json",
+        &get(&strange, "/api/ui/remote").await,
+    );
+
+    // And what a press of the serve switch comes back with. Two of them,
+    // because the pane draws two different things: the machine read again,
+    // which is where the switch settles, and the operator grant, which is a
+    // line for somebody to run in a terminal before pressing again.
+    //
+    // The serving machine above takes the press without complaint — its script
+    // answers every `serve` alike — so what it writes is the whole of a press
+    // that worked, reading and all.
+    let (_dir, took) = tailscale_app(SERVING).await;
+    write(
+        "serve-done.json",
+        &post(
+            &took,
+            "/api/ui/remote/serve",
+            &serde_json::json!({ "on": true }),
+        )
+        .await,
+    );
+
+    let (_dir, denied) = tailscale_app(REFUSES_SERVE).await;
+    write(
+        "serve-ungranted.json",
+        &post(
+            &denied,
+            "/api/ui/remote/serve",
+            &serde_json::json!({ "on": true }),
+        )
+        .await,
     );
 }
 
-/// A router watching one directory, and the directory holding its database
-/// alive.
-///
-/// What a browse in the watched scope is written over: everything else here
-/// stands up a router watching nothing, which is the closed state — and a
-/// dropdown bounded by the Watched Paths has nothing to answer where there are
-/// none.
-async fn browsing_app(watched: &Path) -> (tempfile::TempDir, Router) {
+/// A machine on a tailnet with the workbench served on its tailnet name.
+#[cfg(unix)]
+const SERVING: &str = r#"
+case "$1" in
+  status) printf '%s' '{"BackendState":"Running","Self":{"DNSName":"workbench.tailnet-name.ts.net."}}' ;;
+  serve) printf '%s' '{"TCP":{"443":{"HTTPS":true}},"Web":{"workbench.tailnet-name.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:8422"}}}}}' ;;
+esac
+"#;
+
+/// The same machine with no serve on it at all.
+#[cfg(unix)]
+const NOT_SERVING: &str = r#"
+case "$1" in
+  status) printf '%s' '{"BackendState":"Running","Self":{"DNSName":"workbench.tailnet-name.ts.net."}}' ;;
+  serve) printf '%s' 'null' ;;
+esac
+"#;
+
+/// And one whose daemon is not running, which is what `tailscale` says about it.
+#[cfg(unix)]
+const NO_DAEMON: &str = r#"
+echo "failed to connect to local tailscaled; it doesn't appear to be running (sudo systemctl start tailscaled ?)" >&2
+exit 1
+"#;
+
+/// And the machine with no `tailscale` on it, which is a program that is not
+/// there rather than a script that says anything.
+#[cfg(unix)]
+const NO_TAILSCALE: &str = "";
+
+/// And a machine whose Tailscale will not take a serve from the user this
+/// server is running as, which is the operator grant not yet made.
+#[cfg(unix)]
+const REFUSES_SERVE: &str = r#"
+echo "Access denied: serve config denied" >&2
+exit 1
+"#;
+
+/// And a machine that is up whose serve configuration answered in a shape this
+/// build does not know — which is *cannot tell*, and the one state the switch is
+/// not drawn over.
+#[cfg(unix)]
+const UNREADABLE_SERVE: &str = r#"
+case "$1" in
+  status) printf '%s' '{"BackendState":"Running","Self":{"DNSName":"workbench.tailnet-name.ts.net."}}' ;;
+  serve) printf '%s' '{"Sites":{"workbench.tailnet-name.ts.net:443":{}}}' ;;
+esac
+"#;
+
+/// The port the fixtures' workbench is served on, which is the one the serve
+/// above proxies to.
+#[cfg(unix)]
+const WORKBENCH: u16 = 8422;
+
+/// A server reading a machine whose `tailscale` is `script` — or one with no
+/// `tailscale` at all, which is what the empty script stands for: there is
+/// nothing a script could print that would say *this program does not exist*.
+#[cfg(unix)]
+async fn tailscale_app(script: &str) -> (tempfile::TempDir, Router) {
     let dir = tempfile::tempdir().unwrap();
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
-    let data_dir = dir.path().to_owned();
-    let watched = WatchedPaths::resolve(&[watched.to_owned()]).unwrap();
 
-    (dir, router_watching(pool, watched, data_dir))
+    let tailscale = match script.is_empty() {
+        true => Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], WORKBENCH),
+        false => Tailscale::running(
+            vec![
+                "/bin/sh".to_owned(),
+                "-c".to_owned(),
+                script.to_owned(),
+                // `sh -c` gives `$0` the script's own name, so what Verkstead
+                // passes lands in `$1` onwards.
+                "tailscale".to_owned(),
+            ],
+            WORKBENCH,
+        ),
+    }
+    // Stated, because the operator grant names it: a fixture whose command
+    // said whoever ran `cargo test` would be a fixture of this machine.
+    .as_user("ada".to_owned())
+    // And the Workbench Key stated for the same reason: the login link the pane
+    // draws as a QR code is the served address with this on the end of it, and
+    // thirty-two random bytes would be a fixture nobody could pin.
+    .keyed(WorkbenchKey::stated(dir.path(), "a-stated-workbench-key").unwrap());
+
+    (dir, router_reading_tailscale(pool, tailscale))
+}
+
+/// A router, and the directory holding its database alive.
+///
+/// Nothing is configured on it: a browse consults no boundary and no setting, so
+/// the plainest router there is answers the one ask written over it.
+async fn browsing_app() -> (tempfile::TempDir, Router) {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    (dir, router(pool))
 }
 
 /// Put a payload's temporary directory back to a stated one, wherever it

@@ -1751,8 +1751,11 @@ pub struct AgentOutputEvent {
     /// Off the record rather than off what is running: it is written down as
     /// the session starts and stays true afterwards, so a Profile renamed or
     /// deleted since — and a Verkstead restarted since — leaves this saying
-    /// what actually ran. `null` for a session started before Verkstead wrote
-    /// it down.
+    /// what actually ran.
+    ///
+    /// `null` twice over: a session started before Verkstead wrote it down, and
+    /// one launched under a Profile nobody named. Neither is a name to show, so
+    /// both draw as the harness and the model alone.
     pub profile: Option<String>,
 
     /// And the model it was launched on, as the raw id: `claude-opus-5` rather

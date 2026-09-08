@@ -58,7 +58,8 @@ export function value(pairing: Pairing): string {
 /// there is.
 ///
 /// `saved` is the profiles as they stand, which decides whether the profile's
-/// own name is said at all — see [`reading`](./agents.ts).
+/// own name is said at all — and a profile nobody named reads as *Default* where
+/// it has to be said. See [`reading`](./agents.ts).
 export function label(
   pairing: { profile: ProfileEntry; model: string | null },
   saved: ProfileEntry[] | undefined,

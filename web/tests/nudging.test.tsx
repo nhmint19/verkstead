@@ -23,6 +23,7 @@ import type {
   ConversationEntry,
   ConversationView,
   Nudge,
+  OnboardingView,
   ProfileEntry,
   PullRequestDetails,
   QuestionSetEvent,
@@ -53,6 +54,7 @@ import {
 } from "./serving";
 import { worker } from "./worker";
 import kinds from "./fixtures/nudges.json" with { type: "json" };
+import onboarding from "./fixtures/onboarding-ready.json" with { type: "json" };
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
 import drafting from "./fixtures/conversation.json" with { type: "json" };
 import wrapping from "./fixtures/conversation-wrapping.json" with { type: "json" };
@@ -116,6 +118,9 @@ const BESIDE = [
   whenever(PROFILES, json(profiles as ProfileEntry[])),
   whenever(ROADMAPS, json([])),
   whenever("/api/ui/update", json("Current")),
+  // And the gate around the router, which the app asks about before it draws
+  // anything: a machine with the objective met leaves the workbench standing.
+  whenever("/api/ui/onboarding", json(onboarding as OnboardingView)),
 ];
 
 /// One Set twice over: waiting when the page was drawn, answered from another

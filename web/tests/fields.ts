@@ -17,7 +17,6 @@
 
 import { fireEvent, screen } from "@solidjs/testing-library";
 
-import type { BrowseScope } from "../src/api/types";
 import field from "../src/PathField.module.css";
 import styles from "../src/picking.module.css";
 
@@ -132,17 +131,14 @@ function words(row: Element): string {
 }
 
 /// And where one level of a browse is asked for, spelled as the client spells
-/// it: the scope in the query beside the path, and no path at all for the field
-/// standing empty.
+/// it: the path in the query, and no path at all for the field standing empty —
+/// which is what the server answers with its own home.
 ///
 /// Here rather than in each test, because it is the one thing about a browse
 /// that is neither the dropdown nor the server: a test serving a level has to
 /// name the request the field is about to make.
-export function listingAt(
-  path: string | null,
-  scope: BrowseScope = "anywhere",
-): string {
-  const asking = new URLSearchParams({ scope });
+export function listingAt(path: string | null): string {
+  const asking = new URLSearchParams();
 
   if (path !== null) {
     asking.set("path", path);

@@ -64,41 +64,55 @@ On a NixOS host, import the flake and enable the service:
 ```nix
 services.verkstead = {
   enable = true;
-  watchedPaths = [ "/home/you/src" ];
+  paths = [ "/home/you/src" "/home/you/.claude" ];
   home = "/home/you";                 # optional; the service's own by default
   sandboxBinds = [ "verkstead=/var/cache/verkstead-node" ];
 };
 ```
 
-Three of those are worth understanding before the first Conversation, because
-each is a boundary rather than a convenience:
+Three of those are worth understanding before the first Conversation:
 
-- **`watchedPaths`** is what Verkstead may operate inside. There is no default
-  and no scan; a **Repo** is registered only from within one, and a path that
-  merely reads as inside one is refused. The module refuses to build with none:
-  the server itself would start, because the settings page says Watched Paths
-  too, but a directory this unit was never told about is one its hardened
-  namespace does not hold — so on NixOS this is the list that counts.
+- **`paths`** is the list of directories bound read-write into the unit — the
+  repositories it is to work in and the agent accounts it is to run under,
+  alike. It says nothing to Verkstead: the server is never told the list
+  exists, and inside the unit every path it is given is treated alike. What it
+  is for is that `ProtectHome` and `ProtectSystem` hide everything the unit is
+  not told to bind, so a directory not named here is not there as far as the
+  service is concerned. **A repository or an account you did not name here is
+  answered *missing*** — the same answer as a path that genuinely is not there,
+  because inside the namespace it genuinely is not — and `paths` is where to
+  add it. There is no default, no scan and no minimum: a build naming none of
+  them is a legal build, and what it comes up as is a workbench with nowhere
+  yet to point at.
 - **`home`** is only what `HOME` means for the service; nothing is read out of
   it and nothing of it reaches a Sandbox. Credentials and identity are said
   instead: a token in `secrets.yaml` and a `git_author` in `config.yaml`, both
   in the data directory, reaching each session as `GH_TOKEN` and git's own
-  `GIT_CONFIG_*`.
+  `GIT_CONFIG_*`. It is bound in **read-only**, which is the whole of what
+  naming one buys — so an **Agent Profile**'s account kept under it that a
+  session has to *write*, which is every Claude account, goes in `paths` as
+  well. That is the one composition worth saying outright, and it is why the
+  example above names `/home/you/.claude` beside the repositories.
 - **`sandboxBinds`** is the **Sandbox Configuration** — every entry is a hole
   in the boundary, which is why one that is not there refuses startup rather
   than being skipped. A bare path goes to every session; `name=path` goes only
   to sessions working in the Repo registered under that name.
 
-The workbench says both lists as well, on the settings page's **Paths** section
-and on each Repo's own pane, and what a session gets is the union of the two.
-Those entries are saved into `config.yaml` in the data directory, read afresh
-every time they are used, and never fatal: one the server cannot see is reported
-on the page rather than refused, and simply covers nothing. **On this module,
-that report is the one to read** — the unit's namespace holds what the options
-above name and nothing else, so a path typed into the settings page saves, says
-the server cannot see it, and does nothing until it is added here too. A bare
-binary outside NixOS has no such namespace and needs no flags at all: see
-[development.md](development.md#quickstart).
+The workbench says the binds as well, on the settings page's **Paths** section —
+which holds those and nothing else — and on each Repo's own pane, and what a
+session gets is the union of the two. Those entries are saved into `config.yaml`
+in the data directory, read afresh every time they are used, and never fatal:
+one the server cannot see is reported on the page rather than refused, and
+simply covers nothing. **On this module, that report is the one to read** — the
+unit's namespace holds what the options above name and nothing else, so a bind
+typed into the settings page saves, says the server cannot see it, and does
+nothing until it is added to `sandboxBinds` here too. A repository or an account
+outside the namespace has no such report to read, only the *missing* it is
+refused with, which is why `paths` above is the list to reach for when a
+directory you can see from a shell is one the workbench says is not there.
+
+A bare binary outside NixOS has no namespace like this and needs no options at
+all: see [development.md](development.md#quickstart).
 
 A Rust build cache is not one of them, and there is nothing to configure for
 one. The **Build Cache** is the server's own: the module makes
@@ -122,9 +136,31 @@ on macOS, `%APPDATA%\Verkstead` on Windows. One directory either way, holding
 the database, the Worktrees, the Skills, the handoff directories and both
 settings files.
 
-The server binds loopback and speaks plain HTTP. Answering from a phone needs
-HTTPS, which is `tailscale serve --bg 8422` in front of it — and push
-notifications need that HTTPS to work at all.
+**The first visit is out of the journal.** Every page of the workbench answers
+401 without the **Workbench Key** — the one secret Verkstead makes in its Data
+Directory at the first start, which is what keeps a session out of the workbench
+it is being watched through — and a host with no tray icon has one place to be
+handed the link: the line the server logs as it comes up.
+
+```console
+$ journalctl -u verkstead | grep 'verkstead is listening'
+  INFO verkstead_server: verkstead is listening listen=127.0.0.1:8422 workbench=http://127.0.0.1:8422/?key=… data_dir=/var/lib/verkstead …
+```
+
+`workbench=` is the address with the key on the end of it. Open it once and the
+browser holds a cookie from then on; the same line is there after a restart, so
+a device that forgot the cookie is let back in by reading it again.
+
+The server binds loopback and speaks plain HTTP, and answering from a phone
+needs HTTPS — which push notifications need to work at all. That is the
+**Remote access** section of the workbench settings rather than anything to run
+here: it reads what this machine's Tailscale is doing, a switch puts the tailnet
+name in front of the port, and the login link is drawn there as a QR code to
+point a phone's camera at. What this module does for it is the two things a host
+has to do — `tailscale` goes on the unit's own `PATH`, and the service user is
+made the tailnet's operator, so nobody is shown a `sudo` line for a grant the
+build already made. Joining the tailnet stays the host's own business:
+`services.tailscale.enable`, and a `tailscale up` in a terminal.
 
 ### The desktop app, on a Linux machine
 
@@ -139,6 +175,25 @@ server's logging goes to when there is no terminal to print it in, **Launch on
 Startup** is a checkbox over the desktop's own startup registration, and
 **Exit** stops the server. `--no-open` starts it without the browser, and
 `--data-dir` moves the Data Directory off `~/.local/share/verkstead`.
+
+**The browser it opens is logged in.** Every page of the workbench answers 401
+without the **Workbench Key**, the secret Verkstead keeps in its Data Directory
+where no session can reach it — so what the app opens is the login link, the
+address with the key on the end of it. **Open** composes it afresh at every
+press, which is what to reach for when a browser has forgotten the cookie:
+there is no link to keep anywhere, and nothing to type. Started with
+`--no-open`, the same link is on the startup line in **View Logs**.
+
+**Answering from your phone is the workbench's own settings**, under **Remote
+access**: it reads what this machine's Tailscale is doing, a switch puts the
+tailnet name in front of the port — HTTPS, which push notifications need to work
+at all — and the login link is drawn there as a QR code to point a camera at.
+Nothing here installs Tailscale: the pane points at where to get one where the
+machine has none, and joining a tailnet is a `tailscale up` in a terminal. What
+the app adds over the daemon is the password dialog — Tailscale refuses to be
+served by a process that is neither root nor the tailnet's operator, and an app
+has somebody at the machine to ask, so that press goes through `pkexec` rather
+than handing back a `sudo` line to type.
 
 **What is inside is the whole `verkstead`**, and the icon is one verb of it:
 the entry point in the file runs `verkstead desktop`, because a desktop
@@ -234,6 +289,18 @@ arguments at all.
 macOS keeps a **Login Items** list of its own beside that plist, in a database
 the file is not in, and the checkbox cannot see it: switching Verkstead off
 there leaves the box ticked and the plist where it was.
+
+**The browser it opens is logged in**, as it is on Linux: what the app opens is
+the login link rather than the bare address, and **Open** composes it afresh at
+every press, which is what a browser that has forgotten the cookie wants.
+Started with `--no-open`, the same link is on the startup line in **View Logs**.
+
+**Answering from your phone is the settings page's Remote access section**, as
+it is on Linux, and Tailscale itself is the Mac's own. What differs is the
+password dialog behind the serve switch: serving to a tailnet is refused for a
+process that is neither root nor the tailnet's operator, and here the press is
+put to you through `osascript`'s *with administrator privileges* — the Mac's own
+authentication prompt.
 
 **Sessions run on a Mac**, and what one may reach is the same description as on
 Linux rendered over Apple's sandbox instead of bubblewrap: the Conversation's
@@ -348,6 +415,18 @@ server. **Windows hides an icon it has not seen before**, in the flyout the `^`
 on the taskbar opens — dragging it out of there onto the taskbar is what pins
 it, and until you do, the app is running with its icon one click further away
 than this describes.
+
+**The browser it opens is logged in**, as on the other two: what the app opens
+is the login link rather than the bare address, and **Open** composes it afresh
+at every press, which is what a browser that has forgotten the cookie wants.
+Started from a terminal with `--no-open`, the same link is on the startup line
+printed there and in **View Logs**.
+
+**Answering from your phone is the settings page's Remote access section**, as
+it is on the other two, and Tailscale itself is the machine's own. What differs
+is the elevation prompt behind the serve switch: serving to a tailnet is refused
+for a process that is not the tailnet's operator, and here the press comes up as
+a **User Account Control** dialog.
 
 **The shortcut opens the shim rather than the binary**, and that is what keeps
 a console window off the screen: `verkstead.exe` is an ordinary console program
@@ -478,18 +557,35 @@ directory — is [development.md](development.md#quickstart).
 
 ## A day's work
 
-**Once per machine:** register the Repos you work in, and save at least one
-**Agent Profile** — a claude home and config pair, and the models that account
-can run. A Conversation fixes a **Grilling Pairing**, an **Implementation
-Pairing** and a **Review Pairing** before it starts — a Profile and one of its
-models, picked together as one row. The same Profile may fill all three, and
-separate ones are how the parts bill to separate accounts. The review one runs
-the wrap-up's review and nothing else, reviewing being a fresh set of eyes on
-what was built — and its picker offers **No review** beside the accounts, for
-work you would rather have wrapped up without one. The grilling picker offers
-**No grilling** the same way, for work whose Brief is already the whole plan.
-All of them are settled while the Conversation is drafting, and the work
-starting is what fixes them.
+**Once per machine: the first start asks.** A Verkstead that cannot do anything
+yet is in **Onboarding Mode**, and opens on the wizard at `/setup` rather than
+on the workbench. It walks three steps. **What a session needs** names every
+dependency it could not find — a sandbox, `git`, one of the four coding agents,
+and `gh` as an optional row — with this distro's own install command and where
+the binary has to land, and it re-probes while you are away, so an
+`apt install bubblewrap` finishing in another window ticks the row within ten
+seconds. **Agent Profiles** offers the agent accounts already logged in under
+the server's home; each one you leave ticked is saved as a Profile with no name
+and every model this build knows for that agent — and there is a form under them
+for an account elsewhere. **Who the work is committed as** asks for the git
+author, prefilled from `git config --global`, with the GitHub token optional and
+prefilled from `GH_TOKEN`, `GITHUB_TOKEN` or the host `gh`'s own login, each
+field labelled with where its value came from. The last Continue takes the mode
+off and lands you on the compose page. There is no skip and no going back
+through it: the verdict is reached once, at startup, so a machine that already
+has all three opens the workbench and never sees the wizard. What it does not do
+is register the Repos you work in — that stays yours, on the settings page.
+
+A Conversation fixes a **Grilling Pairing**, an **Implementation Pairing** and a
+**Review Pairing** before it starts — a Profile and one of its models, picked
+together as one row. The same Profile may fill all three, and separate ones are
+how the parts bill to separate accounts. The review one runs the wrap-up's
+review and nothing else, reviewing being a fresh set of eyes on what was built —
+and its picker offers **No review** beside the accounts, for work you would
+rather have wrapped up without one. The grilling picker offers **No grilling**
+the same way, for work whose Brief is already the whole plan. All of them are
+settled while the Conversation is drafting, and the work starting is what fixes
+them.
 
 **Then, per piece of work:**
 

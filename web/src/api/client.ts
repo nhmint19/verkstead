@@ -16,7 +16,6 @@ import type {
   BaseRecorded,
   BranchRenamed,
   BriefSaved,
-  BrowseScope,
   Capture,
   CommitPane,
   CompanionAdded,
@@ -34,6 +33,8 @@ import type {
   ConversationView,
   DirectoryListing,
   GrillingStarted,
+  OnboardingView,
+  PrefillView,
   ProfileChoice,
   ProfileChosen,
   ProfileDeleted,
@@ -43,6 +44,8 @@ import type {
   PullRequestDetails,
   PushKey,
   Registered,
+  RemoteBanner,
+  RemoteView,
   RepoEntry,
   RepoPairingsView,
   RepoRemoved,
@@ -55,6 +58,8 @@ import type {
   RoleChoice,
   RoadmapPane,
   Screen,
+  ServeEdit,
+  ServePress,
   SetReading,
   SettingsEdit,
   SettingsSaved,
@@ -187,17 +192,15 @@ export function loadRepoPairings(repoId: number): Promise<RepoPairingsView> {
 /// somebody drills into, so a browse costs one reading of one directory however
 /// much is under it.
 ///
-/// No path at all is the field standing empty, which the two scopes answer
-/// differently — the Watched Paths themselves, or `/`. Every refusal is in the
-/// body rather than in the status, the way registering a Repo refuses: a path
-/// that is relative, missing, not a directory, outside the Watched Paths or
-/// unreadable is a line the dropdown draws where its rows would be, and most of
-/// those are the ordinary state of a field halfway through being typed into.
-export function listDirectory(
-  scope: BrowseScope,
-  path: string | null,
-): Promise<DirectoryListing> {
-  const asking = new URLSearchParams({ scope });
+/// No path at all is the field standing empty, which the server answers with its
+/// own home — a starting point rather than a ceiling, the way back out of it
+/// being a listing like any other. Every refusal is in the body rather than in
+/// the status, the way registering a Repo refuses: a path that is relative,
+/// missing, not a directory or unreadable is a line the dropdown draws where its
+/// rows would be, and most of those are the ordinary state of a field halfway
+/// through being typed into.
+export function listDirectory(path: string | null): Promise<DirectoryListing> {
+  const asking = new URLSearchParams();
 
   if (path !== null) {
     asking.set("path", path);
@@ -209,9 +212,9 @@ export function listDirectory(
 /// Ask Verkstead to take on the repository at an absolute path.
 ///
 /// Like answering a Set, the outcome is the answer's body rather than its
-/// status: a path outside the Watched Paths is the boundary doing its job and
-/// not an error, and every refusal is a different sentence to put in front of
-/// the human.
+/// status: a path that names no repository is the server reading the path
+/// rather than failing to, and every refusal is a different sentence to put in
+/// front of the human.
 export function registerRepo(path: string): Promise<Registered> {
   return post<Registered>("/api/ui/repos", { path });
 }
@@ -872,7 +875,7 @@ export function listProfiles(): Promise<ProfileEntry[]> {
 
 /// Take on an account, named by the pair that is mounted for it. Like
 /// registering a Repo, every refusal is a named outcome rather than a status —
-/// a pair outside the watched paths is the boundary doing its job.
+/// a config field pointed at a directory is something to go and correct.
 export function createProfile(profile: ProfileEdit): Promise<ProfileSaved> {
   return post<ProfileSaved>("/api/ui/profiles", profile);
 }
@@ -934,6 +937,62 @@ export function chooseReviewPairing(
   );
 }
 
+/// What this machine's Tailscale is doing: whether there is one at all, whether
+/// it is up, what this node is called on the tailnet and whether the tailnet
+/// name is already in front of the workbench.
+///
+/// Read off the machine on every ask rather than out of anything saved — a
+/// `tailscale up` run in a terminal shows on the next load. Never a refusal:
+/// every way the reading can fail is one of the states it answers with, because
+/// each of them is a different thing to say to the human.
+export function loadRemote(): Promise<RemoteView> {
+  return get<RemoteView>("/api/ui/remote");
+}
+
+/// Put this machine's tailnet name in front of the workbench, or take it off
+/// again.
+///
+/// What comes back is the machine read again, so the switch settles where the
+/// machine is rather than where the press meant to put it — with two answers
+/// that are not a reading: the operator grant Tailscale wants before it will
+/// take a serve from this user, and whatever else went wrong, in the machine's
+/// own words.
+export function pressServe(edit: ServeEdit): Promise<ServePress> {
+  return post<ServePress>("/api/ui/remote/serve", edit);
+}
+
+/// A new Workbench Key over the old one, which logs every other device out.
+///
+/// What comes back is the machine read again, the way a serve press answers:
+/// the login link is a field of that reading, so the QR code and the copyable
+/// link redraw on the new key from this answer rather than from a second ask.
+///
+/// The browser that pressed it stays logged in — the answer carries the cookie
+/// for the key it just made — because a reset made from the phone on the
+/// tailnet is a reset made from the only device that can reach this server.
+export function resetKey(): Promise<RemoteView> {
+  return post<RemoteView>("/api/ui/remote/key");
+}
+
+/// Whether the human is done with the banner that points at Remote access.
+///
+/// The server's answer rather than this device's, for the archived switch's
+/// reason said stronger: the banner is drawn at a desk and points at a phone,
+/// so a dismissal that stayed in this browser would meet the human again on the
+/// very device it had just sent them to.
+export async function remoteBannerDismissed(): Promise<boolean> {
+  return (await get<RemoteBanner>("/api/ui/remote/banner")).dismissed;
+}
+
+/// And say they are, which is the whole of the press.
+///
+/// Nothing to send: the banner is dismissed and never put back, so there is no
+/// position for a body to carry. What comes back is the flag as it now stands,
+/// so the page that pressed it holds the truth without a second ask.
+export function dismissRemoteBanner(): Promise<RemoteBanner> {
+  return post<RemoteBanner>("/api/ui/remote/banner");
+}
+
 /// Whether a newer Verkstead has been released than the one serving this page.
 ///
 /// The server is the side that asks GitHub, once a day, and this hands over
@@ -941,6 +1000,40 @@ export function chooseReviewPairing(
 /// never waits on GitHub being reachable.
 export function updateNotice(): Promise<UpdateNotice> {
   return get<UpdateNotice>("/api/ui/update");
+}
+
+/// Whether this Verkstead can do anything yet: the mode the server settled at
+/// startup, the machine it is standing on, and what is missing from it.
+///
+/// Everything but the mode is probed at the moment it is asked, so an install
+/// that lands between two reads is ticked on the next one — which is what the
+/// wizard's own interval is for. The mode itself is the startup verdict and
+/// does not move while the server runs.
+export function loadOnboarding(): Promise<OnboardingView> {
+  return get<OnboardingView>("/api/ui/onboarding");
+}
+
+/// What the wizard's git step can fill its fields with, for whatever Verkstead
+/// has not been told.
+///
+/// A read of its own rather than a part of the one above, and made by the step
+/// that has the fields: the probes behind it are two `git config` runs and a
+/// `gh`, and one of the three values is a GitHub token — none of which belongs
+/// in a payload the wizard re-reads every ten seconds and the workbench asks
+/// for at every start. A field Verkstead already holds a value for is absent
+/// here, because the value in front of the human is then the one written down.
+export function loadGitPrefill(): Promise<PrefillView> {
+  return get<PrefillView>("/api/ui/onboarding/git");
+}
+
+/// The wizard's last Continue: onboarding mode is off for the rest of this run.
+///
+/// It writes nothing — the author and the token went through the settings save
+/// a moment before — and what comes back is the machine read again with the
+/// mode off, which is what says the workbench is a page again. The next start
+/// reaches its own verdict, off a machine that now has what it was missing.
+export function finishOnboarding(): Promise<OnboardingView> {
+  return post<OnboardingView>("/api/ui/onboarding/finished");
 }
 
 /// What Verkstead has been told: who a session commits as, and that there is a

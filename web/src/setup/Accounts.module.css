@@ -1,0 +1,164 @@
+/* The accounts step — see `Accounts.tsx`.
+
+   A column inside the step's card, like the step before it: the line that says
+   what a Profile is, the accounts that were found, the press onwards, and the
+   form for an account that is kept somewhere else. Nothing is a grid — a row is
+   a tick, a name and a couple of paths, and it is read down on a phone. */
+
+.step {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.standing {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One account. Separated by a rule rather than by cards inside a card, the way
+   the dependency rows are: the step is already one surface. */
+.row {
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--edge);
+}
+
+.row:last-child {
+  border-bottom: 1px solid var(--edge);
+}
+
+/* An account whose harness is not on the machine is drawn quiet: it is a row to
+   read rather than a row to tick, and the note under it says why. */
+.row[data-harness="no"] {
+  color: var(--ink-soft);
+}
+
+/* The tick, the mark and the name on one line — the whole of it a label, so
+   that the name is what the tick is read out as. */
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  cursor: pointer;
+}
+
+.row[data-harness="no"] .head {
+  cursor: not-allowed;
+}
+
+.name {
+  display: flex;
+  gap: 0.4rem;
+  align-items: baseline;
+  font-weight: 600;
+}
+
+/* The harness's own mark, sized to the word beside it the way every other
+   reading of a backend sizes one. */
+.harness {
+  flex: none;
+  width: 0.9em;
+}
+
+/* Where the account is kept, for whoever is checking what is about to be saved.
+   The paths wrap rather than scroll: they are names rather than a line to
+   paste. */
+.kept {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.4rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.kept code {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+/* A home with nothing in it: the line that says so, and one command per harness
+   that could make an account here. */
+.nothing {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.logins {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.login {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.login pre {
+  margin: 0;
+  padding: 0.35rem 0.6rem;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.85rem;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+}
+
+.onwards {
+  margin-top: 0.3rem;
+}
+
+/* The press onwards, drawn as the step before it draws its own. Refused until
+   there is a Profile to run under, and refused the way every other disabled
+   control here is. */
+.continue {
+  padding: 0.5rem 1.1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.continue:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.failure {
+  margin-top: 0.5rem;
+}
+
+/* The form under the rows, set apart by a rule and a heading: it is the way in
+   for an account nothing found, rather than another row of the list. */
+.byHand {
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--edge);
+}
+
+.byHand h3 {
+  margin: 0 0 0.4rem;
+  font-size: 1rem;
+}
+
+@media (hover: hover) {
+  .continue:not(:disabled):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}

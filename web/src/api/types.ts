@@ -71,6 +71,34 @@ stage_title: string,
 base: string, };
 
 /**
+ * One account this machine already has, offered as the Agent Profile it would
+ * be saved as.
+ *
+ * **Found rather than configured.** The server looks in its own home for the
+ * shapes a session mounts an account from, so what is here is an account some
+ * agent wrote there by being logged into once. At most one per harness, each
+ * shape being a fixed path under a home — which is the same fact an unnamed
+ * Profile's uniqueness is per harness for.
+ *
+ * **And it is the whole account**, in the shape the profile form sends one:
+ * the wizard saves a ticked row by handing it straight back to the profile
+ * create, with no name and the models this build knows for its harness, rather
+ * than by naming paths of its own.
+ */
+export type AccountView = { 
+/**
+ * What was found, ready to be saved as it stands.
+ */
+account: ProfileAccount, 
+/**
+ * And whether the harness that runs it is on this machine — the same
+ * answer that harness's [`Dependency`] row carries, so a row is offered
+ * ticked or drawn greyed without the viewer pairing the two lists up. An
+ * account whose binary is missing is not one to make a Profile of yet.
+ */
+harness: boolean, };
+
+/**
  * What became of pressing Adopt.
  *
  * Named the way [`GrillingStarted`]'s refusals are, and for the same reason: a
@@ -217,8 +245,11 @@ idle: boolean,
  * Off the record rather than off what is running: it is written down as
  * the session starts and stays true afterwards, so a Profile renamed or
  * deleted since — and a Verkstead restarted since — leaves this saying
- * what actually ran. `null` for a session started before Verkstead wrote
- * it down.
+ * what actually ran.
+ *
+ * `null` twice over: a session started before Verkstead wrote it down, and
+ * one launched under a Profile nobody named. Neither is a name to show, so
+ * both draw as the harness and the model alone.
  */
 profile: string | null, 
 /**
@@ -549,18 +580,7 @@ export type BriefSaved = "Saved" | "NoSuchConversation" | "NotDrafting";
  * was written down. This is what has become of its account since — the pair
  * for a Claude Profile, and the one home for every type that keeps one.
  */
-export type Broken = "DirMissing" | "ConfigMissing" | "HomeMissing" | "OutsideWatchedPaths";
-
-/**
- * Which kind of field is asking, which is what decides where it may look.
- *
- * Sent in the query rather than being a route of its own: it is one reading,
- * asked two ways round, and the answer has the same shape either way.
- *
- * Spelled in lower case, unlike everything else the viewer sends: this one
- * travels in a URL beside the path, where a capital would read as a mistake.
- */
-export type BrowseScope = "watched" | "anywhere";
+export type Broken = "DirMissing" | "ConfigMissing" | "HomeMissing";
 
 /**
  * The build cache as the human has just set it.
@@ -1582,6 +1602,37 @@ shared: ShareView | null,
 attachments: Array<AttachmentView>, };
 
 /**
+ * What a row is about.
+ *
+ * Flat rather than a harness variant carrying an [`crate::AgentType`]: the
+ * step draws seven rows with an instruction apiece, and which of them are
+ * harnesses is a fact about the objective rather than about the drawing.
+ */
+export type Dependency = "Sandbox" | "Git" | "Claude" | "Codex" | "Grok" | "OpenCode" | "Gh";
+
+/**
+ * And whether the machine has it.
+ *
+ * Flat on the wire — `{"state": "Absent", "trouble": "…"}` — so the viewer
+ * narrows on a field rather than unwrapping a variant name.
+ */
+export type DependencyState = { "state": "Present" } | { "state": "Absent", 
+/**
+ * What the machine said about it, where anything was said at all: the
+ * standard error of a `bwrap` that is installed and would not run,
+ * which is where an unprivileged user namespace that is switched off
+ * says so in its own words. Nothing where the answer was simply that
+ * no such program is on the sandbox's `PATH`.
+ */
+trouble: string | null, } | { "state": "NotApplicable" };
+
+/**
+ * One row of the dependencies step: a thing a session needs, and whether this
+ * machine has it.
+ */
+export type DependencyView = { dependency: Dependency, state: DependencyState, };
+
+/**
  * The Diff as the browser receives it: the HTML the server rendered, and the
  * path of each file in it, in Diff order — `paths[0]` is what `#diff-1` shows.
  *
@@ -1614,9 +1665,9 @@ export type DirectoryEntry = {
 /**
  * What it is called in the directory holding it — the row's own word.
  *
- * The Watched Paths' roots have no directory holding them, so what comes
- * back for one of those is the last segment of it. A field drawing that
- * listing has the whole path beside it and may say more.
+ * A drive has no directory holding it, so what comes back for one of those
+ * is the last segment of it. A field drawing that listing has the whole
+ * path beside it and may say more.
  */
 name: string, 
 /**
@@ -1637,11 +1688,21 @@ export type DirectoryListing = { "Listed": {
  * The directory this lists, resolved — `..` taken out and every
  * symlink followed, which is what the entries below hang off.
  *
- * `null` for the [`BrowseScope::Watched`] roots, which are a listing
- * with no one directory above them: the boundary is a set of
- * directories rather than a place.
+ * `null` for a listing with no one directory above it, which is what a
+ * Windows machine's drives are: there is a root per drive and nothing
+ * holding them.
  */
-path: string | null, entries: Array<DirectoryEntry>, } } | "NotAbsolute" | "Missing" | "NotADirectory" | "OutsideWatchedPaths" | { "Unreadable": { why: string, } };
+path: string | null, entries: Array<DirectoryEntry>, } } | "NotAbsolute" | "Missing" | "NotADirectory" | { "Unreadable": { why: string, } };
+
+/**
+ * And which of the wizard's eight tabs this machine is.
+ *
+ * The five Linux distributions whose commands are written down, everything
+ * else that is a Linux, and the two platforms whose answer is the platform's
+ * own. Read off `/etc/os-release` — `ID` first and then `ID_LIKE`, so that a
+ * derivative gets its parent's commands rather than the generic list.
+ */
+export type Distro = "MacOs" | "Windows" | "NixOs" | "Ubuntu" | "Fedora" | "Debian" | "Arch" | "OtherLinux";
 
 /**
  * What one entry is, which decides what the field drawing it does with the row.
@@ -1877,6 +1938,39 @@ html: string, };
 export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "profiles" };
 
 /**
+ * Whether a fresh Verkstead can do anything yet, and what it would take.
+ */
+export type OnboardingView = { 
+/**
+ * Whether onboarding mode is on: the verdict of the objective, reached
+ * once at startup and standing until the wizard finishes.
+ */
+mode: boolean, 
+/**
+ * Whose rules this machine plays by, which is what the sandbox row and the
+ * wording around it are about.
+ */
+platform: Platform, 
+/**
+ * And which install commands it takes, which is the tab that opens.
+ */
+distro: Distro, 
+/**
+ * Every row of the dependencies step, in the order it is drawn.
+ */
+dependencies: Array<DependencyView>, 
+/**
+ * And every agent account already on this machine, in the order the
+ * harnesses above are drawn. Empty on a machine that has none, which is
+ * the step saying what to run rather than what to tick.
+ */
+accounts: Array<AccountView>, 
+/**
+ * And whether each of the three steps stands met, at this moment.
+ */
+steps: StepsView, };
+
+/**
  * One Option as the page draws it: the number a Response answers by, its text
  * already rendered, and whether the agent recommended it.
  *
@@ -1943,19 +2037,15 @@ export type PathSource = "Installation" | "Settings";
 
 /**
  * Every path Verkstead has been told about, from both sources at once: the
- * directories it may operate inside, and the extra directories a sandbox is
- * given beyond the surface every one of them has.
+ * extra directories a sandbox is given beyond the surface every one of them
+ * has.
  *
- * Two lists rather than one, because they are two different permissions — a
- * Watched Path says where the human may point Verkstead, and a bind says what
- * a session may write in — and the page draws them apart for that reason.
- *
- * The installation's own entries come first in each list, and the settings'
- * follow in the order they were written down. That is the order the two were
- * decided in: a flag is said once when the machine is set up, and the file is
- * where somebody has been adding to it since.
+ * The installation's own entries come first, and the settings' follow in the
+ * order they were written down. That is the order the two were decided in: a
+ * flag is said once when the machine is set up, and the file is where somebody
+ * has been adding to it since.
  */
-export type PathsView = { watched: Array<WatchedPathEntry>, 
+export type PathsView = { 
 /**
  * Every configured bind, the ones every sandbox gets and the ones one Repo
  * does together — see [`BindEntry::repo`], which is what says which of the
@@ -1993,6 +2083,59 @@ export type PickedView = "Nothing" | "Skipped" | { "Under": PairingView };
  * the pinned block in `crates/server/src/ui.rs`.
  */
 export type PinnedEvent = { "AgentOutput": AgentOutputEvent } | { "TaskList": TaskListEvent } | { "StageList": StageListEvent } | { "PullRequest": PullRequestEvent };
+
+/**
+ * The three platforms, as the viewer receives one.
+ *
+ * Its own type beside [`Distro`], which carries the same fact for two of its
+ * eight values: the distro is which set of commands to draw, and this is which
+ * machine they are for — a sandbox row that ticks, one that is run, and one
+ * that is nothing to install.
+ */
+export type Platform = "Linux" | "MacOs" | "Windows";
+
+/**
+ * What this machine can offer the git step, for each field Verkstead has not
+ * been told yet.
+ *
+ * **Its own read, beside [`OnboardingView`] rather than in it.** The reading
+ * above is probed every ten seconds while a step is unmet and again by the
+ * workbench's own gate on every start, and neither of those has any business
+ * running `git config` — or handing a GitHub token to a page that is drawing
+ * a sidebar. This is asked for once, by the step that has the fields, and
+ * only while they are still empty.
+ *
+ * **Found rather than configured, and only where nothing is configured.** A
+ * value Verkstead already holds is what the field shows, so it is not
+ * prefilled over: what is here is what the machine could tell a Verkstead
+ * that has been told nothing. A field nothing answered for is absent, which
+ * is a field that stays empty until somebody types in it.
+ */
+export type PrefillView = { 
+/**
+ * Who the machine's own git commits are by.
+ */
+name: Prefilled | null, 
+/**
+ * And what address they carry.
+ */
+email: Prefilled | null, 
+/**
+ * And a GitHub token this machine is already holding somewhere — which is
+ * the one optional field of the three, GitHub being a choice.
+ */
+token: Prefilled | null, };
+
+/**
+ * One field's prefill: what was found, and where.
+ *
+ * The source travels with the value because the human is being asked to
+ * confirm something they did not type: a name off a `git config` and a token
+ * out of an environment variable are two different things to be sure about,
+ * and a field that only showed the value would be asking them to trust it
+ * blind.
+ */
+export type Prefilled = { value: string, source: Source, };
 
 /**
  * The account a Profile names, in the shape the agent type running it keeps
@@ -2044,7 +2187,12 @@ export type ProfileDeleted = "Removed" | "NoSuchProfile";
  * that cannot launch the real binary yet would be a lie in a picker — so a
  * type this knows about may still be one nothing arrives as.
  */
-export type ProfileEdit = { name: string, 
+export type ProfileEdit = { 
+/**
+ * What to call it, or `null` to leave it unnamed — which is what the form
+ * sends for an empty box. A harness takes one unnamed Profile.
+ */
+name: string | null, 
 /**
  * The absolute paths this Profile's account is, in its type's shape.
  */
@@ -2064,7 +2212,17 @@ models: Array<string>, };
  * whatever was typed to save them: those are what will be bind-mounted, so
  * those are what is worth showing.
  */
-export type ProfileEntry = { id: number, name: string, 
+export type ProfileEntry = { id: number, 
+/**
+ * What the human calls this account, and `null` where they have called it
+ * nothing.
+ *
+ * A name tells two accounts of one harness apart, which is the rare case;
+ * the ordinary one is an account the harness's mark and the model already
+ * say the whole of. So the viewer says nothing where nothing has to be
+ * said, and *Default* where a name has to be shown.
+ */
+name: string | null, 
 /**
  * Which agent this Profile runs, and the account it runs as — one field,
  * because the type is what says which fields the account has.
@@ -2085,11 +2243,11 @@ broken: Broken | null, };
 /**
  * What became of saving a Profile.
  *
- * The refusals are the server's and not the form's: the Watched Paths are a
- * security boundary, and every request reaching the endpoint is decided there
+ * The refusals are the server's and not the form's: a check the browser made
+ * is a courtesy, and every request reaching the endpoint is decided there
  * whether or not a form was involved.
  */
-export type ProfileSaved = "Saved" | "NoSuchProfile" | "Nameless" | "Modelless" | "NameTaken" | "DirNotAbsolute" | "DirMissing" | "DirOutsideWatchedPaths" | "NotADirectory" | "ConfigNotAbsolute" | "ConfigMissing" | "ConfigOutsideWatchedPaths" | "NotAFile" | "HomeNotAbsolute" | "HomeMissing" | "HomeOutsideWatchedPaths" | "HomeNotADirectory";
+export type ProfileSaved = "Saved" | "NoSuchProfile" | "Modelless" | "NameTaken" | "DefaultTaken" | "DirNotAbsolute" | "DirMissing" | "NotADirectory" | "ConfigNotAbsolute" | "ConfigMissing" | "NotAFile" | "HomeNotAbsolute" | "HomeMissing" | "HomeNotADirectory";
 
 /**
  * The grilling's closing proposal as the Set it rides draws it: which direction
@@ -2372,7 +2530,7 @@ id: number, html: string, };
  * is a courtesy, and every request reaching this endpoint is decided here
  * whether or not a form was involved.
  */
-export type Registered = "Added" | "NotAbsolute" | "Missing" | "OutsideWatchedPaths" | "NotARepository" | "NoDefaultBranch" | "AlreadyRegistered";
+export type Registered = "Added" | "NotAbsolute" | "Missing" | "NotARepository" | "NoDefaultBranch" | "AlreadyRegistered";
 
 /**
  * A repository the human is asking Verkstead to take on, named by its absolute
@@ -2383,6 +2541,69 @@ export type Registered = "Added" | "NotAbsolute" | "Missing" | "OutsideWatchedPa
  * `project` and `branch` instead of trusting them.
  */
 export type Registration = { path: string, };
+
+/**
+ * Whether the human is done with the banner that points at this section.
+ *
+ * The banner stands on a Conversation page above the Timeline, at every
+ * grilling start until it is dismissed, while the first Question Set is being
+ * prepared — the one moment the human has nothing to do at the desk, and so
+ * the moment worth telling them they need not stay at it.
+ *
+ * Read off the server on every load rather than out of the browser it was
+ * pressed in, which is the whole of why it is on this wire at all: the banner
+ * is about picking up a phone, and a dismissal that did not travel would meet
+ * the human again on the very device it had just sent them to.
+ *
+ * One direction. There is nothing on any page that puts it back, so what is
+ * sent is a press rather than a position — unlike the archived switch's
+ * [`ShowingArchived`](crate::ShowingArchived), which this is otherwise written
+ * beside.
+ */
+export type RemoteBanner = { 
+/**
+ * True once somebody has pressed it away, on this device or any other.
+ */
+dismissed: boolean, };
+
+/**
+ * What this machine's Tailscale is doing.
+ *
+ * Flat on the wire — `{"tailscale": "Up", "node": "…", "serve": {…}}` — so the
+ * viewer narrows on a field rather than unwrapping a variant name.
+ */
+export type RemoteView = { "tailscale": "Absent" } | { "tailscale": "Down", 
+/**
+ * What `tailscale` said about it — its own line where it printed one,
+ * because that is what names the service to start.
+ */
+trouble: string, } | { "tailscale": "Unreadable", trouble: string, } | { "tailscale": "Up", 
+/**
+ * The node's own name, as the tailnet knows it —
+ * `workbench.tailnet-name.ts.net`, with the trailing dot a DNS name
+ * carries taken off.
+ */
+node: string, 
+/**
+ * And whether anything on that name is proxied to the workbench.
+ */
+serve: ServeView, 
+/**
+ * The login link a phone is let in by: the served address with the
+ * Workbench Key on it, which is what the pane draws as a QR code and
+ * offers to copy.
+ *
+ * Composed here rather than in the browser because the key is the one
+ * thing the browser is not given — it is carried in a cookie no script
+ * reads — and it is a field of the reading rather than of
+ * [`ServeView::On`] because the serve is what `tailscale` said and this
+ * is what Verkstead makes of it.
+ *
+ * `None` where there is nothing to build one on: a machine on the
+ * tailnet serving nothing has no address a link could point at, and
+ * nor has one whose serve could not be read.
+ */
+link: string | null, };
 
 /**
  * Which registered Repo a drafting Conversation is to be moved onto.
@@ -2731,6 +2952,53 @@ why: string, };
 export type Screen = { repaint: string, columns: number, rows: number, };
 
 /**
+ * Where the serve switch is being put.
+ *
+ * A press rather than a setting: nothing of it is saved, and what the switch
+ * reads as afterwards is the machine read again — see [`ServePress::Done`].
+ */
+export type ServeEdit = { 
+/**
+ * Whether the workbench is to be served to the tailnet.
+ */
+on: boolean, };
+
+/**
+ * And what came of the press.
+ *
+ * Three answers, because the middle one is the whole of why this is not simply
+ * a command that worked or did not. `tailscale serve` is refused outright for a
+ * process that is neither root nor the tailnet's **operator**, and the only
+ * thing that lifts it is a line somebody runs in a terminal. So a refusal
+ * carries that line rather than an apology, and the next press runs the same
+ * command again — which is all a re-try is once the grant has been made.
+ *
+ * Nothing here escalates anything. The server has no privilege to raise and no
+ * business asking for one; what the desktop app does with the same line is its
+ * own, and still the human's press.
+ */
+export type ServePress = { "press": "Done", reading: RemoteView, } | { "press": "Ungranted", 
+/**
+ * The line that grants it, for this machine's own user —
+ * `sudo tailscale set --operator=ada`. Copied into a terminal, run,
+ * and then the switch pressed again.
+ */
+grant: string, 
+/**
+ * And what `tailscale` said when it refused, in its own words.
+ */
+trouble: string, } | { "press": "Trouble", trouble: string, };
+
+/**
+ * Whether `tailscale serve` is putting this machine's tailnet name in front of
+ * the port the workbench is served on.
+ *
+ * The port matters: a serve of somebody else's port is not this one, and would
+ * read as an address that answers with something that is not the workbench.
+ */
+export type ServeView = { "serve": "Off" } | { "serve": "On", address: string, } | { "serve": "Unreadable", trouble: string, };
+
+/**
  * One stored Question Set as the browser receives it: the document where this
  * build can still read what was asked, and the record itself where it cannot.
  *
@@ -2882,23 +3150,19 @@ conflict_resolution: ConflictResolution,
  */
 share_on_done: boolean, 
 /**
- * The Watched Paths the settings own, as values again: what is sent is
- * what `config.yaml` holds afterwards, so a row taken off the page is a
- * row taken out of the file.
- *
- * The installation's own are not here and cannot be sent. They are the
- * unit's word rather than this page's, and a save leaves them exactly
- * where they are — see [`PathSource`].
- */
-watched_paths: Array<string>, 
-/**
- * And the Sandbox Configuration binds the settings own, in the grammar
- * `--sandbox-bind` uses: `/abs/path` for a bind every sandbox gets, and
- * `name=/abs/path` for one the Repo registered under that name gets.
+ * The Sandbox Configuration binds the settings own, as values again: what
+ * is sent is what `config.yaml` holds afterwards, so a row taken off the
+ * page is a row taken out of the file. In the grammar `--sandbox-bind`
+ * uses: `/abs/path` for a bind every sandbox gets, and `name=/abs/path`
+ * for one the Repo registered under that name gets.
  *
  * Strings rather than a shape of their own, because a string is what the
  * file holds — and one grammar for both of the places a bind is said is
  * one thing to learn rather than two.
+ *
+ * The installation's own are not here and cannot be sent. They are the
+ * unit's word rather than this page's, and a save leaves them exactly
+ * where they are — see [`PathSource`].
  */
 sandbox_binds: Array<string>, 
 /**
@@ -2988,8 +3252,7 @@ conflict_resolution: ConflictResolution,
  */
 share_on_done: boolean, 
 /**
- * And the Watched Paths and the Sandbox Configuration binds, from both of
- * the places either of them is said.
+ * And the Sandbox Configuration binds, from both of the places they are said.
  */
 paths: PathsView, 
 /**
@@ -3180,6 +3443,15 @@ export type Shown = { "Painted": Screen } | { "Printed": string };
  * the latest one is the size the Screen and the session's own terminal are.
  */
 export type Size = { columns: number, rows: number, };
+
+/**
+ * And where a prefill came from.
+ *
+ * Four values rather than a variable name carried as a string: the wording
+ * around each of them is the viewer's, the way the install commands are, and
+ * which environment variable answered is part of what there is to say.
+ */
+export type Source = "GitConfig" | "GhToken" | "GithubToken" | "HostGh";
 
 /**
  * One stage's brief as the pane draws it: the entry it belongs to, and the
@@ -3495,6 +3767,25 @@ upgraded: Array<CompanionUpgrade>, };
  * wrapping up and no following up of work nobody can see.
  */
 export type SteerTarget = "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Done";
+
+/**
+ * Whether each of the wizard's three steps stands met, read at the moment the
+ * endpoint is asked.
+ */
+export type StepsView = { 
+/**
+ * A sandbox, `git`, and at least one of the four harnesses.
+ */
+dependencies: boolean, 
+/**
+ * At least one Agent Profile, however it was made.
+ */
+accounts: boolean, 
+/**
+ * And a git author: both halves of one, because that is what git asks for.
+ * The GitHub token is not in this — see ADR-0016.
+ */
+git: boolean, };
 
 /**
  * What became of the human's Response.
@@ -3876,18 +4167,6 @@ export type Violation = {
  * the Set as a whole.
  */
 label?: string | null, message: string, };
-
-/**
- * One Watched Path, whichever of the two places said it.
- */
-export type WatchedPathEntry = { 
-/**
- * The directory: resolved, for the installation's own, which were resolved
- * when the server started; and exactly as it was written, for one out of
- * the settings — that is what a save sends back, so it has to come back as
- * it went in.
- */
-path: string, source: PathSource, resolution: PathResolution, };
 
 /**
  * And what a watcher says back up it.

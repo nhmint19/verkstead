@@ -39,7 +39,7 @@ const MODEL: &str = "claude-opus-5";
 /// switch must leave alone.
 fn profile_facts(name: &str) -> ProfileFacts {
     ProfileFacts {
-        name: name.to_owned(),
+        name: Some(name.to_owned()),
         account: Account::Claude {
             claude_dir: PathBuf::from(format!("/watched/accounts/{name}/.claude")),
             config_file: PathBuf::from(format!("/watched/accounts/{name}/.claude.json")),

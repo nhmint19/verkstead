@@ -43,14 +43,14 @@
 //! draws beside the second of them — a rebase is force-pushed, and a
 //! force-pushed branch rewrites what reviewers have read.
 //!
-//! And the paths — the Watched Paths and the Sandbox Configuration binds — are
-//! the one thing here said in two places at once. The installation says its own
-//! on the command line and the human says theirs in `config.yaml`, and what
-//! Verkstead goes by is the union. So each entry comes back saying which of the
-//! two said it, and whether the server can see what it names right now: the
-//! first is what makes an entry editable here rather than read-only, and the
-//! second is a report rather than a refusal — a save lands whatever it was
-//! told, and an entry the server cannot see is a row that says so.
+//! And the paths — the Sandbox Configuration binds — are the one thing here
+//! said in two places at once. The installation says its own on the command
+//! line and the human says theirs in `config.yaml`, and what Verkstead goes by
+//! is the union. So each entry comes back saying which of the two said it, and
+//! whether the server can see what it names right now: the first is what makes
+//! an entry editable here rather than read-only, and the second is a report
+//! rather than a refusal — a save lands whatever it was told, and an entry the
+//! server cannot see is a row that says so.
 //!
 //! And the ignore rules are the one thing here a save can be *refused* over: a
 //! list of patterns for the comments no agent is ever to be spun up about, and
@@ -101,8 +101,7 @@ pub struct SettingsView {
     /// what it turns on writes to GitHub under the human's own account.
     pub share_on_done: bool,
 
-    /// And the Watched Paths and the Sandbox Configuration binds, from both of
-    /// the places either of them is said.
+    /// And the Sandbox Configuration binds, from both of the places they are said.
     pub paths: PathsView,
 
     /// And the comments nobody wants addressed, in the order they were written
@@ -137,41 +136,20 @@ pub enum ConflictResolution {
 }
 
 /// Every path Verkstead has been told about, from both sources at once: the
-/// directories it may operate inside, and the extra directories a sandbox is
-/// given beyond the surface every one of them has.
+/// extra directories a sandbox is given beyond the surface every one of them
+/// has.
 ///
-/// Two lists rather than one, because they are two different permissions — a
-/// Watched Path says where the human may point Verkstead, and a bind says what
-/// a session may write in — and the page draws them apart for that reason.
-///
-/// The installation's own entries come first in each list, and the settings'
-/// follow in the order they were written down. That is the order the two were
-/// decided in: a flag is said once when the machine is set up, and the file is
-/// where somebody has been adding to it since.
+/// The installation's own entries come first, and the settings' follow in the
+/// order they were written down. That is the order the two were decided in: a
+/// flag is said once when the machine is set up, and the file is where somebody
+/// has been adding to it since.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct PathsView {
-    pub watched: Vec<WatchedPathEntry>,
-
     /// Every configured bind, the ones every sandbox gets and the ones one Repo
     /// does together — see [`BindEntry::repo`], which is what says which of the
     /// two an entry is.
     pub binds: Vec<BindEntry>,
-}
-
-/// One Watched Path, whichever of the two places said it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct WatchedPathEntry {
-    /// The directory: resolved, for the installation's own, which were resolved
-    /// when the server started; and exactly as it was written, for one out of
-    /// the settings — that is what a save sends back, so it has to come back as
-    /// it went in.
-    pub path: String,
-
-    pub source: PathSource,
-
-    pub resolution: PathResolution,
 }
 
 /// And one Sandbox Configuration bind.
@@ -200,8 +178,8 @@ pub struct BindEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum PathSource {
-    /// A `--watched-path` or a `--sandbox-bind`, from the command line or from
-    /// the environment the server was started in.
+    /// A `--sandbox-bind`, from the command line or from the environment the
+    /// server was started in.
     Installation,
 
     /// And one out of `config.yaml`, which is the file this page writes.
@@ -218,8 +196,7 @@ pub enum PathSource {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum PathResolution {
-    /// The server can see it: a directory, for a Watched Path, and anything at
-    /// all for a bind.
+    /// The server can see it, which for a bind is anything at all being there.
     Resolves,
 
     /// It cannot, and this is why, in the words it is logged in.
@@ -410,22 +387,19 @@ pub struct SettingsEdit {
     /// this is to be.
     pub share_on_done: bool,
 
-    /// The Watched Paths the settings own, as values again: what is sent is
-    /// what `config.yaml` holds afterwards, so a row taken off the page is a
-    /// row taken out of the file.
-    ///
-    /// The installation's own are not here and cannot be sent. They are the
-    /// unit's word rather than this page's, and a save leaves them exactly
-    /// where they are — see [`PathSource`].
-    pub watched_paths: Vec<String>,
-
-    /// And the Sandbox Configuration binds the settings own, in the grammar
-    /// `--sandbox-bind` uses: `/abs/path` for a bind every sandbox gets, and
-    /// `name=/abs/path` for one the Repo registered under that name gets.
+    /// The Sandbox Configuration binds the settings own, as values again: what
+    /// is sent is what `config.yaml` holds afterwards, so a row taken off the
+    /// page is a row taken out of the file. In the grammar `--sandbox-bind`
+    /// uses: `/abs/path` for a bind every sandbox gets, and `name=/abs/path`
+    /// for one the Repo registered under that name gets.
     ///
     /// Strings rather than a shape of their own, because a string is what the
     /// file holds — and one grammar for both of the places a bind is said is
     /// one thing to learn rather than two.
+    ///
+    /// The installation's own are not here and cannot be sent. They are the
+    /// unit's word rather than this page's, and a save leaves them exactly
+    /// where they are — see [`PathSource`].
     pub sandbox_binds: Vec<String>,
 
     /// And what is to become of the ignore rules, which is an action rather

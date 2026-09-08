@@ -6,11 +6,10 @@
 //! is the box it always was with a dropdown under it that browses the filesystem
 //! a directory at a time. What the form is for has not moved: it names a path,
 //! and what the server does about that path is still the only thing that decides
-//! whether it is taken. The browse is bounded the way this form is, in the
-//! watched scope, so it offers nothing the boundary would turn away; and it
-//! marks a repository where it finds one and stops there, that being the one
-//! thing this field is looking for and the one place in the workbench a `.git`
-//! means anything.
+//! whether it is taken. The browse reaches anywhere the server can read, this
+//! form being bounded by nothing else either; and it marks a repository where it
+//! finds one and stops there, that being the one thing this field is looking for
+//! and the one place in the workbench a `.git` means anything.
 //!
 //! Every refusal is shown as a refusal, in words, beside the field the path was
 //! typed into: the human has just done something and is owed a reason it did not
@@ -102,8 +101,6 @@ export const REFUSAL: Record<Registered, string> = {
   Added: "",
   NotAbsolute: "Give the repo's absolute path, starting with a slash.",
   Missing: "There is nothing at that path.",
-  OutsideWatchedPaths:
-    "That is outside the watched paths, so Verkstead will not touch it.",
   NotARepository:
     "That is not a git repository — name the repository's own directory.",
   NoDefaultBranch:
@@ -558,11 +555,9 @@ function ConflictResolution(props: { repo: RepoView }): JSX.Element {
 ///
 /// The field browses, and Register is untouched by it: what is sent is whatever
 /// the box holds, tapped together or typed straight in, and every refusal below
-/// is still the server's answer about it. Inside the Watched Paths rather than
-/// anywhere, because that is where a Repo may be registered from — a dropdown
-/// offering what the press would turn away would be offering somebody a wasted
-/// press — and looking for a repository, which is what this form is being filled
-/// in with.
+/// is still the server's answer about it. Anywhere the server can read, because
+/// that is where a Repo may be registered from, and looking for a repository,
+/// which is what this form is being filled in with.
 export function RepoPane(props: {
   /// The way back to the settings, which is a change of level rather than a
   /// navigation: what is open stays open, and the URL goes on saying so.
@@ -627,7 +622,6 @@ export function RepoPane(props: {
         <label for="repo-path">Absolute path of a git repository</label>
         <PathField
           id="repo-path"
-          scope="watched"
           repositories
           placeholder="/home/you/src/verkstead"
           value={path()}

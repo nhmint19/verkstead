@@ -22,8 +22,10 @@
 mod answering;
 mod browsing;
 mod conversations;
+mod onboarding;
 mod profiles;
 mod push;
+mod remote;
 mod repos;
 mod settings;
 mod sharing;
@@ -32,7 +34,7 @@ mod update;
 mod view;
 
 pub use answering::{Locked, Submitted};
-pub use browsing::{BrowseScope, DirectoryEntry, DirectoryListing, EntryKind};
+pub use browsing::{DirectoryEntry, DirectoryListing, EntryKind};
 pub use conversations::{
     AbandonedRepo, AbandonedRoadmap, Adopted, AdoptedStage, AdoptionView, AgentOutputEvent,
     AgentSession, Attached, AttachmentOrigin, AttachmentRemoved, AttachmentView, BacklogPane,
@@ -57,11 +59,16 @@ pub use conversations::{
     stage_list_event, stage_list_reached, steer_event, task_list, task_list_event,
     task_list_reached, unreadable_set_event,
 };
+pub use onboarding::{
+    AccountView, Dependency, DependencyState, DependencyView, Distro, OnboardingView, Platform,
+    PrefillView, Prefilled, Source, StepsView,
+};
 pub use profiles::{
     AgentType, Broken, PairingView, PickedView, ProfileAccount, ProfileChoice, ProfileChosen,
     ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, RepoPairingsView, RoleChoice,
 };
 pub use push::{PushKey, Subscribed, Subscription, Unsubscribe};
+pub use remote::{RemoteBanner, RemoteView, ServeEdit, ServePress, ServeView};
 pub use repos::{
     ConflictResolutionEdit, Registered, Registration, RepoEntry, RepoRemoved, RepoView,
 };
@@ -69,7 +76,7 @@ pub use settings::{
     Author, BindEntry, BuildCacheEdit, BuildCacheView, CleanupEdit, CleanupStepEdit,
     CleanupStepView, CleanupView, CompileCaching, ConflictResolution, IgnoreRule,
     IgnoredCommentsEdit, PathResolution, PathSource, PathsView, RuleField, RuleRefused,
-    SettingsEdit, SettingsSaved, SettingsView, TokenEdit, TokenSaved, Verified, WatchedPathEntry,
+    SettingsEdit, SettingsSaved, SettingsView, TokenEdit, TokenSaved, Verified,
 };
 pub use sharing::{
     CommentedOn, MissedOut, SHARE_MARKER, ShareCommented, SharePublished, SharedCommit,

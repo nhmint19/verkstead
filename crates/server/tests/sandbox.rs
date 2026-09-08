@@ -32,6 +32,7 @@ use std::process::{Command, Stdio};
 use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
+use verkstead_server::key::WorkbenchKey;
 use verkstead_server::platform::Platform;
 use verkstead_server::sandbox::{
     Bind, Closing, Executable, Homes, Reachable, Sandbox, SandboxConfig, under_dev_shell,
@@ -70,8 +71,8 @@ const SAYS_WHICH_SCCACHE: &str = "printf 'sccache 0.0.0-the-one-resolved\\n'\n";
 /// the one directory both it and this test can write to and read.
 const COMPILE_SERVER_REPORT: &str = "compile-server-report";
 
-/// A Conversation part-way through its first grilling: a Repo inside a Watched
-/// Path, a Profile to run as, and a worktree under Verkstead's own state
+/// A Conversation part-way through its first grilling: a Repo in a directory of
+/// its own, a Profile to run as, and a worktree under Verkstead's own state
 /// directory.
 ///
 /// Everything is real. The repository is a repository, the worktree is one git
@@ -81,7 +82,7 @@ const COMPILE_SERVER_REPORT: &str = "compile-server-report";
 struct Grilling {
     /// Kept alive for as long as the fixture is: the directories go when these
     /// drop, and a worktree that vanished mid-probe would fail obscurely.
-    watched: tempfile::TempDir,
+    elsewhere: tempfile::TempDir,
     state: tempfile::TempDir,
     home: tempfile::TempDir,
 
@@ -356,11 +357,11 @@ fi
     /// What the fixture's own Claude Profile names: the directory half of the
     /// account, and the file half.
     fn claude_dir(&self) -> PathBuf {
-        self.watched.path().join("account/.claude")
+        self.elsewhere.path().join("account/.claude")
     }
 
     fn claude_config(&self) -> PathBuf {
-        self.watched.path().join("account/.claude.json")
+        self.elsewhere.path().join("account/.claude.json")
     }
 
     /// Write `secrets.yaml` as the settings page would, so that the sandboxes
@@ -377,19 +378,19 @@ fi
 
     /// A Profile of the second agent type, whose whole account is one home.
     ///
-    /// Saved into the same store the fixture's own was, with a home inside the
-    /// Watched Path holding something of the account's — so that "the home is
+    /// Saved into the same store the fixture's own was, with a home beside the
+    /// repository holding something of the account's — so that "the home is
     /// bound" is a claim about a directory with contents rather than about an
     /// empty one.
     async fn codex_profile(&self) -> store::Profile {
-        let home = self.watched.path().join("codex-account/.codex");
+        let home = self.elsewhere.path().join("codex-account/.codex");
         std::fs::create_dir_all(&home).unwrap();
         std::fs::write(home.join("config.toml"), "# the account's own\n").unwrap();
 
         store::create_profile(
             &self.pool,
             &store::ProfileFacts {
-                name: "codex".to_owned(),
+                name: Some("codex".to_owned()),
                 account: store::Account::Codex { home },
                 models: vec!["gpt-5-codex".to_owned()],
             },
@@ -406,7 +407,7 @@ fi
     /// anything inside such a home (ADR-0011), and what would be hidden if
     /// something were is the skills grok itself ships.
     async fn grok_profile(&self) -> store::Profile {
-        let home = self.watched.path().join("grok-account/.grok");
+        let home = self.elsewhere.path().join("grok-account/.grok");
         std::fs::create_dir_all(home.join("skills/the-accounts-own")).unwrap();
         std::fs::write(
             home.join("skills/the-accounts-own/SKILL.md"),
@@ -417,7 +418,7 @@ fi
         store::create_profile(
             &self.pool,
             &store::ProfileFacts {
-                name: "grok".to_owned(),
+                name: Some("grok".to_owned()),
                 account: store::Account::Grok { home },
                 models: vec!["grok-4.6".to_owned()],
             },
@@ -437,7 +438,7 @@ fi
     /// the Profile names, and its two global paths are under HOME, where a
     /// fresh sandbox has nothing at all.
     async fn opencode_profile(&self) -> store::Profile {
-        let home = self.watched.path().join("opencode-account/opencode");
+        let home = self.elsewhere.path().join("opencode-account/opencode");
         let config = home.join(".config/opencode");
         let data = home.join(".local/share/opencode");
 
@@ -454,7 +455,7 @@ fi
         store::create_profile(
             &self.pool,
             &store::ProfileFacts {
-                name: "opencode".to_owned(),
+                name: Some("opencode".to_owned()),
                 account: store::Account::OpenCode { home },
                 models: vec!["opencode/big-pickle".to_owned()],
             },
@@ -501,7 +502,7 @@ async fn grilling() -> Grilling {
 /// checks them out: a read-write companion on a branch of its own, a read-only
 /// one detached at the commit its base resolved to.
 async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Grilling {
-    let watched = tempfile::tempdir().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
 
@@ -544,8 +545,8 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
     )
     .unwrap();
 
-    let repo = repository(watched.path().join("verkstead"));
-    let sibling = repository(watched.path().join("something-else"));
+    let repo = repository(elsewhere.path().join("verkstead"));
+    let sibling = repository(elsewhere.path().join("something-else"));
 
     let pool = store::open_database(&state.path().join("verkstead.db"))
         .await
@@ -556,8 +557,8 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
         .unwrap()
         .expect("the Repo registers");
 
-    let claude_dir = watched.path().join("account/.claude");
-    let config_file = watched.path().join("account/.claude.json");
+    let claude_dir = elsewhere.path().join("account/.claude");
+    let config_file = elsewhere.path().join("account/.claude.json");
     std::fs::create_dir_all(&claude_dir).unwrap();
     std::fs::write(claude_dir.join("settings.json"), "{}\n").unwrap();
     std::fs::write(&config_file, "{}\n").unwrap();
@@ -575,7 +576,7 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
     let profile = store::create_profile(
         &pool,
         &store::ProfileFacts {
-            name: "work".to_owned(),
+            name: Some("work".to_owned()),
             account: store::Account::Claude {
                 claude_dir,
                 config_file,
@@ -620,7 +621,7 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
     let mut checkouts = Vec::new();
 
     for (name, mode) in companions {
-        let path = repository(watched.path().join(name));
+        let path = repository(elsewhere.path().join(name));
         let registered = store::register_repo(&pool, &path, name, "main")
             .await
             .unwrap()
@@ -712,7 +713,7 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
         .expect("the executable was just written");
 
     Grilling {
-        watched,
+        elsewhere,
         state,
         home,
         repo,
@@ -1368,7 +1369,7 @@ async fn an_account_that_is_one_directory_is_joined_into_the_profile_too() {
 
     assert!(
         fixture
-            .watched
+            .elsewhere
             .path()
             .join("codex-account/.codex/auth.json")
             .exists(),
@@ -1552,7 +1553,7 @@ async fn an_account_on_another_volume_is_a_session_that_is_not_started() {
     let elsewhere = store::create_profile(
         &fixture.pool,
         &store::ProfileFacts {
-            name: "on-the-other-drive".to_owned(),
+            name: Some("on-the-other-drive".to_owned()),
             // The directory half where the fixture's own is, so that what is
             // being refused is the one path a hard link is asked for rather
             // than the whole account being somewhere odd.
@@ -2056,6 +2057,32 @@ async fn the_verkstead_a_session_asks_with_is_the_one_serving_it() {
     );
 }
 
+/// And `/usr/local/bin` is on it, which is where the Debian family's `npm
+/// install -g` lands a binary.
+///
+/// Asked of a shell inside rather than of the constant it was built from, like
+/// everything else here: what settles whether a session would find an agent
+/// installed from npm is a session reading the `PATH` it was really handed.
+/// That is what the onboarding probes resolve on too — a row that ticked
+/// against a list a session did not have would be a row promising a session
+/// that could not start. See `verkstead_server::onboarding`.
+#[tokio::test]
+async fn a_session_looks_for_a_program_where_an_npm_install_puts_one() {
+    let fixture = grilling().await;
+    let sandbox = fixture.sandbox(vec![]);
+
+    let reported = probe(&sandbox, r#"say path "$PATH""#);
+
+    assert!(
+        reported["path"]
+            .split(':')
+            .any(|entry| entry == "/usr/local/bin"),
+        "a session's PATH is {:?}, and an agent installed from npm on this \
+         family of distributions is nowhere on it",
+        reported["path"],
+    );
+}
+
 /// And where that image was packed with the libraries it runs over, a session
 /// still finds one `verkstead` and nothing beside it: the launcher that points
 /// the loader at them and execs the image behind it.
@@ -2188,10 +2215,10 @@ async fn no_other_checkout_on_the_machine_is_reachable() {
             r#"
             dir {sibling} sibling
             file {readme} repo-readme
-            say watched-holds "$(ls -A {watched} | sort | tr '\n' ' ')"
+            say outside-holds "$(ls -A {elsewhere} | sort | tr '\n' ' ')"
             say repo-holds "$(ls -A {repo} | sort | tr '\n' ' ')"
             "#,
-            watched = quoted(fixture.watched.path()),
+            elsewhere = quoted(fixture.elsewhere.path()),
             repo = quoted(&fixture.repo),
             sibling = quoted(&fixture.sibling),
             readme = quoted(&fixture.repo.join("README.md")),
@@ -2200,7 +2227,7 @@ async fn no_other_checkout_on_the_machine_is_reachable() {
 
     assert_eq!(
         reported["sibling"], "absent",
-        "another repository under the same Watched Path is another Conversation's business"
+        "another repository in the same directory is another Conversation's business"
     );
     assert_eq!(
         reported["repo-readme"], "absent",
@@ -2208,12 +2235,12 @@ async fn no_other_checkout_on_the_machine_is_reachable() {
     );
 
     // A bind's parent directories have to exist for it to land on, so the
-    // Watched Path is inside as a scaffold: empty tmpfs directories holding
-    // nothing but what was deliberately bound, and writing in them writes
-    // nothing the host will ever see.
+    // directory the repository is in is inside as a scaffold: empty tmpfs
+    // directories holding nothing but what was deliberately bound, and writing
+    // in them writes nothing the host will ever see.
     assert_eq!(
-        reported["watched-holds"], "verkstead ",
-        "nothing under a Watched Path arrives except by being bound — and the \
+        reported["outside-holds"], "verkstead ",
+        "nothing around the Repo arrives except by being bound — and the \
          Profile's pair arrives in HOME rather than where it lives"
     );
     assert_eq!(
@@ -2357,6 +2384,86 @@ YAML
             .expect("the Set the session just sent reads back")
             .title,
         "What a delivery that has failed forty times becomes"
+    );
+
+    serving.abort();
+}
+
+/// And the half of the same loopback a session may *not* reach: the workbench's
+/// own namespace, which answers 401 to everything that has not shown the
+/// Workbench Key (ADR-0015).
+///
+/// A session's network is the host's own — see
+/// [`the_network_is_the_hosts_own`] — so the address the agent contract is
+/// served on is the address the workbench is served on, and nothing about the
+/// socket tells the two apart. What does is a secret in the Data Directory,
+/// which is not among the things a sandbox binds.
+///
+/// Asked from inside rather than read off the flags, like every other claim in
+/// this file: what settles whether a session can register a Repo through the
+/// viewer's API is a session trying to, and the status it reads back.
+#[tokio::test]
+async fn a_session_is_refused_the_workbenchs_own_namespace() {
+    let fixture = grilling().await;
+
+    // In the Data Directory, where a real server keeps it.
+    let key = WorkbenchKey::issued(fixture.state.path()).unwrap();
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listening = listener.local_addr().unwrap();
+
+    let serving = tokio::spawn({
+        let pool = fixture.pool.clone();
+        let key = key.clone();
+        async move {
+            let _ = axum::serve(listener, verkstead_server::router_keyed(pool, key)).await;
+        }
+    });
+
+    let sandbox = fixture.sandbox_reaching(listening, &BuildCache::none(), vec![]);
+    let key_file = key.path().to_owned();
+
+    let reported = tokio::task::spawn_blocking(move || {
+        probe(
+            &sandbox,
+            &format!(
+                r#"
+                status() {{
+                    {curl} --silent --output /dev/null --write-out '%{{http_code}}' "$2" \
+                        > /tmp/status 2>/dev/null
+                    say "$1" "$(cat /tmp/status)"
+                }}
+
+                status workbench "http://{listening}/api/ui/repos"
+                status page "http://{listening}/conversations"
+                status health "http://{listening}/api/v1/health"
+
+                file {key_file} key-file
+                "#,
+                curl = quoted(&on_the_host("curl")),
+                key_file = quoted(&key_file),
+            ),
+        )
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(
+        reported["workbench"], "401",
+        "a session shares the loopback, so what keeps it out of the viewer's \
+         namespace is the key rather than the network"
+    );
+    assert_eq!(
+        reported["page"], "401",
+        "and out of the workbench's own pages, which carry the same"
+    );
+    assert_eq!(
+        reported["health"], "200",
+        "whether the server is up is not a question about anybody's work"
+    );
+    assert_eq!(
+        reported["key-file"], "absent",
+        "the key is in the Data Directory, which no sandbox mounts"
     );
 
     serving.abort();

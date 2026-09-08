@@ -42,7 +42,6 @@
 //! its own switch, and a sibling of this module is where one would go. Naming
 //! this one for what it caches is what leaves room for that.
 
-use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -138,10 +137,10 @@ pub fn compiles_through_an_sccache(platform: Platform) -> bool {
 
 /// The build cache this server hands out: where it is, and what it can offer.
 ///
-/// Resolved once at startup, like the Watched Paths and the Sandbox
-/// Configuration, and for the reason those are: a cache directory that cannot
-/// be made is a misconfiguration to report at startup rather than a session
-/// that fails to start weeks later with nobody watching.
+/// Resolved once at startup, like the Sandbox Configuration, and for the reason
+/// that is: a cache directory that cannot be made is a misconfiguration to
+/// report at startup rather than a session that fails to start weeks later with
+/// nobody watching.
 ///
 /// The switch that turns it off is *not* here. It is in `config.yaml` and is
 /// read at every session spawn — see [`BuildCache::shared`] — so flipping it in
@@ -678,32 +677,22 @@ fn compile_server(
 /// puts sccache on the service's path precisely so that this finds it.
 ///
 /// **Read on the two platforms that compile through one.** Nothing calls this
-/// on Windows any more — see [`compiles_through_an_sccache`] — and the arm
-/// below is kept for the reason every platform arm here is: it is what a name
-/// means on that machine, rather than a claim that anything asks.
+/// on Windows any more — see [`compiles_through_an_sccache`] — and the arm it
+/// resolves under is kept for the reason every platform arm here is: it is what
+/// a name means on that machine, rather than a claim that anything asks.
 ///
-/// **What a name means is the platform's**, which is the one arm here. A bare
-/// `sccache` is a file on the two Unixes and is nothing at all on Windows,
-/// where what is installed is `sccache.exe` and what says so is `PATHEXT` — so
-/// a walk of `PATH` alone would find one on no Windows machine that has it.
-/// That resolving is the open rendering's, handed the server's own environment
-/// exactly as the terminals' shell lookup hands it — see
-/// [`crate::sandbox::open::found`], which is where the rules are, and
-/// [`crate::terminals::shell`], which is the other caller.
+/// The lookup itself is [`crate::sandbox::on_the_path`], which is where the
+/// platform's own rules for reading a name are, and which the onboarding probes
+/// ask the same question of against the `PATH` a *session* is given. What is
+/// left here is which `PATH` this caller means, which is the whole of the
+/// difference between the two.
 fn on_the_path(program: &str) -> Option<PathBuf> {
-    match Platform::HERE {
-        Platform::Windows => crate::sandbox::open::found(
-            OsStr::new(program),
-            std::env::var_os("PATH").as_deref(),
-            std::env::var_os("PATHEXT").as_deref(),
-        ),
-        Platform::Linux | Platform::MacOs => std::env::split_paths(&std::env::var_os("PATH")?)
-            // A `PATH` entry that is empty means the working directory, which
-            // is not somewhere to go looking for a compiler wrapper.
-            .filter(|dir| !dir.as_os_str().is_empty())
-            .map(|dir| dir.join(program))
-            .find(|path| path.is_file()),
-    }
+    crate::sandbox::on_the_path(
+        Platform::HERE,
+        program,
+        std::env::var_os("PATH").as_deref(),
+        std::env::var_os("PATHEXT").as_deref(),
+    )
 }
 
 #[cfg(test)]

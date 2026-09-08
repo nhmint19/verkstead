@@ -121,6 +121,21 @@ pub struct Environment {
     /// `$XDG_CACHE_HOME`, which the Build Cache is resolved out of on both
     /// Unixes rather than on Linux alone — see [`default_cache_dir`].
     pub xdg_cache_home: Option<PathBuf>,
+
+    /// `$GH_TOKEN`, and the one value here that is not a directory at all: the
+    /// GitHub token the onboarding wizard offers as a prefill, where the
+    /// machine running this server is already holding one — see
+    /// [`crate::onboarding`].
+    ///
+    /// It is read here for the reason every value above is: the process
+    /// environment is read once, at the edge, so that everything below is a
+    /// function of values a test can hand over rather than of the process the
+    /// suite happens to be running in.
+    pub gh_token: Option<String>,
+
+    /// And `$GITHUB_TOKEN`, which is the other variable `gh` itself reads and
+    /// the second place the prefill looks.
+    pub github_token: Option<String>,
 }
 
 impl Environment {
@@ -135,6 +150,8 @@ impl Environment {
             xdg_state_home: std::env::var_os("XDG_STATE_HOME").map(PathBuf::from),
             local_appdata: std::env::var_os("LOCALAPPDATA").map(PathBuf::from),
             xdg_cache_home: std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from),
+            gh_token: std::env::var("GH_TOKEN").ok(),
+            github_token: std::env::var("GITHUB_TOKEN").ok(),
         }
     }
 }

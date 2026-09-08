@@ -93,10 +93,6 @@ pub enum Broken {
 
     /// The home the account was kept under is not there any more.
     HomeMissing,
-
-    /// The account now resolves outside every Watched Path — a directory was
-    /// replaced by a symlink, or the boundary itself was reconfigured.
-    OutsideWatchedPaths,
 }
 
 /// One row of the Profile list.
@@ -108,7 +104,15 @@ pub enum Broken {
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ProfileEntry {
     pub id: i64,
-    pub name: String,
+
+    /// What the human calls this account, and `null` where they have called it
+    /// nothing.
+    ///
+    /// A name tells two accounts of one harness apart, which is the rare case;
+    /// the ordinary one is an account the harness's mark and the model already
+    /// say the whole of. So the viewer says nothing where nothing has to be
+    /// said, and *Default* where a name has to be shown.
+    pub name: Option<String>,
 
     /// Which agent this Profile runs, and the account it runs as — one field,
     /// because the type is what says which fields the account has.
@@ -133,7 +137,9 @@ pub struct ProfileEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ProfileEdit {
-    pub name: String,
+    /// What to call it, or `null` to leave it unnamed — which is what the form
+    /// sends for an empty box. A harness takes one unnamed Profile.
+    pub name: Option<String>,
 
     /// The absolute paths this Profile's account is, in its type's shape.
     pub account: ProfileAccount,
@@ -147,8 +153,8 @@ pub struct ProfileEdit {
 
 /// What became of saving a Profile.
 ///
-/// The refusals are the server's and not the form's: the Watched Paths are a
-/// security boundary, and every request reaching the endpoint is decided there
+/// The refusals are the server's and not the form's: a check the browser made
+/// is a courtesy, and every request reaching the endpoint is decided there
 /// whether or not a form was involved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
@@ -159,10 +165,6 @@ pub enum ProfileSaved {
     /// There is no Profile with that id to rewrite.
     NoSuchProfile,
 
-    /// It was given no name. A Profile is picked out of a list by its name, so
-    /// one without a name is one nobody can choose.
-    Nameless,
-
     /// It was given no models. A session has to know what it runs on, and a
     /// Profile naming none is one nothing could be launched under.
     Modelless,
@@ -170,17 +172,16 @@ pub enum ProfileSaved {
     /// Another Profile is called that already.
     NameTaken,
 
+    /// That harness already has a Profile nobody named. A name is what tells two
+    /// accounts of one harness apart, so the second of them has to have one.
+    DefaultTaken,
+
     /// The claude directory was named relatively. There is nothing to resolve it
     /// against that would mean the same thing twice.
     DirNotAbsolute,
 
     /// Nothing is at the claude directory's path.
     DirMissing,
-
-    /// It resolves to somewhere outside every Watched Path. Checked after `..`
-    /// and every symlink have been taken out, so a path that merely reads as
-    /// inside one lands here too.
-    DirOutsideWatchedPaths,
 
     /// Something is there and it is not a directory — `~/.claude` is a directory
     /// bind-mounted over, so a file cannot stand in for it.
@@ -192,9 +193,6 @@ pub enum ProfileSaved {
     /// Nothing is at the config file's path.
     ConfigMissing,
 
-    /// The config file resolves to somewhere outside every Watched Path.
-    ConfigOutsideWatchedPaths,
-
     /// Something is there and it is not a file — the pair is a directory and a
     /// file, and this is the file half.
     NotAFile,
@@ -205,9 +203,6 @@ pub enum ProfileSaved {
 
     /// Nothing is at the home's path.
     HomeMissing,
-
-    /// The home resolves to somewhere outside every Watched Path.
-    HomeOutsideWatchedPaths,
 
     /// Something is there and it is not a directory — a home is a directory
     /// bind-mounted over, so a file cannot stand in for it.

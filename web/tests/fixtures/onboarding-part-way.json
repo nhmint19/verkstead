@@ -1,0 +1,75 @@
+{
+  "mode": true,
+  "platform": "Linux",
+  "distro": "Ubuntu",
+  "dependencies": [
+    {
+      "dependency": "Sandbox",
+      "state": {
+        "state": "Present"
+      }
+    },
+    {
+      "dependency": "Git",
+      "state": {
+        "state": "Present"
+      }
+    },
+    {
+      "dependency": "Claude",
+      "state": {
+        "state": "Present"
+      }
+    },
+    {
+      "dependency": "Codex",
+      "state": {
+        "state": "Absent",
+        "trouble": null
+      }
+    },
+    {
+      "dependency": "Grok",
+      "state": {
+        "state": "Absent",
+        "trouble": null
+      }
+    },
+    {
+      "dependency": "OpenCode",
+      "state": {
+        "state": "Absent",
+        "trouble": null
+      }
+    },
+    {
+      "dependency": "Gh",
+      "state": {
+        "state": "Absent",
+        "trouble": null
+      }
+    }
+  ],
+  "accounts": [
+    {
+      "account": {
+        "agent_type": "Claude",
+        "claude_dir": "/home/you/.claude",
+        "config_file": "/home/you/.claude.json"
+      },
+      "harness": true
+    },
+    {
+      "account": {
+        "agent_type": "Codex",
+        "home": "/home/you/.codex"
+      },
+      "harness": false
+    }
+  ],
+  "steps": {
+    "dependencies": true,
+    "accounts": false,
+    "git": false
+  }
+}

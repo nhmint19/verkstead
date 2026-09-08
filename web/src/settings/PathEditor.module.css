@@ -2,9 +2,9 @@
    — see `PathEditor.tsx`.
 
    Its own module rather than the Paths section's, because two panes draw these:
-   the watched paths and the global binds on `/settings/paths`, and one Repo's
-   own binds on that Repo's pane. What a row looks like is the same question in
-   both places, and one sheet is what keeps it one answer. What is around them —
+   the global binds on `/settings/paths`, and one Repo's own binds on that
+   Repo's pane. What a row looks like is the same question in both places, and
+   one sheet is what keeps it one answer. What is around them —
    the card, the headings, the notices a pane says beside its lists — belongs to
    whichever pane is drawing them. */
 

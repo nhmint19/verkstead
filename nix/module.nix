@@ -50,8 +50,13 @@ in
 
         The server binds the loopback interface and speaks plain HTTP.
         Reaching the web UI from a phone means HTTPS, which is
-        `tailscale serve --bg 8422`'s job in front of it and stays host-level
-        configuration rather than anything this module arranges.
+        `tailscale serve --bg 8422`'s job in front of it — and that is the
+        **Remote access** section of the workbench settings rather than a
+        command anybody runs here, on a host where
+        {option}`services.tailscale.enable` is on. This module puts `tailscale`
+        on the service's own `PATH` and makes the service user Tailscale's
+        operator, which is the whole of what that section needs to work; joining
+        the tailnet in the first place stays the host's own business.
       '';
     };
 
@@ -117,6 +122,10 @@ in
         creates and hands over. Pointing this at a human's own home works too, as
         long as the `verkstead` user can read it; it is bound in read-only, so it
         has to exist.
+
+        Read-only is the whole of what naming one here buys, so an agent account
+        kept under it that a session has to write — `~/.claude`, say — is named
+        in `paths` as well. See that option.
       '';
     };
 
@@ -146,35 +155,42 @@ in
       '';
     };
 
-    watchedPaths = lib.mkOption {
+    paths = lib.mkOption {
       type = lib.types.listOf lib.types.path;
-      example = lib.literalExpression ''[ "/home/you/src" ]'';
+      default = [ ];
+      example = lib.literalExpression ''[ "/home/you/src" "/home/you/.claude" ]'';
       description = ''
-        The directories Verkstead is permitted to operate inside, as
-        `--watched-path`.
+        The directories bound read-write into the service's namespace: the
+        repositories it is to work in and the agent accounts it is to run under,
+        alike.
 
-        A security boundary rather than a convenience: nothing outside these
-        directories is ever touched, and a Repo is registered only from within
-        one. There is no default and no scan — guessing at what a machine's
-        owner meant to expose is not a guess worth making.
+        This says nothing to Verkstead. `ProtectHome = "tmpfs"` and
+        `ProtectSystem = "strict"` hide everything the unit is not told to bind,
+        so the server sees this list and the state directory and nothing else of
+        the machine — but what it sees is a namespace rather than a boundary,
+        and the server is never told the list exists. Inside it, every path
+        Verkstead is given is treated alike.
 
-        Each is resolved at startup, so it has to exist; symlinks and `..` are
-        taken out of every path checked against them, and a path that merely
-        reads as inside one is refused.
+        Which is why there is no minimum and nothing to assert: a build naming
+        none of them is a legal build, and what it comes up as is a workbench
+        with nowhere yet to point at. There is no default and no scan either —
+        guessing at what a machine's owner meant to expose is not a guess worth
+        making.
 
-        Each is bound into the service's sandbox, and nothing beside it is: the
-        hardening otherwise leaves nothing but the state directory reachable,
-        so a watched path under `/home` would be one the service cannot see at
-        all. What the sandbox exposes is therefore exactly this list.
+        A path this does not name is not there as far as the service is
+        concerned, and a Repo or an account under one is answered *missing*,
+        exactly as a path that genuinely is not there would be.
 
-        Which is why this list may not be empty, and why the assertion below
-        refuses a build with none. The server itself no longer requires any —
-        the workbench settings say Watched Paths too, and the boundary is the
-        union of the two, so a bare binary is pointed at its first directory
-        from its own settings page. Under this module that route stops at the
-        namespace: a directory typed into the settings page is saved and
-        reported as one the server cannot see, and stays functionless until it
-        is named here.
+        Bind mounts rather than `ReadWritePaths`, because a directory under
+        `/home` is one `ProtectHome` has already replaced with an empty tmpfs: a
+        path merely permitted under one is a path that is not there to permit.
+
+        The `home` option below is bound in too, and read-only — so an agent
+        account kept under it that a session has to *write*, which is every
+        Claude account, is named here as well. That is the one composition worth
+        saying outright: naming it as the home does not make it writable, and
+        the account is the thing a session writes its own logs and settings
+        into.
       '';
     };
 
@@ -213,8 +229,8 @@ in
         page is saved, reported on the page as one the server cannot see, and
         does nothing until it is named here as well.
 
-        Each is bound into the service's own sandbox, for the reason the watched
-        paths are: the hardening leaves nothing but the state directory
+        Each is bound into the service's own sandbox, for the reason the
+        `paths` above are: the hardening leaves nothing but the state directory
         reachable, and a directory the service cannot see is not one it can hand
         to a session.
       '';
@@ -237,31 +253,47 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    # Kept even though the server itself starts with none: what it would come up
-    # with is a boundary around nothing, and the way out of that on a bare binary
-    # — typing a path into the settings page — cannot work here, because this
-    # unit's namespace holds only what is named above. So a build with none is
-    # refused at build time rather than left to be discovered as a settings entry
-    # that saves and does nothing.
-    assertions = [
-      {
-        assertion = cfg.watchedPaths != [ ];
-        message = ''
-          services.verkstead.watchedPaths must name at least one directory.
-          Verkstead operates only inside the directories it is given, so with
-          none of them it has nothing it may touch. The settings page can add
-          more, but only inside this unit's namespace: what is not named here is
-          not somewhere the hardened service can see.
-        '';
-      }
-    ];
+    # No assertion on `paths`. It bounded nothing but this unit's own namespace
+    # even when it was a boundary, and now that Verkstead is never told about it
+    # a build naming none of them is a workbench with nowhere yet to point at
+    # rather than one that cannot work.
 
     # The binary lands on `PATH`, for a human at a terminal: `verkstead serve
     # --help` is how they find out what this unit is passing it, and `verkstead
     # ask` is there for an agent working outside Verkstead. A session inside a
     # Sandbox asks with the running server's own image instead, bound in ahead of
     # this one, so the two halves of an ask are always the same build.
-    environment.systemPackages = [ cfg.package ];
+    #
+    # And bubblewrap beside it, which is here as well as on the unit's `path`
+    # below. The two are different questions: the unit's `path` is what the
+    # server can *run*, and the system profile is what the onboarding wizard can
+    # *see* — it resolves every dependency row on the `PATH` a Sandbox gets
+    # (`LINUX_PATH` in `crates/server/src/sandbox.rs`), which starts at
+    # `/run/current-system/sw/bin` and never names a unit's own. A module
+    # install with bwrap on the unit alone was a wizard reporting no sandbox on
+    # a machine whose sessions sandboxed perfectly, and holding its first step
+    # there for good.
+    environment.systemPackages = [
+      cfg.package
+      pkgs.bubblewrap
+    ];
+
+    # The operator grant, made by the host rather than asked for on the page.
+    #
+    # `tailscale serve` is refused for a process that is neither root nor the
+    # tailnet's operator, and Verkstead runs as neither: the daemon's answer to
+    # that is to show `sudo tailscale set --operator=verkstead` and re-try on
+    # the next press. On a host that is already declaring both services there
+    # is nobody left to show it to — the two facts are in the same file — so it
+    # is set here and the switch simply works.
+    #
+    # `services.tailscale.extraSetFlags` is what runs it: nixpkgs turns a
+    # non-empty list into a `tailscaled-set` oneshot that runs `tailscale set`
+    # after the daemon. Merged rather than assigned, so a host with flags of its
+    # own keeps them.
+    services.tailscale.extraSetFlags = lib.mkIf config.services.tailscale.enable [
+      "--operator=verkstead"
+    ];
 
     users.users.verkstead = {
       isSystemUser = true;
@@ -285,7 +317,9 @@ in
       # sandbox, and it is here rather than in the package's own wrapper because
       # it is the server that spawns one — the CLI half of the same binary has
       # no use for it, and there are systems the package builds for that have no
-      # bwrap to offer.
+      # bwrap to offer. It is in `environment.systemPackages` as well, and for a
+      # different reason: what the wizard's sandbox row looks at is the `PATH` a
+      # Sandbox gets rather than this one — see that list above.
       #
       # `gh` is how Verkstead reaches GitHub itself: the pull request a finish
       # step opened, and what is on it. It runs as whoever the service's home is
@@ -299,11 +333,24 @@ in
       # sandbox read-only. Without it the cache is still a cache — the crate
       # downloads are shared — so the server says so in the log and carries on,
       # but on a module install it never has to.
+      #
+      # And `tailscale`, which is the whole of what the **Remote access**
+      # section runs: `tailscale status --json` to read this machine, and
+      # `tailscale serve` to put its tailnet name in front of the workbench.
+      # `path` is what the unit's `PATH` *is* rather than something added to it,
+      # so a section that has no `tailscale` to run reads every machine as one
+      # with none installed — which would be a lie on a host that is on a
+      # tailnet.
+      #
+      # Only where the host has Tailscale on, and the host's own package rather
+      # than `pkgs.tailscale`: a machine that has not turned it on has none, and
+      # a section saying so with a link to the installer is exactly right there.
       path = [
         pkgs.bubblewrap
         pkgs.gh
         pkgs.sccache
-      ];
+      ]
+      ++ lib.optional config.services.tailscale.enable config.services.tailscale.package;
 
       serviceConfig = {
         # The flags rather than the environment variables behind them: what the
@@ -320,13 +367,10 @@ in
             "--build-cache-dir"
             cacheDir
           ]
-          # One flag per directory rather than the `:`-separated form the
-          # environment variable takes: a path with a colon in it would split
-          # in two, and this is the list that says what may be touched.
-          ++ lib.concatMap (path: [
-            "--watched-path"
-            "${path}"
-          ]) cfg.watchedPaths
+          # `paths` is not passed to anything: it is the unit's namespace and
+          # the server is never told it exists. One flag per bind rather than
+          # the `:`-separated form the environment variable takes, because a
+          # path with a colon in it would split in two.
           ++ lib.concatMap (bind: [
             "--sandbox-bind"
             bind
@@ -477,29 +521,33 @@ in
         # nothing else, which is the whole of what the server writes: the Data
         # Directory is that directory, so there is nothing else to permit.
 
-        # The Watched Paths, and nothing else of the filesystem they sit in.
+        # The `paths`, read-write, and nothing else of the filesystem they sit
+        # in. Repositories and agent accounts alike: a session writes its own
+        # logs and settings into the account it runs under, so read-only would
+        # be the wrong half of the pair for either of them.
         #
-        # Bind mounts rather than `ReadWritePaths`, because a Watched Path is
+        # Bind mounts rather than `ReadWritePaths`, because one of these is
         # usually somewhere under `/home` and `ProtectHome` replaces that with
         # an empty tmpfs: a path merely permitted under one is a path that is
-        # not there to permit. Bound in, it exists inside the namespace and
-        # nothing beside it does — which is the sandbox saying exactly what the
-        # server says, rather than something wider that the server then narrows.
+        # not there to permit.
         #
         # Not prefixed with `-`, so a directory that has gone missing fails the
-        # unit. The server refuses to start on one too; both of them saying so
-        # beats a service that comes up watching nothing.
+        # unit rather than leaving a namespace quietly narrower than what the
+        # unit was told to expose.
         #
         # The Sandbox Configuration's binds come in the same way and for the
         # same reason: what the service cannot see it cannot hand to a session.
         #
         # This list is therefore the ceiling on what the settings page can add.
-        # A Watched Path or a bind typed there is saved into `config.yaml` and
-        # read at every use, but it resolves inside this namespace like anything
-        # else — so one naming a directory not here is reported on the page as
-        # unseen and does nothing until it is named here as well. That is the
-        # deliberate shape of it: a phone may widen what the server does with
-        # what the unit already exposes, and only the unit widens the exposure.
+        # A bind typed there is saved into `config.yaml` and read at every use,
+        # but it resolves inside this namespace like anything else — so one
+        # naming a directory not here is reported on the page as unseen and does
+        # nothing until it is named here as well. A Repo or an account is the
+        # same story with a different word for it: what this list does not name
+        # is answered *missing*, because inside the namespace it genuinely is.
+        # That is the deliberate shape of it: a phone may widen what the server
+        # does with what the unit already exposes, and only the unit widens the
+        # exposure.
         #
         # The build cache is first, and it is here by the same rule rather than
         # because something is currently hiding it: `CacheDirectory` above
@@ -510,11 +558,11 @@ in
         BindPaths = [
           cacheDir
         ]
-        ++ map (path: "${path}") cfg.watchedPaths
+        ++ map (path: "${path}") cfg.paths
         ++ map bindPath cfg.sandboxBinds;
 
         # A home the human named somewhere of their own, bound in for the reason
-        # a Watched Path is: it is usually under `/home`, which `ProtectHome`
+        # a `paths` entry is: it is usually under `/home`, which `ProtectHome`
         # replaces with an empty tmpfs, and a HOME that is not there is what a
         # tool reaching for one fails obscurely on. Read-only, because nothing is
         # read out of it any more and a service writing into somebody's own home

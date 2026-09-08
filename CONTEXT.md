@@ -11,30 +11,9 @@ still holds word for word, because the asking half is unchanged.
 
 ## The workbench
 
-**Watched Path**:
-A directory Verkstead is permitted to operate inside, said either in the
-environment at installation or in the workbench settings, the boundary being
-the union of the two. A security boundary rather than a convenience: nothing
-outside every Watched Path is written, worked in or registered — a Repo is
-registered only from within one, and so is the account an Agent Profile names.
-**Reading the names in a directory is the one thing it does not bound**, and
-deliberately: the workbench's path fields browse the filesystem into
-themselves, and the fields whose values the boundary says nothing about — a
-Watched Path being added, a Sandbox Configuration bind — browse anywhere the
-server can read. What that discloses is a listing of names to the one human the
-tailnet is the perimeter for, and a field that could not reach the directory it
-is about to be pointed at would be a field nobody could fill in. The fields
-whose values *are* bounded browse bounded, by the same admission their save
-makes. The installation's own are resolved once
-at startup and a missing one refuses to start; the settings' own are re-read
-whenever an admission is decided and never refuse anything — one that will not
-resolve covers nothing, with a line in the log — so a bare binary comes up
-watching nothing, admitting nothing, and is pointed at its first directory from
-the settings page's Paths section.
-_Avoid_: project root, workspace, scan path, allowed directory
-
 **Repo**:
-A git repository registered with Verkstead from inside a Watched Path.
+A git repository registered with Verkstead: an absolute path that is a
+repository root with a default branch, anywhere the server can read.
 Conversations attach to one — and while one is still a Draft with nothing checked
 out, the Repo dropdown on its composer moves it onto another. Its files stay the
 source of truth for task lists (`.tasks/`) and roadmaps (`docs/roadmaps/`) —
@@ -152,8 +131,9 @@ refused over, and the ones a crash left behind. A Conversation that is Done
 keeps its checkouts like any other — Done is not Closed, and a Follow-up steer
 works in them.
 Named for the Repo and what the checkout holds — the branch, or the base a
-detached one stands at — and it lives in the Data Directory rather than inside
-a Watched Path: Verkstead made it, so it goes among Verkstead's own things.
+detached one stands at — and it lives in the Data Directory rather than beside
+the Repo it was made from: Verkstead made it, so it goes among Verkstead's own
+things.
 **A session may rename the branch in its Worktree, and Verkstead follows it.**
 A recorded branch that is gone from the Repo while the checkout sits on another
 branch is a rename: the record moves to the new name, and every mirroring
@@ -175,10 +155,10 @@ on macOS, `%APPDATA%\Verkstead` on Windows, whichever binary was started, so
 that a Verkstead launched from an icon finds what one launched from a shell
 left. A run out of a checkout asks for the old behaviour by name, with
 `--data-dir .`. Everything in it is named by Verkstead rather than by whoever
-started it. Not a Watched Path and not the same kind of thing: a Watched Path
-bounds what the human may point Verkstead at, and this is Verkstead's own. The
-**Build Cache** and the **Log Directory** are Verkstead's own too, and neither
-of them is in here.
+started it. Not a directory the human points Verkstead at and not the same kind
+of thing: a Repo and an Agent Profile's account are somebody else's directories,
+and this is Verkstead's own. The **Build Cache** and the **Log Directory** are
+Verkstead's own too, and neither of them is in here.
 _Avoid_: state directory, work dir, scratch space, cache
 
 **Sandbox**:
@@ -238,10 +218,11 @@ _Avoid_: container, jail, isolation, environment
 **Sandbox Configuration**:
 The extra writable binds a Sandbox gets beyond that surface — a package
 registry's, a cache Verkstead does not provide — as one global set every Sandbox
-gets plus a per-Repo set composed over it. Configured where the Watched Paths
-are, which is now the installation *and* the workbench: `--sandbox-bind DIR` or
+gets plus a per-Repo set composed over it. Configured in two places, the
+installation *and* the workbench: `--sandbox-bind DIR` or
 `--sandbox-bind NAME=DIR`, and the same two grammars on the settings page's
-Paths section and on a Repo's own pane. The two sets union, and each keeps its
+Paths section, which holds these and nothing else, and on a Repo's own pane.
+The two sets union, and each keeps its
 own answer to a bind that is not there — the installation's refuses startup, the
 settings' is skipped for that session with a line in the log, because a phone is
 no place to be told a typo cost every session in a Repo its start. Every one of
@@ -339,6 +320,127 @@ asked for one is left alone. What it starts is an ordinary launch of the app
 with the browser left alone, because a login is not a moment to be handed a
 browser window.
 _Avoid_: autostart setting, startup preference, run at login option
+
+**Workbench Key**:
+The one long-lived secret that says a request is the human's browser rather
+than something a session started. A session's network is the host's own, so the
+loopback address an agent asks on is the address the workbench answers on and
+the socket cannot tell the two apart; what can is a secret kept in the **Data
+Directory**, which is not bound into a Sandbox. `workbench.key` beside the
+settings files rather than inside one — a file of its own, at mode `0600`, made
+at the first start and read back at every one after it — because clearing the
+GitHub token writes `secrets.yaml` empty and would take a key kept there with
+it.
+**What it gates is every page of the workbench and the viewer's own `/api/ui/`
+namespace**: without a cookie carrying the current key, a 401. **The link is
+the address with `?key=…` on it**, and opening one is the whole of logging in:
+the server sets the cookie and redirects to the same path without the
+parameter, so the secret is out of the URL bar, the history entry and any
+referrer before the page is drawn. A wrong key is worth exactly what none is.
+**What stays open is what is nobody's work to read**: `/api/v1/health`, the
+Conversation-scoped session API a session is already scoped to, and the service
+worker, web manifest and icons a phone installs the viewer from — a manifest is
+fetched without credentials and a service worker behind a gate is a push
+notification that never arrives, and there is nothing about anybody's work in
+an icon. The **Share Viewer** needs no exemption, being a file at GitHub that
+reads nothing of this server.
+**Where it is handed out is the install's own first-visit path**: the daemon's
+startup line carries `workbench=`, and on the desktop app the browser opened at
+startup and the tray's **Open** both go to the link, built afresh at each press
+so a browser that forgot the cookie is let in again.
+**Reset key**, its own section on **Remote Access**, re-issues it: everything
+holding the old one meets a 401 on its next request, and the browser that
+pressed stays in — a reset made from the phone is a reset made from the only
+device that could reach the server at all. One secret with a press behind it,
+rather than a key per device or a key that expires.
+_Avoid_: password, login, token, API key, session
+
+**Remote Access**:
+The settings section that puts this workbench in front of a phone: what this
+machine's Tailscale is doing, the switch that puts the tailnet name in front of
+the port Verkstead is listening on, and the **Workbench Key** handed over as
+something a camera can read. A card and a pane like every other section, and
+the answer to what used to be a `tailscale serve --bg 8422` somebody ran in a
+terminal.
+**Everything on it is read off the machine rather than configured**: two
+commands at the moment the pane opens, so a tailnet joined in a terminal and a
+serve set up by hand read here exactly as ones set up from this page would, and
+nothing of this section is in either settings file. Four answers, because each
+wants something different done about it — no `tailscale` at all is an install
+and the pane points at one; a binary with no daemon answering is a `tailscale
+up`, said in the words the command printed; up is the node's name and whether
+the workbench is served; and a shape this build cannot read says so rather than
+being read as the nearest state with room for it, because *cannot tell* under a
+switch offering to turn *off* on is the one thing this section must never say.
+**The serve switch is that reading rather than a wish**: a press answers with
+the machine read again, and the switch settles wherever the machine ended up.
+**The operator grant is its third answer.** Tailscale refuses a serve from a
+process that is neither root nor the tailnet's operator and the server has no
+privilege to raise, so a refused press hands back `sudo tailscale set
+--operator=<user>` for this machine's own user and the next press is the
+re-try. The desktop app has somebody at the machine to ask and a daemon has
+not, so where the app started the server that press goes through the platform's
+own password dialog first; the NixOS module makes the grant itself, so nobody
+on a host is shown a command they are also the one to run.
+**And the address by itself lets nobody in**, which is why the pane draws the
+login link rather than the address: a QR code, drawn in the browser from an
+encoder the viewer ships because a workbench standing behind a secret has no
+business handing it to a third party to render, with the link to copy beside it.
+**And the key those links carry is a section under them**, on every state of the
+pane rather than under the code: the key gates a machine that has never heard of
+a tailnet exactly as it gates one serving on it, so **Reset key** is not a press
+the serve switch can take away — turning remote access off is one of the moments
+somebody wants a link back.
+**The banner is how somebody finds it**: one line above the Timeline while the
+first grilling is writing its first Question Set — the first moment there is
+nothing to do at the desk — pointing here and dismissed with *Got it*. The
+dismissal is the server's, read back on every load, because a banner drawn at a
+desk and pointing at a phone would otherwise meet the human again on the very
+device it sent them to.
+_Avoid_: remote settings, tailnet settings, VPN, tunnel, exposing the workbench
+(it is served to a tailnet, never to the internet)
+
+**Onboarding Mode**:
+The state a Verkstead that cannot do anything yet is in, and while it is on the
+wizard at `/setup` is the only page there is: every other URL redirects there.
+What it is about is the **objective** — a sandbox, `git` and at least one of the
+four harnesses present; at least one **Agent Profile**; a git author. Present
+means a session would find it, so every probe resolves on the `PATH` inside the
+**Sandbox** rather than the server's own: a harness on the server's `PATH` and
+nowhere a session looks is a row that ticks and a session that cannot start. The
+GitHub token is not part of it — GitHub may not be in use at all, where git is
+not optional and its author is what git asks for.
+
+**The verdict is reached once, at startup**, and the mode stays on until the
+wizard's last Continue takes it off. There is no skip and no re-entry: nothing
+inside a run puts it back on, so deleting the last Profile mid-run is the
+settings page's own empty state to say rather than a first-run page thrown over
+work somebody has, and finishing the wizard is the one thing that ends it. What
+the wizard *shows* is a different thing from the verdict and is probed at every
+read — a `PATH` walked, one trivial `bwrap` run, the server's home looked in —
+so an install that lands in another window ticks its row within ten seconds
+without anybody touching the page, and a workbench nobody has open asks the
+machine nothing at all.
+
+**Three steps, in the order a machine is set up in**, and the order is not the
+human's to pick: an account is an account under a harness, and the harness has
+to be installed before there is one to log into; there is nothing to commit as
+until there is something to commit. The first names every dependency with this
+distro's own install command and where the binary has to land; the second offers
+the agent accounts already in the server's home as Profiles and holds its
+Continue until there is one, because a step that walked past a Profile would
+clear the mode onto the empty state a skip was rejected for; the third asks for
+the git author over fields prefilled with whatever the machine could say for
+itself, each labelled with where it was found. Which step is open is a fact
+about the browser in front of you and is kept on the device, never on the wire.
+The last Continue clears the mode and lands on the compose page.
+
+**Not the compose page's setup card**, which is a draft's own row of pickers —
+the Repo, the branch and base, the companions, the three Pairings — and was here
+first. That one settles a piece of work and is answered again for every one;
+this settles the machine, once, before there is any work to settle.
+_Avoid_: first-run wizard as the name of the state (the mode is the state, the
+wizard is the page), setup mode, install wizard, onboarding flow, skip
 
 **Companion Repo**:
 Another registered Repo a Conversation is given to work alongside its own,
@@ -910,24 +1012,45 @@ _Avoid_: quiet (one backend's answer, not the question), silent, asleep, stalled
 (that is a Conversation nothing is driving)
 
 **Agent Profile**:
-A named coding-agent account Verkstead can run a session under: an agent type,
-the account itself, and the models that account can run. **The account's shape
-is its type's**, rather than one shape every Profile is assumed to have — Claude
-Code's is the directory and config file pair bind-mounted at `~/.claude` /
-`~/.claude.json` inside the sandbox, and every backend after it keeps its whole
-account under one relocatable home — Codex's at `~/.codex`, Grok Build's at
-`~/.grok`, and OpenCode's at neither, opencode keeping no dot-directory of its
-own: its home is the directory its XDG config and data directories sit inside,
-and both are bound at those defaults in a HOME that is fresh enough for them to
-resolve there. Whichever it is, mounting it is what keeps accounts separate. A
-type is offered to the human only once it can launch the real thing: one that
-cannot would be a lie in a picker, so the form offers Claude, Codex, Grok Build
-and OpenCode, and a Profile of a type whose stage has not landed is one saved
-over the API until it does. Picking a type on the form asks for that type's own
-account paths. The models are a list and the list is the Profile's own, because
-different Profiles reach different accounts and each can launch different
-things; none of them is a default, so which one a session runs is always picked
-— as a Pairing, alongside the Profile itself.
+A coding-agent account Verkstead can run a session under: an agent type, the
+account itself, the models that account can run, and a name where there is
+anything for one to tell apart. **The account's shape is its type's**, rather
+than one shape every Profile is assumed to have — Claude Code's is the directory
+and config file pair bind-mounted at `~/.claude` / `~/.claude.json` inside the
+sandbox, and every backend after it keeps its whole account under one
+relocatable home — Codex's at `~/.codex`, Grok Build's at `~/.grok`, and
+OpenCode's at neither, opencode keeping no dot-directory of its own: its home is
+the directory its XDG config and data directories sit inside, and both are bound
+at those defaults in a HOME that is fresh enough for them to resolve there.
+Whichever it is, mounting it is what keeps accounts separate. A type is offered
+to the human only once it can launch the real thing: one that cannot would be a
+lie in a picker, so the form offers Claude, Codex, Grok Build and OpenCode, and
+a Profile of a type whose stage has not landed is one saved over the API until
+it does. Picking a type on the form asks for that type's own account paths. The
+models are a list and the list is the Profile's own, because different Profiles
+reach different accounts and each can launch different things; none of them is a
+default, so which one a session runs is always picked — as a Pairing, alongside
+the Profile itself.
+**A Profile need not be named.** The harness's mark and the model already say
+the whole of what most accounts are — the one Claude Code login on this machine,
+running Fable 5 — and a box that had to be filled in before a save would be a
+word invented to get past it. So the name is optional, and what a name is *for*
+is telling two accounts of one harness apart: **at most one unnamed Profile per
+harness**, and **no two named alike**. Both are rules the store holds rather
+than looks taken in front of a write, and which of the two refused a save is
+read off what was being saved — a Profile with a name can only have hit the
+second, and one without a name only the first.
+**An unnamed one reads as nothing wherever the harness and the model say
+enough**, which is most of the places a Profile is read: the pairing rows of a
+harness with one account, the second line of the Agent run card, the Brief's
+three pairing facts. Where a name has to be shown it reads **Default** — the
+settings card, which is a list of Profiles by name, and a picker holding two
+accounts of one harness, where the name is the difference between the rows. It
+is a word for a blank rather than a Profile anything falls back to: there is no
+default Profile, exactly as there is no default model. And a session run under
+one writes no name into its record, so a finished run draws as the harness and
+the model alone — which is how a record from before Verkstead wrote the name
+down already drew.
 **Removing one is always allowed**, and it is a delete rather than an
 unregistering: a Profile is a way in to an account, so one the human is finished
 with is one Verkstead should stop holding. Every Conversation that had chosen it
@@ -938,7 +1061,8 @@ account it launched under; the next session that Conversation would start finds
 no account and starts nothing, and a **Steer** is how the human picks another and
 carries on. What has already run goes on saying so, a session's record holding
 the Profile's name rather than a pointer to its row.
-_Avoid_: account, identity, persona, agent config
+_Avoid_: account, identity, persona, agent config, default profile (**Default**
+is what an unnamed one is *called*, not one anything falls back to)
 
 **Pairing**:
 An Agent Profile and one of the models it lists, chosen together, and what a

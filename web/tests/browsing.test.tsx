@@ -20,9 +20,10 @@
 //! - **How a browse ends.** The human closes it and the field keeps whatever it
 //!   holds. There is no picking here, so a close that changed the field would
 //!   be the one way to leave with something nobody typed or tapped.
-//! - **What a bounded field offers.** A browse inside the Watched Paths begins
-//!   at their roots and stops there on the way back out: a row above one leads
-//!   somewhere the server refuses, and offering it would be offering a dead end.
+//! - **Where a browse begins.** A field standing empty asks for no path at all,
+//!   and what the server answers that with is its own home. A starting point
+//!   rather than a ceiling: the way back out of it is a row like any other, so
+//!   nothing above the home is out of reach.
 //! - **What a field looking for a repository does with one.** It marks it and
 //!   stops there — the Repos' form is being filled in with a repository, so one
 //!   is the end of that browse rather than another level of it.
@@ -44,7 +45,7 @@ import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PathField } from "../src/PathField";
-import type { BrowseScope, DirectoryListing } from "../src/api/types";
+import type { DirectoryListing } from "../src/api/types";
 import chrome from "../src/picking.module.css";
 import {
   browse,
@@ -62,7 +63,6 @@ import {
 } from "./fields";
 import { askedFor, json, serving, whenever } from "./serving";
 import listing from "./fixtures/directories.json" with { type: "json" };
-import roots from "./fixtures/directories-roots.json" with { type: "json" };
 
 /// `/home/ada/src` as the server answered for it: two directories, one of them
 /// a repository, and the file and the dotfile a field showing directories
@@ -70,7 +70,8 @@ import roots from "./fixtures/directories-roots.json" with { type: "json" };
 const SRC = listing as DirectoryListing;
 
 /// The level above it, written the way the server writes one — directories
-/// first and then by name, dotfiles among them.
+/// first and then by name, dotfiles among them. The server's own home, which is
+/// what a field standing empty is answered with.
 const HOME: DirectoryListing = {
   Listed: {
     path: "/home/ada",
@@ -83,13 +84,8 @@ const HOME: DirectoryListing = {
   },
 };
 
-/// And where a browse bounded by the Watched Paths begins, as the server's own
-/// tests wrote it: the roots themselves, which is the one listing with no
-/// directory above it. The same Verkstead as the listing above — its watched
-/// path is the directory that listing is of.
-const ROOTS = roots as DirectoryListing;
-
-/// And the top of the anywhere scope, which is what an empty field asks for.
+/// And the top of the machine, which is where a browse out of the home goes on
+/// to: nothing here stops at any level.
 const ROOT: DirectoryListing = {
   Listed: {
     path: "/",
@@ -97,10 +93,13 @@ const ROOT: DirectoryListing = {
   },
 };
 
-/// The three levels, each answered for however often it is asked.
+/// The levels, each answered for however often it is asked — and the home twice
+/// over, being both a directory somebody may type and what the server hands back
+/// to a field that has typed nothing.
 function theFilesystem(...also: Array<ReturnType<typeof whenever>>) {
   return serving(
-    whenever(at(null), json(ROOT)),
+    whenever(at(null), json(HOME)),
+    whenever(at("/"), json(ROOT)),
     whenever(at("/home"), json({ Listed: { path: "/home", entries: [
       { name: "ada", path: "/home/ada", kind: "Directory" },
     ] } })),
@@ -115,12 +114,11 @@ afterEach(() => {
 });
 
 /// The field, with its value held where a form would hold it — and as whichever
-/// kind of field the test is about: where its value may be, and whether a
-/// repository is what it is looking for.
+/// kind of field the test is about: whether a repository is what it is looking
+/// for, and which of what came back it shows.
 function mounted(
   at = "",
   how: {
-    scope?: BrowseScope;
     repositories?: boolean;
     files?: boolean;
     dotfiles?: boolean;
@@ -137,7 +135,6 @@ function mounted(
       <label for="where">Where</label>
       <PathField
         id="where"
-        scope={how.scope ?? "anywhere"}
         repositories={how.repositories}
         files={how.files}
         dotfiles={how.dotfiles}
@@ -224,13 +221,14 @@ describe("what the rows are", () => {
     expect(rows(WHERE)).toEqual(["Up to /home", "work"]);
   });
 
-  it("asks for the top of the scope when the field is empty", async () => {
+  it("asks for no path at all when the field is empty", async () => {
     theFilesystem();
     mounted();
     await browsed();
 
-    // Nothing above `/`, so no way back out of it.
-    expect(rows(WHERE)).toEqual(["home"]);
+    // Which the server answers with its own home, and it draws like any other
+    // directory: the way back out at the top, and the dotfile left out.
+    expect(rows(WHERE)).toEqual(["Up to /home", "src", "work"]);
   });
 
   /// One directory per level and no walking: the filter moves over rows already
@@ -419,80 +417,53 @@ describe("what the server said instead of rows", () => {
   });
 });
 
-describe("a browse bounded by the watched paths", () => {
-  /// The one root that Verkstead watches, and what is under it — the two
-  /// fixtures the server's own tests wrote, which are the same Verkstead seen
-  /// from its boundary and from inside it.
-  const EMPTY: DirectoryListing = {
-    Listed: { path: "/home/ada/src/assets", entries: [] },
-  };
-
-  function theBoundary(...also: Array<ReturnType<typeof whenever>>) {
-    return serving(
-      whenever(at(null, "watched"), json(ROOTS)),
-      whenever(at("/home/ada/src", "watched"), json(SRC)),
-      whenever(at("/home/ada/src/assets", "watched"), json(EMPTY)),
-      ...also,
-    );
-  }
-
-  /// Where a bounded browse begins: the roots themselves, which is the listing
-  /// with nothing above it.
-  it("offers the watched roots to a field standing empty", async () => {
-    theBoundary();
-    mounted("", { scope: "watched" });
+describe("where a browse begins", () => {
+  /// The home the empty field is answered with, drawn like the directory it is:
+  /// there is no boundary left for it to be the edge of.
+  it("opens on the server's own home", async () => {
+    theFilesystem();
+    mounted();
     await browsed();
 
-    expect(rows(WHERE)).toEqual(["src"]);
+    expect(rows(WHERE)).toEqual(["Up to /home", "src", "work"]);
   });
 
-  /// And where it stops going back: above a root is outside the boundary, and
-  /// the server would answer that row with a refusal.
-  it("offers no way above a root it has drilled into", async () => {
-    theBoundary();
-    const { value } = mounted("", { scope: "watched" });
+  /// And walks out of it: the row above the home goes there like any other, so
+  /// a repository or an account above it is still something a browse reaches.
+  it("offers the way out of the home like any other level", async () => {
+    theFilesystem();
+    const { value } = mounted();
     await browsed();
 
-    tap(WHERE, "src");
+    tap(WHERE, "Up to /home");
 
-    expect(value()).toBe("/home/ada/src");
-    await waitFor(() => expect(rows(WHERE)).toContain("assets"));
+    expect(value()).toBe("/home");
+    await waitFor(() => expect(rows(WHERE)).toEqual(["Up to /", "ada"]));
 
-    // The directories under it, and nothing leading out of it: the way back is
-    // a row only while there is somewhere this field may go back to.
-    expect(rows(WHERE)).toEqual(["assets", "verkstead"]);
+    tap(WHERE, "Up to /");
 
-    tap(WHERE, "assets");
-    await waitFor(() => expect(rows(WHERE)).toEqual(["Up to /home/ada/src"]));
+    expect(value()).toBe("/");
+    await waitFor(() => expect(rows(WHERE)).toEqual(["home"]));
   });
 });
 
 describe("a field looking for a repository", () => {
-  function theBoundary(...also: Array<ReturnType<typeof whenever>>) {
-    return serving(
-      whenever(at(null, "watched"), json(ROOTS)),
-      whenever(at("/home/ada/src", "watched"), json(SRC)),
-      ...also,
-    );
-  }
-
   /// Marked, because it is the thing the Repos' form is being filled in with:
   /// the row a human is looking for should not read as one more directory.
   it("draws a repository marked and the directories beside it plain", async () => {
-    theBoundary();
-    mounted("/home/ada/src/", { scope: "watched", repositories: true });
+    theFilesystem();
+    mounted("/home/ada/src/", { repositories: true });
     await browsed();
 
-    expect(rows(WHERE)).toEqual(["assets", "verkstead"]);
+    expect(rows(WHERE)).toEqual(["Up to /home/ada", "assets", "verkstead"]);
     expect(marked(WHERE)).toEqual(["verkstead"]);
   });
 
   /// And a leaf: the browse was going here, so a tap writes it and stops rather
   /// than asking the server what is inside a repository nobody wants to see.
   it("writes a repository into the field without opening it", async () => {
-    const fetching = theBoundary();
+    const fetching = theFilesystem();
     const { value } = mounted("/home/ada/src/", {
-      scope: "watched",
       repositories: true,
     });
     await browsed();
@@ -500,11 +471,12 @@ describe("a field looking for a repository", () => {
     tap(WHERE, "verkstead");
 
     expect(value()).toBe("/home/ada/src/verkstead");
-    expect(askedFor(fetching, at("/home/ada/src/verkstead", "watched"))).toBe(0);
+    expect(askedFor(fetching, at("/home/ada/src/verkstead"))).toBe(0);
 
-    // Still on the directory holding it, and still down: closing is the
-    // human's here as it is everywhere else in this dropdown.
-    expect(rows(WHERE)).toEqual(["verkstead"]);
+    // Still on the directory holding it, filtered to the row that was taken —
+    // and still down: closing is the human's here as it is everywhere else in
+    // this dropdown.
+    expect(rows(WHERE)).toEqual(["Up to /home/ada", "verkstead"]);
     expect(browsing(WHERE)).toBe(true);
   });
 

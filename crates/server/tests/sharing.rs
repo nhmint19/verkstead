@@ -34,7 +34,7 @@ use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{SharedConversation, TimelineEvent};
 use verkstead_schema::QuestionSet;
-use verkstead_server::{WatchedPaths, open_database, router, router_watching, store};
+use verkstead_server::{open_database, router, router_keeping, store};
 // The `gh` half, which the six tests that reach GitHub want — see
 // [`app_asking_github`] for what keeps them, and these, off Windows.
 #[cfg(unix)]
@@ -576,7 +576,7 @@ async fn a_share_says_nothing_about_the_machine_it_was_taken_on() {
     let profile = store::create_profile(
         &pool,
         &store::ProfileFacts {
-            name: "fable".to_owned(),
+            name: Some("fable".to_owned()),
             account: store::Account::Claude {
                 claude_dir: PathBuf::from("/srv/accounts/fable/.claude"),
                 config_file: PathBuf::from("/srv/accounts/fable/.claude.json"),
@@ -658,21 +658,17 @@ async fn a_share_says_nothing_about_the_machine_it_was_taken_on() {
 /// a gist.
 #[tokio::test]
 async fn a_share_carries_the_files_names_and_never_their_bytes() {
-    let watched = tempfile::tempdir().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
     let dir = tempfile::tempdir().unwrap();
 
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
-    let app = router_watching(
-        pool.clone(),
-        WatchedPaths::resolve(&[watched.path().to_owned()]).unwrap(),
-        dir.path().to_owned(),
-    );
+    let app = router_keeping(pool.clone(), dir.path().to_owned());
 
     let repo = store::register_repo(
         &pool,
-        &repository(watched.path().join("verkstead")),
+        &repository(elsewhere.path().join("verkstead")),
         "verkstead",
         "main",
     )

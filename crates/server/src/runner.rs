@@ -4084,7 +4084,7 @@ mod tests {
         store::Pairing {
             profile: store::Profile {
                 id: 1,
-                name: model.to_owned(),
+                name: Some(model.to_owned()),
                 account: store::Account::Claude {
                     claude_dir: PathBuf::from("/data/claude"),
                     config_file: PathBuf::from("/data/claude.json"),

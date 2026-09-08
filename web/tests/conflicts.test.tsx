@@ -166,7 +166,6 @@ describe("the pane", () => {
           trim: { enabled: true, days: "" },
           delete: { enabled: false, days: "" },
         },
-        watched_paths: [],
         sandbox_binds: [],
         conflict_resolution: "Rebase",
         share_on_done: UNSET.share_on_done,

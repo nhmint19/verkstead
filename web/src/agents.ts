@@ -70,8 +70,25 @@ export type Said = {
   /// model was paired beside it, which is half a choice and reads as one.
   model: string | null;
   /// And the name of the Profile whose account it ran as.
-  profile: string;
+  ///
+  /// `null` is a Profile nobody named, which reads as [`DEFAULT_PROFILE`]
+  /// wherever a name has to be said at all. The empty string is a *record* with
+  /// no name in it — a run from before Verkstead wrote one down, and a run under
+  /// an unnamed Profile alike — and reads as nothing: there is no account to
+  /// point at, so there is nothing to call it.
+  profile: string | null;
 };
+
+/// What an unnamed Profile is called where a name has to be shown.
+///
+/// A Profile may go unnamed, and most readings say nothing at all where the
+/// backend's mark and the model already say the whole of what it is — see
+/// [`tells`]. This is the word for the readings that cannot: a picker with two
+/// accounts of one backend in it, where the name is the difference between the
+/// rows, and the settings card, which is a list of Profiles by name. The server
+/// says the same word in the prose it writes about an account — see
+/// `crates/server/src/profiles.rs`.
+export const DEFAULT_PROFILE = "Default";
 
 /// How one of them reads: the backend, the model, and the Profile's own name
 /// where that is what tells two of them apart.
@@ -91,10 +108,7 @@ export function reading(said: Said, saved: ProfileEntry[] | undefined): string {
 
   // Joined rather than appended, so that a record holding nothing but a profile
   // name reads as the name rather than as an em dash with a name after it.
-  return [
-    words(harness, said.model, model),
-    tells(said, saved) ? said.profile : "",
-  ]
+  return [words(harness, said.model, model), named(said, saved)]
     .filter((part) => part !== "")
     .join(" — ");
 }
@@ -140,6 +154,21 @@ function brands(harness: string, model: string): boolean {
   return new RegExp(`\\b${harness.split(" ")[0]!}\\b`, "i").test(model);
 }
 
+/// The Profile's half of the reading: its name where the name is what tells
+/// this apart from another under the same backend, and nothing where it is not.
+///
+/// [`DEFAULT_PROFILE`] for a Profile nobody named — the name has to be said, and
+/// that is what it is called. The empty string stays empty: a record with no
+/// name in it is not an account to point at, so what it draws is the backend and
+/// the model alone.
+function named(said: Said, saved: ProfileEntry[] | undefined): string {
+  if (!tells(said, saved)) {
+    return "";
+  }
+
+  return said.profile === null ? DEFAULT_PROFILE : said.profile;
+}
+
 /// Whether the Profile's own name is what tells this reading apart from another
 /// under the same backend.
 ///
@@ -182,7 +211,7 @@ export function briefly(said: Said, saved: ProfileEntry[] | undefined): string {
     // reading of the account's name alone would say less than the control it
     // replaced.
     model ?? (said.agent === null ? "" : AGENT_NAME[said.agent]),
-    tells(said, saved) ? said.profile : "",
+    named(said, saved),
   ]
     .filter((part) => part !== "")
     .join(" — ");
@@ -191,11 +220,14 @@ export function briefly(said: Said, saved: ProfileEntry[] | undefined): string {
 /// What one finished or running session was launched under, off the record it
 /// wrote as it started.
 ///
-/// The three fields under three other names, and one coercion: a session from
-/// before Verkstead wrote a Profile's name down has none, and no name is the
-/// empty one — the reading drops an empty half rather than drawing an em dash
-/// with nothing after it. A run recorded with none of the three reads as
-/// nothing at all, which is each site's own fallback to say instead.
+/// The three fields under three other names, and one coercion: a record with no
+/// name in it becomes the empty one, which the reading drops rather than drawing
+/// an em dash with nothing after it. Two things arrive that way — a session from
+/// before Verkstead wrote a Profile's name down, and one launched under a
+/// Profile nobody named — and both are a run with no account to point at, so
+/// both read as the backend and the model alone. A run recorded with none of the
+/// three reads as nothing at all, which is each site's own fallback to say
+/// instead.
 export function ran(output: AgentOutputEvent): Said {
   return {
     agent: output.agent_type,

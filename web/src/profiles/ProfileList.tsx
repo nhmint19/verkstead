@@ -6,8 +6,8 @@
 //! typed into with a dropdown under it that browses the filesystem a directory
 //! at a time. What the form is for has not moved: it names an account, and what
 //! the server does about the paths is still the only thing that decides whether
-//! it is taken. The browse is bounded the way these fields are, in the watched
-//! scope, so it offers nothing the save would turn away.
+//! it is taken. The browse reaches anywhere the server can read, an account
+//! being allowed to sit anywhere — the human's own login under `~` above all.
 //!
 //! Two things about these fields are their own, and both come off what they are
 //! for. They point at dotfiles — a `.claude` beside a `.claude.json` — so they
@@ -21,6 +21,13 @@
 //! with nothing built from them yet, so editing one is filling the same form in
 //! with what it already says — a second form for the same fields would be a
 //! second opinion about what a profile is.
+//!
+//! And one form does both places a profile is written. The onboarding wizard's
+//! accounts step has to let somebody with no profile at all make one before it
+//! will let them past, so [`ProfileForm`] is its own component below and that
+//! step draws it — see `../setup/Accounts.tsx`. What differs between the two is
+//! where a save goes and what a save that was taken means, and both of those
+//! are the caller's.
 //!
 //! Which fields those are comes off the profile's agent type rather than being
 //! written into the form: an account is that type's own shape — Claude's pair of
@@ -102,7 +109,7 @@ import {
   editProfile,
   listProfiles,
 } from "../api/client";
-import { AGENT_NAME, type AgentType } from "../agents";
+import { AGENT_NAME, DEFAULT_PROFILE, type AgentType } from "../agents";
 import type {
   Broken,
   ProfileAccount,
@@ -127,26 +134,21 @@ import styles from "./ProfileList.module.css";
 export const PROFILE_REFUSAL: Record<ProfileSaved, string> = {
   Saved: "",
   NoSuchProfile: "That profile is gone.",
-  Nameless: "Give the profile a name — it is what you pick it by.",
   Modelless:
     "Give the profile at least one model — a session has to know what it runs on.",
   NameTaken: "Another profile is called that already.",
+  DefaultTaken:
+    "That agent already has a profile with no name. Name this one — a name is what tells two accounts of one agent apart.",
   DirNotAbsolute:
     "Give the claude directory's absolute path, starting with a slash.",
   DirMissing: "There is nothing at the claude directory's path.",
-  DirOutsideWatchedPaths:
-    "That claude directory is outside the watched paths, so Verkstead will not touch it.",
   NotADirectory: "That is not a directory — `~/.claude` is mounted from one.",
   ConfigNotAbsolute:
     "Give the config file's absolute path, starting with a slash.",
   ConfigMissing: "There is nothing at the config file's path.",
-  ConfigOutsideWatchedPaths:
-    "That config file is outside the watched paths, so Verkstead will not touch it.",
   NotAFile: "That is not a file — `~/.claude.json` is mounted from one.",
   HomeNotAbsolute: "Give the home's absolute path, starting with a slash.",
   HomeMissing: "There is nothing at the home's path.",
-  HomeOutsideWatchedPaths:
-    "That home is outside the watched paths, so Verkstead will not touch it.",
   HomeNotADirectory:
     "That is not a directory — an account's home is mounted from one.",
 };
@@ -166,7 +168,6 @@ export const BROKEN: Record<Broken, string> = {
   DirMissing: "Its claude directory is gone.",
   ConfigMissing: "Its config file is gone.",
   HomeMissing: "The home it kept its account under is gone.",
-  OutsideWatchedPaths: "Its account now points outside the watched paths.",
 };
 
 /// One path an account of some agent type is: the key it is held under, what the
@@ -275,8 +276,8 @@ const BLANK_ACCOUNT: Record<AgentType, ProfileAccount> = {
 /// A Claude account because it is the first of [`AGENT_TYPES`], rather than
 /// because it is the only one. What this is not is a hard-coded pair: the
 /// fields drawn under it come off the type this names.
-const BLANK: ProfileEdit = {
-  name: "",
+export const BLANK_PROFILE: ProfileEdit = {
+  name: null,
   account: BLANK_ACCOUNT.Claude,
   models: [],
 };
@@ -419,7 +420,12 @@ function ProfileCard(props: {
         open={props.open}
         press={props.press}
       >
-        <span class={styles.title}>{props.profile.name}</span>
+        {/* A card is a list read down by name, so the one nobody named still
+            needs a word to be read by — see [`DEFAULT_PROFILE`](../agents.ts),
+            which is that word wherever a name has to be shown. */}
+        <span class={styles.title}>
+          {props.profile.name ?? DEFAULT_PROFILE}
+        </span>
         <span class={styles.meta}>
           {/* Every model, because the list is the whole of what a profile says
               it can run and a card showing one of them would be picking. */}
@@ -469,62 +475,26 @@ export function ProfilePane(props: {
   const saved = (): ProfileEntry | undefined =>
     profiles.data?.find((profile) => profile.id === props.profile);
 
-  // What has been typed, or `null` while nothing has — the fields follow the
-  // saved Profile until somebody touches them, the way the credentials' do. It
-  // matters here because the pane is built before the read that fills it lands.
-  const [edited, setEdited] = createSignal<ProfileEdit | null>(null);
-  const [refused, setRefused] = createSignal<ProfileSaved | null>(null);
-  // What is in the field beside the picks: an id this build has not learned,
-  // while it is being typed. Its own signal rather than one of the form's
-  // fields, because it is not part of the profile until it is added.
-  const [typing, setTyping] = createSignal("");
   const [refusedRemoval, setRefusedRemoval] =
     createSignal<ProfileDeleted | null>(null);
 
-  /// What is in the fields: what was typed, or what the Profile says, or
-  /// nothing at all for one that does not exist yet.
+  /// What the fields start from: what this Profile says, or nothing at all for
+  /// one that does not exist yet.
   ///
   /// The paths are the resolved ones the server recorded rather than whatever
   /// was typed to save them — those are what will be bind-mounted, and the point
   /// of showing them is that they can be checked.
-  const form = (): ProfileEdit => {
-    const typed = edited();
-    if (typed !== null) {
-      return typed;
-    }
-
+  const initial = (): ProfileEdit => {
     const profile = saved();
+
     return profile === undefined
-      ? BLANK
+      ? BLANK_PROFILE
       : {
           name: profile.name,
           account: { ...profile.account },
           models: [...profile.models],
         };
   };
-
-  /// The fields this profile's type is asked for, which is what the form draws
-  /// between the models and the buttons.
-  const fields = (): AccountField[] => ACCOUNT_FIELDS[form().account.agent_type];
-
-  const save = useMutation(() => ({
-    mutationFn: (profile: ProfileEdit) => {
-      const which = props.profile;
-      return which === "new" ? createProfile(profile) : editProfile(which, profile);
-    },
-    onSuccess: (outcome: ProfileSaved) => {
-      if (outcome !== "Saved") {
-        setRefused(outcome);
-        return;
-      }
-
-      void queries.invalidateQueries({ queryKey: ["profiles"] });
-      // A rewritten profile is shown on whichever conversation chose it, and
-      // whether one is ready to grill turns on what its profiles are.
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
-      props.done();
-    },
-  }));
 
   const remove = useMutation(() => ({
     mutationFn: (id: number) => deleteProfile(id),
@@ -542,9 +512,165 @@ export function ProfilePane(props: {
     },
   }));
 
+  return (
+    <>
+      <PaneSticky>
+        <PaneHead
+          back={{ to: "Settings", go: props.back }}
+          title={adding() ? "Add a profile" : "Edit profile"}
+        />
+      </PaneSticky>
+
+      {/* The blank form first, so that adding one never waits on a read it has
+          no use for. Everything below it is about a Profile that is saved, and
+          the fallback is what is left once the list has been read and has no
+          such Profile in it. */}
+      <Switch fallback={<Empty>That profile is gone.</Empty>}>
+        <Match when={adding() || saved() !== undefined}>
+          {/* The fields themselves, which are the same fields wherever a
+              Profile is written: this pane sends them to the endpoint that
+              belongs to the Profile it is about, and the onboarding wizard
+              sends them to the create. */}
+          <ProfileForm
+            initial={initial}
+            submit={adding() ? "Save" : "Save changes"}
+            save={(profile) => {
+              const which = props.profile;
+
+              return which === "new"
+                ? createProfile(profile)
+                : editProfile(which, profile);
+            }}
+            saved={() => {
+              void queries.invalidateQueries({ queryKey: ["profiles"] });
+              // A rewritten profile is shown on whichever conversation chose
+              // it, and whether one is ready to grill turns on what its
+              // profiles are.
+              void queries.invalidateQueries({ queryKey: ["conversation"] });
+              props.done();
+            }}
+          />
+
+          {/* The one press that is about a saved Profile rather than about what
+              is typed into the form, and so belongs to no Profile that does not
+              exist yet. The agent type used to be said here; it is picked in the
+              form now, which is where a fact somebody can change belongs. */}
+          <Show when={saved()}>
+            {(profile) => (
+              <section class={styles.standing}>
+                <div class={styles.actions}>
+                  <button
+                    type="button"
+                    class={styles.remove}
+                    disabled={remove.isPending}
+                    onClick={() => remove.mutate(profile().id)}
+                  >
+                    Remove
+                  </button>
+                </div>
+
+                {/* The one thing a removal can be refused for — a profile
+                    another tab took away first — said here because here is
+                    where the press was made. */}
+                <Show when={refusedRemoval()}>
+                  {(outcome) => (
+                    <ErrorLine class={styles.failure}>
+                      {PROFILE_REMOVAL_REFUSAL[outcome()]}
+                    </ErrorLine>
+                  )}
+                </Show>
+                <Show when={remove.isError}>
+                  <ErrorLine class={styles.failure}>
+                    The profile could not be removed: {remove.error?.message}
+                  </ErrorLine>
+                </Show>
+              </section>
+            )}
+          </Show>
+        </Match>
+
+        <Match when={profiles.isPending}>
+          <Empty>Loading…</Empty>
+        </Match>
+        <Match when={profiles.isError}>
+          <ErrorLine>
+            Could not read the agent profiles: {profiles.error?.message}
+          </ErrorLine>
+        </Match>
+      </Switch>
+    </>
+  );
+}
+
+/// The fields a Profile is written in, wherever it is written.
+///
+/// Its own component because there are two places a Profile is made now: the
+/// settings pane above, and the onboarding wizard's accounts step, where
+/// somebody with no Profile at all has to be able to make one before the wizard
+/// will let them past — see `setup/Accounts.tsx`. One form for both, because a
+/// second set of fields would be a second opinion about what a Profile is, and
+/// the refusals it draws are the server's either way.
+///
+/// What differs between the two is where a save goes and what a save that was
+/// taken means, so both are the caller's: this holds what is typed, sends it,
+/// and draws what came back.
+export function ProfileForm(props: {
+  /// What the fields start from, read on every render: the Profile being
+  /// rewritten, or a blank one. Followed until somebody types, the way the
+  /// credentials' fields follow theirs — it matters because a pane is built
+  /// before the read that fills it lands.
+  initial: () => ProfileEdit;
+
+  /// What the button says, which is the one word that differs between adding
+  /// one and rewriting one.
+  submit: string;
+
+  /// Where a save goes.
+  save: (profile: ProfileEdit) => Promise<ProfileSaved>;
+
+  /// And what a save that was taken means to whoever asked for it. A refusal
+  /// never reaches here: it is about what is in the fields, and it is drawn
+  /// under them.
+  saved: () => void;
+}): JSX.Element {
+  // What has been typed, or `null` while nothing has.
+  const [edited, setEdited] = createSignal<ProfileEdit | null>(null);
+  const [refused, setRefused] = createSignal<ProfileSaved | null>(null);
+  // What is in the field beside the picks: an id this build has not learned,
+  // while it is being typed. Its own signal rather than one of the form's
+  // fields, because it is not part of the profile until it is added.
+  const [typing, setTyping] = createSignal("");
+
+  /// What is in the fields: what was typed, or what the caller started them
+  /// with.
+  const form = (): ProfileEdit => edited() ?? props.initial();
+
+  /// The fields this profile's type is asked for, which is what the form draws
+  /// between the models and the buttons.
+  const fields = (): AccountField[] => ACCOUNT_FIELDS[form().account.agent_type];
+
+  const save = useMutation(() => ({
+    mutationFn: (profile: ProfileEdit) => props.save(profile),
+    onSuccess: (outcome: ProfileSaved) => {
+      if (outcome !== "Saved") {
+        setRefused(outcome);
+        return;
+      }
+
+      // The fields go back to whatever the caller starts them with, which is
+      // what leaves a form that stays open — the wizard's — empty for the next
+      // one rather than holding the Profile that has just been saved.
+      setEdited(null);
+      props.saved();
+    },
+  }));
+
   /// The name, typed into.
+  ///
+  /// An empty box is the null rather than the empty string: a profile may go
+  /// unnamed, and *no name* is a thing to send rather than a name of no letters.
   const typedName = (value: string) => {
-    setEdited({ ...form(), name: value });
+    setEdited({ ...form(), name: value === "" ? null : value });
     setRefused(null);
   };
 
@@ -645,242 +771,184 @@ export function ProfilePane(props: {
   };
 
   return (
-    <>
-      <PaneSticky>
-        <PaneHead
-          back={{ to: "Settings", go: props.back }}
-          title={adding() ? "Add a profile" : "Edit profile"}
-        />
-      </PaneSticky>
+    <form class={styles.form} onSubmit={submit}>
+      {/* Left empty where there is nothing to tell apart, which is the
+          ordinary case: one account per agent, read by the agent's own
+          mark and the model beside it. An agent takes one such profile,
+          and the second of them is refused until it is named. */}
+      <label for="profile-name">
+        Name, where two accounts of one agent need telling apart
+      </label>
+      <input
+        id="profile-name"
+        type="text"
+        autocapitalize="off"
+        autocorrect="off"
+        spellcheck={false}
+        placeholder="work"
+        value={form().name ?? ""}
+        onInput={(ev) => typedName(ev.currentTarget.value)}
+      />
 
-      {/* The blank form first, so that adding one never waits on a read it has
-          no use for. Everything below it is about a Profile that is saved, and
-          the fallback is what is left once the list has been read and has no
-          such Profile in it. */}
-      <Switch fallback={<Empty>That profile is gone.</Empty>}>
-        <Match when={adding() || saved() !== undefined}>
-          <form class={styles.form} onSubmit={submit}>
-            <label for="profile-name">Name</label>
-            <input
-              id="profile-name"
-              type="text"
-              autocapitalize="off"
-              autocorrect="off"
-              spellcheck={false}
-              placeholder="work"
-              value={form().name}
-              onInput={(ev) => typedName(ev.currentTarget.value)}
-            />
+      {/* Ticked rather than typed, and no default among them: the list
+          says what this account can launch, and which of them a session
+          runs is picked when the session is set up.
 
-            {/* Ticked rather than typed, and no default among them: the list
-                says what this account can launch, and which of them a session
-                runs is picked when the session is set up.
+          A fieldset with a legend rather than a label, because this is one
+          question with several answers and a `<label for>` names one
+          control. */}
+      <fieldset class={styles.models}>
+        <legend>Models</legend>
 
-                A fieldset with a legend rather than a label, because this is one
-                question with several answers and a `<label for>` names one
-                control. */}
-            <fieldset class={styles.models}>
-              <legend>Models</legend>
-
-              <ul class={styles.picks}>
-                <For each={offered()}>
-                  {(model) => (
-                    <li>
-                      <label>
-                        <input
-                          type="checkbox"
-                          checked={form().models.includes(model)}
-                          onChange={(ev) =>
-                            pick(model, ev.currentTarget.checked)
-                          }
-                        />
-                        {prettify(model)}
-                        {/* And whose it is, where it is not this account's:
-                            inside the label rather than beside it, unlike the
-                            id below, because it is about the tick rather than
-                            about the model — a reader who cannot see the row
-                            hears it as part of what they are ticking. */}
-                        <Show when={elsewhere(model)}>
-                          {(agent) => (
-                            <span class={styles.elsewhere}>
-                              {AGENT_NAME[agent()]}'s model, which this account
-                              cannot launch
-                            </span>
-                          )}
-                        </Show>
-                      </label>
-                      {/* The id beside the name, for whoever is checking: the
-                          name is this viewer's word and the id is what the
-                          session is launched with. Outside the label so it is
-                          not read out as part of the tick's name, and not drawn
-                          at all beside one the list does not know — there the id
-                          is the name already. */}
-                      <Show when={known(model)}>
-                        <code>{model}</code>
-                      </Show>
-                    </li>
-                  )}
-                </For>
-              </ul>
-
-              {/* The way past the list. It goes stale the week another model
-                  ships, and a profile that could not be given the new one until
-                  Verkstead was rebuilt would be a form standing in front of the
-                  work. What is added here is a pick like any other: it joins the
-                  ticks above, ticked, and unticking it takes it away again. */}
-              <label for="profile-model">Another model id</label>
-              <div class={styles.byHand}>
-                <input
-                  id="profile-model"
-                  type="text"
-                  autocapitalize="off"
-                  autocorrect="off"
-                  spellcheck={false}
-                  placeholder="claude-opus-6"
-                  value={typing()}
-                  onInput={(ev) => setTyping(ev.currentTarget.value)}
-                  // Return adds the id rather than saving the profile, which is
-                  // what a return in a text field does to a form left alone.
-                  onKeyDown={(ev) => {
-                    if (ev.key === "Enter") {
-                      ev.preventDefault();
-                      add();
+        <ul class={styles.picks}>
+          <For each={offered()}>
+            {(model) => (
+              <li>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={form().models.includes(model)}
+                    onChange={(ev) =>
+                      pick(model, ev.currentTarget.checked)
                     }
-                  }}
-                />
-                <button
-                  type="button"
-                  disabled={typing().trim() === ""}
-                  onClick={add}
-                >
-                  Add
-                </button>
-              </div>
-            </fieldset>
-
-            {/* Which agent this account is for, over the fields it decides:
-                picking another type is asking for that type's own paths, so what
-                is under this changes with it and nothing typed for the old one
-                is carried across. */}
-            <label for="profile-agent_type">Agent</label>
-            {/* The app's own listbox rather than a `<select>`, because each row
-                carries that backend's brand mark and an `<option>` holds
-                nothing but text — the one row of this form where there is
-                something to draw beside the words.
-
-                A profile of a type this build draws but does not offer reads as
-                nothing chosen rather than as whichever type happens to be first,
-                which is the listbox's own guarantee and the honest reading of a
-                row that is not on offer. Its account is untouched by that: what
-                the form sends is what was read back, until another type is
-                picked. */}
-            <Listbox
-              id="profile-agent_type"
-              class={styles.agentType}
-              options={AGENT_TYPES}
-              value={(agent_type) => agent_type}
-              label={(agent_type) => AGENT_NAME[agent_type]}
-              mark={(agent_type) => agent_type}
-              chosen={form().account.agent_type}
-              pick={(picked) => pickedType(picked as AgentType)}
-            />
-
-            {/* The account, in whatever shape its agent type keeps one: the
-                fields come off the type rather than being written here, so a
-                backend arriving is a row in `ACCOUNT_FIELDS` and nothing
-                else. */}
-            <For each={fields()}>
-              {(field) => (
-                <>
-                  <label for={`profile-${field.key}`}>{field.label}</label>
-                  {/* Browsed or typed, which the form cannot tell apart and has
-                      no reason to: what Save sends is whatever the box holds,
-                      and the server's answer about it is unchanged. Inside the
-                      Watched Paths, because that is where an account may be —
-                      and showing the dotfiles these fields exist to point at,
-                      with the files as well where the field names one. */}
-                  <PathField
-                    id={`profile-${field.key}`}
-                    scope="watched"
-                    dotfiles
-                    files={field.file}
-                    placeholder={field.placeholder}
-                    value={path(form().account, field.key)}
-                    write={typedPath(field.key)}
                   />
-                </>
-              )}
-            </For>
-
-            <div class={styles.buttons}>
-              <button type="submit" disabled={save.isPending}>
-                {adding() ? "Save" : "Save changes"}
-              </button>
-            </div>
-
-            <Show when={refused()}>
-              {(outcome) => (
-                <ErrorLine class={styles.failure}>
-                  {PROFILE_REFUSAL[outcome()]}
-                </ErrorLine>
-              )}
-            </Show>
-            {/* A server that could not answer at all, which is the one thing
-                here that is an error rather than an outcome. */}
-            <Show when={save.isError}>
-              <ErrorLine class={styles.failure}>
-                The profile could not be saved: {save.error?.message}
-              </ErrorLine>
-            </Show>
-          </form>
-
-          {/* The one press that is about a saved Profile rather than about what
-              is typed into the form, and so belongs to no Profile that does not
-              exist yet. The agent type used to be said here; it is picked in the
-              form now, which is where a fact somebody can change belongs. */}
-          <Show when={saved()}>
-            {(profile) => (
-              <section class={styles.standing}>
-                <div class={styles.actions}>
-                  <button
-                    type="button"
-                    class={styles.remove}
-                    disabled={remove.isPending}
-                    onClick={() => remove.mutate(profile().id)}
-                  >
-                    Remove
-                  </button>
-                </div>
-
-                {/* The one thing a removal can be refused for — a profile
-                    another tab took away first — said here because here is
-                    where the press was made. */}
-                <Show when={refusedRemoval()}>
-                  {(outcome) => (
-                    <ErrorLine class={styles.failure}>
-                      {PROFILE_REMOVAL_REFUSAL[outcome()]}
-                    </ErrorLine>
-                  )}
+                  {prettify(model)}
+                  {/* And whose it is, where it is not this account's:
+                      inside the label rather than beside it, unlike the
+                      id below, because it is about the tick rather than
+                      about the model — a reader who cannot see the row
+                      hears it as part of what they are ticking. */}
+                  <Show when={elsewhere(model)}>
+                    {(agent) => (
+                      <span class={styles.elsewhere}>
+                        {AGENT_NAME[agent()]}'s model, which this account
+                        cannot launch
+                      </span>
+                    )}
+                  </Show>
+                </label>
+                {/* The id beside the name, for whoever is checking: the
+                    name is this viewer's word and the id is what the
+                    session is launched with. Outside the label so it is
+                    not read out as part of the tick's name, and not drawn
+                    at all beside one the list does not know — there the id
+                    is the name already. */}
+                <Show when={known(model)}>
+                  <code>{model}</code>
                 </Show>
-                <Show when={remove.isError}>
-                  <ErrorLine class={styles.failure}>
-                    The profile could not be removed: {remove.error?.message}
-                  </ErrorLine>
-                </Show>
-              </section>
+              </li>
             )}
-          </Show>
-        </Match>
+          </For>
+        </ul>
 
-        <Match when={profiles.isPending}>
-          <Empty>Loading…</Empty>
-        </Match>
-        <Match when={profiles.isError}>
-          <ErrorLine>
-            Could not read the agent profiles: {profiles.error?.message}
+        {/* The way past the list. It goes stale the week another model
+            ships, and a profile that could not be given the new one until
+            Verkstead was rebuilt would be a form standing in front of the
+            work. What is added here is a pick like any other: it joins the
+            ticks above, ticked, and unticking it takes it away again. */}
+        <label for="profile-model">Another model id</label>
+        <div class={styles.byHand}>
+          <input
+            id="profile-model"
+            type="text"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck={false}
+            placeholder="claude-opus-6"
+            value={typing()}
+            onInput={(ev) => setTyping(ev.currentTarget.value)}
+            // Return adds the id rather than saving the profile, which is
+            // what a return in a text field does to a form left alone.
+            onKeyDown={(ev) => {
+              if (ev.key === "Enter") {
+                ev.preventDefault();
+                add();
+              }
+            }}
+          />
+          <button
+            type="button"
+            disabled={typing().trim() === ""}
+            onClick={add}
+          >
+            Add
+          </button>
+        </div>
+      </fieldset>
+
+      {/* Which agent this account is for, over the fields it decides:
+          picking another type is asking for that type's own paths, so what
+          is under this changes with it and nothing typed for the old one
+          is carried across. */}
+      <label for="profile-agent_type">Agent</label>
+      {/* The app's own listbox rather than a `<select>`, because each row
+          carries that backend's brand mark and an `<option>` holds
+          nothing but text — the one row of this form where there is
+          something to draw beside the words.
+
+          A profile of a type this build draws but does not offer reads as
+          nothing chosen rather than as whichever type happens to be first,
+          which is the listbox's own guarantee and the honest reading of a
+          row that is not on offer. Its account is untouched by that: what
+          the form sends is what was read back, until another type is
+          picked. */}
+      <Listbox
+        id="profile-agent_type"
+        class={styles.agentType}
+        options={AGENT_TYPES}
+        value={(agent_type) => agent_type}
+        label={(agent_type) => AGENT_NAME[agent_type]}
+        mark={(agent_type) => agent_type}
+        chosen={form().account.agent_type}
+        pick={(picked) => pickedType(picked as AgentType)}
+      />
+
+      {/* The account, in whatever shape its agent type keeps one: the
+          fields come off the type rather than being written here, so a
+          backend arriving is a row in `ACCOUNT_FIELDS` and nothing
+          else. */}
+      <For each={fields()}>
+        {(field) => (
+          <>
+            <label for={`profile-${field.key}`}>{field.label}</label>
+            {/* Browsed or typed, which the form cannot tell apart and has
+                no reason to: what Save sends is whatever the box holds,
+                and the server's answer about it is unchanged. Anywhere
+                the server can read, because an account may be anywhere —
+                and showing the dotfiles these fields exist to point at,
+                with the files as well where the field names one. */}
+            <PathField
+              id={`profile-${field.key}`}
+              dotfiles
+              files={field.file}
+              placeholder={field.placeholder}
+              value={path(form().account, field.key)}
+              write={typedPath(field.key)}
+            />
+          </>
+        )}
+      </For>
+
+      <div class={styles.buttons}>
+        <button type="submit" disabled={save.isPending}>
+          {props.submit}
+        </button>
+      </div>
+
+      <Show when={refused()}>
+        {(outcome) => (
+          <ErrorLine class={styles.failure}>
+            {PROFILE_REFUSAL[outcome()]}
           </ErrorLine>
-        </Match>
-      </Switch>
-    </>
+        )}
+      </Show>
+      {/* A server that could not answer at all, which is the one thing
+          here that is an error rather than an outcome. */}
+      <Show when={save.isError}>
+        <ErrorLine class={styles.failure}>
+          The profile could not be saved: {save.error?.message}
+        </ErrorLine>
+      </Show>
+    </form>
   );
 }

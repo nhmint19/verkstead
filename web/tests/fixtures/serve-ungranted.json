@@ -1,0 +1,5 @@
+{
+  "grant": "sudo tailscale set --operator=ada",
+  "press": "Ungranted",
+  "trouble": "Access denied: serve config denied"
+}

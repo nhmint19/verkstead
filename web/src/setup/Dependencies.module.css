@@ -1,0 +1,195 @@
+/* The dependencies step — see `Dependencies.tsx`.
+
+   A column inside the step's card: the line that says what a session needs, the
+   strip that says which machine the commands are for, the seven rows, and the
+   press onwards. Nothing is a grid: a row is read down on a phone as often as
+   it is scanned on a desktop, and what a row has to show is a name, a mark and
+   sometimes a command wider than either. */
+
+.step {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.standing {
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* The eight machines, as the pressed-or-not buttons in a group the workbench's
+   terminals already use: they are all always there, `aria-pressed` is the one
+   word that says which is showing, and the strip scrolls where a phone cannot
+   hold all eight. */
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+  max-width: 100%;
+  padding: 0.2rem;
+  overflow-x: auto;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.tab {
+  flex: none;
+  padding: 0.35rem 0.7rem;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+  border-radius: 0.4rem;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.tab[aria-pressed="true"] {
+  color: var(--paper);
+  background: var(--accent);
+}
+
+.rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One thing a session needs. Separated by a rule rather than by cards inside a
+   card: the step is already one surface, and seven boxes on it would be a page
+   of borders. */
+.row {
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--edge);
+}
+
+.row:last-child {
+  border-bottom: 1px solid var(--edge);
+}
+
+/* The name and the mark on one line, with what the row is for at the end of it
+   — and under the name on a narrow window, where the two would not fit. */
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.name {
+  display: flex;
+  gap: 0.4rem;
+  align-items: baseline;
+  font-weight: 600;
+}
+
+/* The harness's own mark, sized to the word beside it the way every other
+   reading of a backend sizes one. */
+.harness {
+  flex: none;
+  width: 0.9em;
+}
+
+.why {
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+}
+
+/* What a `bwrap` that would not run said, kept exactly as it said it: the line
+   naming the sysctl to set is the one worth reading. */
+.trouble {
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0.6rem;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  white-space: pre-wrap;
+}
+
+.instruction {
+  margin-top: 0.5rem;
+}
+
+/* The line to paste, and the press that copies it. The command scrolls rather
+   than wrapping: a wrapped shell line reads as two commands. */
+.command {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.45rem 0.6rem;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+}
+
+.command pre {
+  flex: 1;
+  margin: 0;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.85rem;
+}
+
+.copy {
+  flex: none;
+  padding: 0.2rem 0.5rem;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  background: none;
+  border: 1px solid var(--edge);
+  border-radius: 0.35rem;
+  cursor: pointer;
+}
+
+.vendor {
+  margin: 0;
+  font-size: 0.9rem;
+  word-break: break-all;
+}
+
+.onwards {
+  margin-top: 0.3rem;
+}
+
+/* The press onwards, drawn as the app draws every act that saves or starts
+   something. Refused while the step is unmet, and refused in the way a
+   disabled control is everywhere else here. */
+.continue {
+  padding: 0.5rem 1.1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.continue:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+@media (hover: hover) {
+  .tab:not([aria-pressed="true"]):hover {
+    color: var(--ink);
+  }
+
+  .copy:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .continue:not(:disabled):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}

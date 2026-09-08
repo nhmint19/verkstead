@@ -692,12 +692,69 @@ pub(crate) fn taken_back(data_dir: &Path, conversation: i64) {
 /// One list or the other and never both: a NixOS box has nothing under
 /// `/opt/homebrew` and a Mac has nothing under `/run/current-system/sw` unless
 /// somebody put it there.
-fn machine_path(platform: Platform) -> OsString {
+///
+/// Reachable from outside this module because it is what *present* means: the
+/// onboarding probes ask whether a session would find a program, and a session
+/// finds one on this list — see [`crate::onboarding`], which walks it with
+/// [`on_the_path`]. Verkstead's own directory is left off, that being the one
+/// entry holding nothing a human installs.
+pub(crate) fn machine_path(platform: Platform) -> OsString {
     match platform {
         Platform::Linux => OsString::from(LINUX_PATH),
         Platform::MacOs => OsString::from(APPLE_PATH),
         Platform::Windows => servers_path(),
     }
+}
+
+/// Where `program` is on `path`, read the way `platform` reads a name, or
+/// `None` where that platform would find it nowhere.
+///
+/// **What a name means is the platform's**, which is the whole of why this
+/// takes one. A bare `git` is a file on the two Unixes and is nothing at all on
+/// Windows, where what is installed is `git.exe` and what says so is `PATHEXT`
+/// — so a walk of `PATH` alone would find a program on no Windows machine that
+/// has one. That resolving is the open rendering's, which is where the rules
+/// are written down: see [`open::found`].
+///
+/// **The `PATH` is a value rather than a read**, and that is what makes this
+/// one function with two callers rather than two functions. The build cache
+/// asks about the *server's* own environment, because what it is looking for is
+/// a file to bind into a sandbox; the onboarding probes ask about
+/// [`machine_path`], because what they are looking for is what a session would
+/// find. One question — *is this program there, by this platform's rules* — and
+/// the caller says which `PATH` it is being asked of.
+///
+/// Blocks: it is a handful of `stat` calls.
+pub(crate) fn on_the_path(
+    platform: Platform,
+    program: &str,
+    path: Option<&OsStr>,
+    pathext: Option<&OsStr>,
+) -> Option<PathBuf> {
+    match platform {
+        Platform::Windows => open::found(OsStr::new(program), path, pathext),
+        Platform::Linux | Platform::MacOs => apart(path?)
+            .map(|dir| Path::new(dir).join(program))
+            .find(|candidate| candidate.is_file()),
+    }
+}
+
+/// The directories a Unix `PATH` names, in the order they were written, with
+/// the empty ones left out — an empty entry means the working directory, which
+/// is not somewhere to go looking for a program.
+///
+/// Split by hand rather than by [`std::env::split_paths`], which splits on the
+/// separator of whatever platform the *server* was compiled for: this is a Unix
+/// value wherever it is being read, and the Windows job asking this arm what it
+/// resolves is asking about one written with colons. The same reading
+/// [`open::apart`] is of the same value on the other platform, and put back
+/// together the same way — an `OsStr`'s encoding is self-synchronising, so a
+/// split on an ASCII byte lands on a boundary.
+fn apart(path: &OsStr) -> impl Iterator<Item = &OsStr> {
+    path.as_encoded_bytes()
+        .split(|byte| *byte == b':')
+        .filter(|piece| !piece.is_empty())
+        .map(|piece| unsafe { OsStr::from_encoded_bytes_unchecked(piece) })
 }
 
 /// And what it is on Windows, which is not a list here at all: the `PATH` the
@@ -725,8 +782,15 @@ fn servers_path() -> OsString {
 
 /// What that is on Linux: the system profile, then the Nix default profile,
 /// then the paths a non-NixOS `/usr` would put things in.
-const LINUX_PATH: &str =
-    "/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/usr/bin:/bin";
+///
+/// `/usr/local/bin` among them because that is where the Debian family's
+/// `npm install -g` lands a binary, and an agent installed from npm is one of
+/// the shapes ADR-0016 says a machine may have its harness in: a session that
+/// could not find one there would be a session refused for a program the human
+/// had installed. Ahead of `/usr/bin`, which is the ordering every Unix reads a
+/// local install by and the one [`APPLE_PATH`] already has.
+const LINUX_PATH: &str = "/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:\
+                          /usr/local/bin:/usr/bin:/bin";
 
 /// And on a Mac, which has none of NixOS in it until somebody installs one.
 ///
@@ -925,6 +989,57 @@ fn account_inside(account: &store::Account, home: &Path) -> Vec<(PathBuf, PathBu
     }
 }
 
+/// The account an agent of `agent_type` keeps directly in `home`, where the
+/// whole of one is there.
+///
+/// **The same list as [`account_inside`] rather than a second one.** What a
+/// session mounts an account *from* and what the onboarding wizard finds one
+/// *in* are one question about one set of paths: this builds the account whose
+/// own paths are the ones under `home`, and asks that list whether every one of
+/// them is there. So a backend arriving with a shape of its own is offered by
+/// the wizard the day it can be joined into a sandbox, rather than being taught
+/// to both halves separately.
+///
+/// **At most one per harness**, which is what a home being asked about at all
+/// turns on: each shape is a fixed path under it, so a home holds one Claude
+/// account and one Codex account and no more — which is the same fact an
+/// unnamed Profile is unique per harness for.
+///
+/// Blocking: one `stat` per path of the shape.
+pub(crate) fn account_in_home(agent_type: store::AgentType, home: &Path) -> Option<store::Account> {
+    let account = kept_in(agent_type, home);
+
+    account_inside(&account, home)
+        .into_iter()
+        .all(|(host, _)| host.exists())
+        .then_some(account)
+}
+
+/// And what such an account would be: the shape `agent_type` keeps one in,
+/// rooted where that agent itself would have written it.
+///
+/// [`account_inside`]'s own arms read the other way round — the pair under
+/// `~/.claude`, the one dot-directory each of the two after it, and, for
+/// opencode, the home its XDG defaults resolve inside, which is the home
+/// itself.
+fn kept_in(agent_type: store::AgentType, home: &Path) -> store::Account {
+    match agent_type {
+        store::AgentType::Claude => store::Account::Claude {
+            claude_dir: home.join(CLAUDE_DIR_INSIDE_HOME),
+            config_file: home.join(CLAUDE_CONFIG_INSIDE_HOME),
+        },
+        store::AgentType::Codex => store::Account::Codex {
+            home: home.join(CODEX_INSIDE_HOME),
+        },
+        store::AgentType::Grok => store::Account::Grok {
+            home: home.join(GROK_INSIDE_HOME),
+        },
+        store::AgentType::OpenCode => store::Account::OpenCode {
+            home: home.to_owned(),
+        },
+    }
+}
+
 /// Whichever of `account`'s own paths cannot be joined into a profile at
 /// `home`, and `None` where every one of them can.
 ///
@@ -937,12 +1052,12 @@ fn account_inside(account: &store::Account, home: &Path) -> Vec<(PathBuf, PathBu
 ///
 /// **The account is the end that can differ.** The profile is made under the
 /// Data Directory and so is wherever that is; an account is wherever the Agent
-/// Profile points inside a Watched Path, which on a machine with a second drive
-/// may well be that drive. So this asks the account's paths against the
-/// profile's, and what comes back is the first that could not be joined in —
-/// which is a session refused before it starts rather than one started into a
-/// profile with no account in it. See [`Sandbox::for_conversation`], which is
-/// where it is refused and where both paths are said.
+/// Profile points at, which on a machine with a second drive may well be that
+/// drive. So this asks the account's paths against the profile's, and what
+/// comes back is the first that could not be joined in — which is a session
+/// refused before it starts rather than one started into a profile with no
+/// account in it. See [`Sandbox::for_conversation`], which is where it is
+/// refused and where both paths are said.
 ///
 /// Directories are left out, and that is the rule rather than an omission: a
 /// junction is a path rather than a file, it crosses volumes, and it needs no
@@ -992,7 +1107,7 @@ fn volume(path: &Path) -> Option<Vec<u8>> {
 ///
 /// **Every path this codebase stored by resolving it carries one.** Rust's
 /// `canonicalize` writes `\\?\` on this platform and a Profile's account is
-/// admitted through one — see [`crate::watched::WatchedPaths::admit`] — where a
+/// resolved through one — see [`crate::resolved::resolve`] — where a
 /// session's own profile, built by joining names together, has none. And
 /// [`asked`] answers in whichever namespace it was asked in: `\\?\C:\` for the
 /// account and `C:\` for the profile, which compared as bytes are two volumes.
@@ -3403,7 +3518,7 @@ mod tests {
     /// spelling of.
     ///
     /// Which is the whole of what refused every session on Windows: a Profile's
-    /// account is admitted through a `canonicalize` and carries `\\?\`, a
+    /// account is resolved through a `canonicalize` and carries `\\?\`, a
     /// session's own profile is names joined together and carries none, and the
     /// machine answers *which volume* in whichever namespace it was asked in.
     /// So `\\?\C:\` and `C:\` came back for one drive and the two compared as

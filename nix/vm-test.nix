@@ -235,20 +235,24 @@ testers.runNixOSTest {
       # the binary would download here perfectly well.
       services.verkstead.package = package;
 
-      # The module refuses to build without a Watched Path, and the service
-      # refuses to start with one that is not there. Two of them, so that the
-      # sandbox is exercised where it has real work to do: one under `/home`,
-      # which the hardening replaces with an empty tmpfs and the module then binds
-      # back through, and one outside it. The unit coming up at all is what says
-      # both arrived.
-      services.verkstead.watchedPaths = [
+      # The directories the unit is told to bind, and so the whole of what the
+      # service can see of this machine. The service refuses to start on one that
+      # is not there. Two of them, so that the namespace is exercised where it
+      # has real work to do: one under `/home`, which the hardening replaces with
+      # an empty tmpfs and the module then binds back through, and one outside
+      # it. The unit coming up at all is what says both arrived.
+      #
+      # `/home/unbound` below is deliberately not among them: it is what the
+      # other half of this proves, a repository the unit was never told about.
+      services.verkstead.paths = [
         "/srv/repos"
-        "/home/watched"
+        "/home/bound"
       ];
 
       systemd.tmpfiles.rules = [
         "d /srv/repos 0755 root root -"
-        "d /home/watched 0755 root root -"
+        "d /home/bound 0755 root root -"
+        "d /home/unbound 0755 root root -"
         # The Agent Profile's pair, owned by the service because a session
         # writes its own session logs and settings into it. The repository a
         # Conversation is grilled about is deliberately not here: `committed`
@@ -259,6 +263,22 @@ testers.runNixOSTest {
         "d ${account}/.claude 0755 verkstead verkstead -"
         "f ${account}/.claude.json 0644 verkstead verkstead - {}"
       ];
+
+      # Tailscale, because the Remote access section is the one part of the
+      # workbench whose whole subject is another daemon on the same machine —
+      # and reaching it means reaching a unix socket under `/run` from inside
+      # the unit's own hardening, which nothing in-process can show. The crate
+      # tests put a shell script where `tailscale` goes precisely so they need
+      # no daemon; this is the other half, and the only place a relaxation the
+      # unit turns out to need would be caught.
+      #
+      # Userspace networking so that nothing here wants a TUN device: what is
+      # being asked is whether the service can talk to `tailscaled`, and a
+      # tailnet this VM has no route to join would be asking something else.
+      # Unauthenticated, therefore — the daemon comes up, answers, and reports a
+      # machine that is not logged in, which is a state the pane already draws.
+      services.tailscale.enable = true;
+      services.tailscale.interfaceName = "userspace-networking";
 
       # The CLI finds its own git through the package's wrapper; this one is here
       # so the test can build the repository the CLI then reads.
@@ -530,6 +550,40 @@ testers.runNixOSTest {
         machine.wait_for_open_port(8422)
         machine.succeed("curl -sf http://127.0.0.1:8422/api/v1/health")
 
+    with subtest("the workbench is behind the key, and the startup line hands it over"):
+        # Everything of the human's is gated — the viewer's own namespace and the
+        # pages it is served from alike — because a session's network is this
+        # machine's own and nothing about the socket tells a browser apart from
+        # an agent (ADR-0015). What the gate is made of is the crate tests'
+        # subject; what needs a VM is that a packaged install comes up behind it
+        # with nobody having configured anything, and that there is a way in
+        # without a secret being handed over out of band.
+        #
+        # The health endpoint above is deliberately not one of them: it is open,
+        # and it is what said the service was up before anybody had a key.
+        assert status_code("http://127.0.0.1:8422/") == "401"
+        assert status_code("http://127.0.0.1:8422/api/ui/repos") == "401"
+
+        # And the way in is the line the daemon printed as it came up. A machine
+        # started from a unit file has no tray to press **Open** in, so the
+        # journal is where the login link is — the address with the key on it,
+        # which is the whole of what lets a device in.
+        printed = machine.succeed("journalctl -u verkstead.service --no-pager -o cat")
+        found = re.search(r"\?key=([A-Za-z0-9_-]+)", printed)
+        assert found, f"the startup line carries no login link:\n{printed}"
+
+        # Kept where every `curl` below picks it up, which is what makes the rest
+        # of this file the browser that followed that link rather than a stranger
+        # on the loopback. A `.curlrc` is where a curl keeps a cookie, and the
+        # test driver's own shell exports `HOME=/root`.
+        cookie = f'cookie = "workbench_key={found.group(1)}"\n'
+        machine.succeed(f"printf %s {shlex.quote(cookie)} > /root/.curlrc")
+
+        # Which is the whole of being logged in: the same two requests, from the
+        # same machine, now answered.
+        assert status_code("http://127.0.0.1:8422/") == "200"
+        assert status_code("http://127.0.0.1:8422/api/ui/repos") == "200"
+
     with subtest("the database is in the data directory, owned by the service"):
         # The server opens the database before it binds, so the open port above
         # already says the file exists; what is asserted here is where it is and
@@ -615,27 +669,125 @@ testers.runNixOSTest {
         ).strip()
 
 
-    with subtest("a repo inside a watched path registers, and one outside cannot"):
-        # Both watched paths, because they are exposed to the sandbox two
-        # different ways: `/srv/repos` is somewhere the hardening leaves in
-        # place, and `/home/watched` is under a directory it replaces with an
-        # empty tmpfs and the module binds back through. A service that cannot
-        # see the second would refuse it exactly as it refuses one outside.
-        for watched in ["/srv/repos/inside", "/home/watched/inside"]:
-            committed(watched)
-            outcome = register(watched)
-            assert outcome == '"Added"', f"{watched} was answered {outcome}"
+    with subtest("the unit reaches the Tailscale daemon through its own hardening"):
+        # The one part of the workbench whose subject is another daemon on the
+        # same machine — and the only place the unit's hardening can be seen
+        # meeting it. The crate tests put a shell script where `tailscale` goes
+        # so that they need no daemon at all; what needs a VM is whether the
+        # service, under `ProtectSystem`, `PrivateUsers`, an empty capability
+        # bounding set and the seccomp filter, can open `tailscaled`'s socket
+        # under `/run` and be answered.
+        #
+        # This VM's daemon is unauthenticated and on userspace networking, so
+        # what it answers is a machine that has joined no tailnet. That is
+        # exactly the reading worth having: `Down` carrying the daemon's own
+        # `BackendState` can only have been written after the socket was opened,
+        # the JSON parsed and a field read out of it. A unit that could not
+        # reach through would read `Down` too — with a line naming the socket
+        # instead, which is what this tells apart.
+        machine.wait_for_unit("tailscaled.service")
+        machine.wait_until_succeeds("test -S /run/tailscale/tailscaled.sock")
+        machine.wait_until_succeeds(
+            "curl -sf http://127.0.0.1:8422/api/ui/remote"
+            " | grep -q 'the Tailscale daemon reports'"
+        )
 
-        # And the boundary itself, from inside the running service rather than
-        # from a unit test. `/srv/elsewhere` is somewhere the service can see
-        # perfectly well and was not given, so what refuses it is the boundary
-        # and not the sandbox — which is the half worth proving here.
-        committed("/srv/elsewhere")
-        outcome = register("/srv/elsewhere")
-        assert outcome == '"OutsideWatchedPaths"', f"/srv/elsewhere was answered {outcome}"
+        reading = json.loads(
+            machine.succeed("curl -sf http://127.0.0.1:8422/api/ui/remote")
+        )
+        assert reading["tailscale"] == "Down", (
+            f"an unauthenticated daemon reads as not up: {reading}"
+        )
+        assert "the Tailscale daemon reports" in reading["trouble"], (
+            "the reading has to be the daemon's own answer rather than a socket "
+            f"the unit could not reach: {reading['trouble']!r}"
+        )
 
-        listed = machine.succeed("curl -sf http://127.0.0.1:8422/api/ui/repos")
-        assert "/srv/elsewhere" not in listed, f"a refused repo is on the list:\n{listed}"
+        # Which is also what says `tailscale` is on the unit's `PATH` at all:
+        # `path` is what that `PATH` *is* rather than something added to it, so
+        # a service with no `tailscale` on it would read every machine as one
+        # with nothing installed — `Absent`, and a link to the installer.
+        #
+        # And the press runs, which is the other half of the same reach: whether
+        # a logged-out daemon takes a serve is its own business, but running
+        # `tailscale serve` at all has to be something this unit can do.
+        pressed = json.loads(post("/api/ui/remote/serve", {"on": True}))
+        assert pressed["press"] in ("Done", "Ungranted", "Trouble"), (
+            f"the press answered nothing this build knows: {pressed}"
+        )
+        assert "No such file or directory" not in pressed.get("trouble", ""), (
+            f"the unit could not run tailscale at all: {pressed}"
+        )
+
+    with subtest("the module makes the service user Tailscale's operator"):
+        # `tailscale serve` is refused for a process that is neither root nor
+        # the tailnet's operator, and the daemon's answer to that is to show
+        # `sudo tailscale set --operator=verkstead` and re-try on the next
+        # press. A host declaring both services has nobody to show it to, so
+        # the module sets it and the switch simply works.
+        #
+        # What `extraSetFlags` becomes is a `tailscaled-set` oneshot, and the
+        # flags are in the script it runs rather than in the unit that runs it —
+        # so the unit is read for what it runs and the grant is read out of
+        # that.
+        unit = machine.succeed("systemctl cat tailscaled-set.service")
+        found = re.search(r"^ExecStart=(\S+)", unit, re.M)
+        assert found, f"tailscaled-set runs nothing:\n{unit}"
+
+        grant = machine.succeed(f"cat {found.group(1)}")
+        assert "--operator=verkstead" in grant, (
+            f"the service user is not Tailscale's operator:\n{grant}"
+        )
+
+        # And it was made rather than merely declared: the oneshot ran and the
+        # daemon took it. Which is what makes the press above the operator's own
+        # — nothing on this machine has an operator grant left to ask for, so a
+        # press refused for want of one would say the grant did not land.
+        result = machine.succeed(
+            "systemctl show -p Result --value tailscaled-set.service"
+        ).strip()
+        assert result == "success", f"the grant did not take: {result}"
+
+        assert pressed["press"] != "Ungranted", (
+            "the service user is Tailscale's operator on this machine, so a "
+            f"serve refused for want of that grant means it did not land: {pressed}"
+        )
+
+    with subtest("a repo under a directory the unit binds registers"):
+        # Both bound paths, because they are exposed to the unit two different
+        # ways: `/srv/repos` is somewhere the hardening leaves in place, and
+        # `/home/bound` is under a directory it replaces with an empty tmpfs
+        # and the module binds back through. A service that could not see the
+        # second would answer it *missing*.
+        for bound in ["/srv/repos/inside", "/home/bound/inside"]:
+            committed(bound)
+            outcome = register(bound)
+            assert outcome == '"Added"', f"{bound} was answered {outcome}"
+
+    with subtest("a repo the unit was not told to bind is answered missing"):
+        # The other half of `paths`: nothing admits or refuses on Verkstead's
+        # behalf any more, so what a repository outside the unit's namespace
+        # meets is the namespace itself. Inside it the directory is not there,
+        # and *missing* is what the server says about a path that is not there
+        # — the same answer a typo would get, which is the whole point.
+        #
+        # Under `/home` and not under `/srv`, and that matters: `ProtectHome =
+        # "tmpfs"` replaces `/home` wholesale and the module binds back only
+        # what it was told to, whereas `ProtectSystem = "strict"` leaves `/srv`
+        # visible read-only — so a repository made under `/srv` outside `paths`
+        # would register perfectly well and prove nothing.
+        committed("/home/unbound/outside")
+
+        outcome = register("/home/unbound/outside")
+        assert outcome == '"Missing"', f"/home/unbound/outside was answered {outcome}"
+
+        # And it is genuinely the namespace rather than the repository: the same
+        # directory is a real repository seen from outside the unit. As the user
+        # that owns it, because git refuses to read a repository it finds under
+        # somebody else — which is the very thing `committed` hands it over for.
+        machine.succeed(
+            "runuser -u verkstead -- git -C /home/unbound/outside rev-parse --git-dir"
+        )
 
     # Somewhere for the agents' Sets to land. Every Set is asked from a
     # Conversation, and the base URL a session is given is what says which — so a
@@ -726,8 +878,8 @@ testers.runNixOSTest {
         # done once and expected to hold, so a service that forgot them on a
         # restart would be one nobody could rely on.
         listed = machine.succeed("curl -sf http://127.0.0.1:8422/api/ui/repos")
-        for watched in ["/srv/repos/inside", "/home/watched/inside"]:
-            assert watched in listed, f"{watched} was forgotten:\n{listed}"
+        for bound in ["/srv/repos/inside", "/home/bound/inside"]:
+            assert bound in listed, f"{bound} was forgotten:\n{listed}"
 
         # The agent did not fail when the server went away; it reconnects its
         # wait, so answering now still reaches it.
@@ -778,7 +930,7 @@ testers.runNixOSTest {
         assert len(profiles) == 1, f"expected the one Profile, got:\n{profiles}"
         profile_id = profiles[0]["id"]
         assert profiles[0]["broken"] is None, (
-            "the Profile's pair is inside a Watched Path and on disk, so the "
+            "the Profile's pair is named in `paths` and on disk, so the "
             f"service should be able to reach it: {profiles[0]}"
         )
 
@@ -830,9 +982,9 @@ testers.runNixOSTest {
         assert grilling == '"Started"', f"grilling was answered {grilling}"
 
         # The worktree is where the design says it is — under the State
-        # Directory, which is Verkstead's own, rather than inside a Watched
-        # Path. `ProtectSystem = "strict"` leaves exactly that one directory
-        # writable, which is the half no crate test can ask.
+        # Directory, which is Verkstead's own, rather than inside one of the
+        # directories `paths` bound. `ProtectSystem = "strict"` leaves exactly
+        # that one directory writable, which is the half no crate test can ask.
         view = json.loads(
             machine.succeed(
                 f"curl -sf http://127.0.0.1:8422/api/ui/conversations/{conversation}"
@@ -916,7 +1068,8 @@ testers.runNixOSTest {
             f"checkout the worktree was made from: {reported['repo-holds']!r}"
         )
         assert reported["sibling"] == "absent", (
-            "another repository under the same Watched Path is another Conversation's"
+            "another repository under the same bound directory is another "
+            "Conversation's"
         )
         assert reported["home"] == ".claude .claude.json", (
             f"everything else in the service's home is absent inside: {reported['home']!r}"

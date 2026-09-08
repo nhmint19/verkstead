@@ -1,0 +1,259 @@
+/* Remote access — see `Remote.tsx`.
+
+   Two halves in two panes, like every other section of this page: the card says
+   whether this workbench can be reached from a phone, and the pane beside it
+   carries the whole of what the machine said about why.
+
+   What a card *is* is `CardButton.module.css`'s. What is here is only what
+   stands on it. */
+
+.remoteCard {
+  margin-bottom: 1.5rem;
+}
+
+.remoteCard h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+/* How things stand, in a line: the same quiet the sections above say what is
+   configured in. Drawn on the card and at the head of the pane, because it is
+   the same sentence in both. */
+.standing {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+  line-height: 1.5;
+}
+
+/* A tailnet name or a `ts.net` address, picked out of the prose around it: it
+   is something to read character by character and to type into a phone, so it
+   is set the way every other exact string on this page is. */
+.address {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+/* And the details pane: what the machine said, under the line that summed it
+   up. */
+.remote .standing {
+  margin-bottom: 0.85rem;
+}
+
+/* What `tailscale` printed when it was asked, shown as it came. Set as output
+   rather than as prose, because it is: the line names a service to start, and a
+   word of it reworded is a command that does not work.
+
+   The stopped red down its edge, the way the build cache draws what the browser
+   cannot fix — nothing here has failed, and what it says is what will go on
+   being unreachable until somebody acts on it. */
+.trouble {
+  display: block;
+  margin: 0.5rem 0 0;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--edge);
+  border-inline-start: 3px solid var(--stopped);
+  border-radius: 0.6rem;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* Where a machine with no Tailscale gets one, which is the one link on this
+   page out of Verkstead altogether. */
+.pointer {
+  color: var(--accent);
+}
+
+/* What the machine is, once it is up: its name on the tailnet, and what is
+   served on that name. A description list, because that is what these are —
+   a reading apiece, each with what it is called beside it. */
+.readings {
+  display: grid;
+  grid-template-columns: auto;
+  gap: 0.25rem 0;
+  margin: 0;
+}
+
+.readings dt {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.readings dd {
+  margin: 0 0 0.85rem;
+  font-size: 0.95rem;
+}
+
+.readings dd:last-child {
+  margin-bottom: 0;
+}
+
+/* The serve switch and what stands under it. The switch is `Switch.module.css`'s
+   own; this is only the room around it, so the readings below do not sit on top
+   of the sentence that explains it. */
+.remote label + p {
+  margin-top: 0.5rem;
+}
+
+.remote .readings {
+  margin-top: 1.25rem;
+}
+
+/* The line that makes this machine's user Tailscale's operator, drawn as what it
+   is: something to select and paste into a terminal, character for character.
+
+   The accent down its edge rather than the stopped red the trouble beside it
+   carries, because they say different things. The trouble is what went wrong;
+   this is the thing to do about it, and the one line on this pane that ends with
+   the switch working. */
+.command {
+  display: block;
+  margin: 0.5rem 0 0;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--edge);
+  border-inline-start: 3px solid var(--accent);
+  border-radius: 0.6rem;
+  background: var(--code-wash);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+/* And a press the browser could not even put on the wire, which is neither of
+   the two answers above: nothing of the machine's to quote. */
+.failure {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+@media (hover: hover) {
+  .pointer:hover {
+    color: var(--accent-deep);
+  }
+}
+
+/* How a phone gets in, under the readings it is made of — the code and the
+   link beside it — and, under that again, the key both of them hand over.
+
+   A rule above each rather than a card of its own, because they are the same
+   section: what is above is what the machine is, and these are what to do with
+   it. */
+.reach,
+.key {
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--edge);
+}
+
+.reach h3,
+.key h3 {
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
+}
+
+/* The code and the link, side by side where there is room and stacked where
+   there is not: this pane is read on a phone as often as on the machine it is
+   about, and a QR is not what somebody scans on the screen they are holding. */
+.letIn {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+}
+
+/* The code itself, on its own white ground: the modules are black on white
+   whatever the page is — see `Qr.tsx` — so the padding round them is the quiet
+   zone's own colour rather than the pane's. */
+.code {
+  flex: none;
+  padding: 0.5rem;
+  background: #fff;
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+  line-height: 0;
+}
+
+.code svg {
+  display: block;
+  width: 9.5rem;
+  height: 9.5rem;
+}
+
+/* And the link beside it, which is the same thing for everything that is not a
+   camera. */
+.beside {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+.link {
+  margin: 0 0 0.5rem;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+/* The copy button, quiet beside the link it is about, the way the Share pane
+   draws its own. */
+.copy {
+  padding: 0.15rem 0.5rem;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  background: transparent;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+/* And Reset key, which is the one press on this page that takes something away.
+
+   Drawn as what it is rather than as a warning: the sentence under it is what
+   says what it costs, and a button coloured like a mistake would be one nobody
+   presses when they need to. */
+.reset {
+  margin: 1.25rem 0 0;
+  padding: 0.4rem 0.9rem;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--stopped);
+  background: transparent;
+  border: 1px solid var(--stopped);
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+.reset:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* The key section starts with its own heading, so the button under it needs no
+   space of its own — and the sentence under the button sits close to it. */
+.key .reset {
+  margin-top: 0.85rem;
+}
+
+.key .reset + p {
+  margin-top: 0.5rem;
+}
+
+@media (hover: hover) {
+  .copy:hover {
+    color: var(--ink);
+    background: var(--card);
+  }
+
+  .reset:not(:disabled):hover {
+    color: var(--card);
+    background: var(--stopped);
+  }
+}

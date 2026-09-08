@@ -50,17 +50,6 @@
           },
           "source": "Settings"
         }
-      ],
-      "watched": [
-        {
-          "path": "/home/ada/src",
-          "resolution": {
-            "Unresolved": {
-              "why": "the server cannot see it: No such file or directory (os error 2)"
-            }
-          },
-          "source": "Settings"
-        }
       ]
     },
     "rust_build_cache": {

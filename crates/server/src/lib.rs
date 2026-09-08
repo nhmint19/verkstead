@@ -1,7 +1,7 @@
 //! The Verkstead server: the agents' HTTP API and the human's web UI, over one
 //! SQLite store and out of one binary.
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -71,6 +71,14 @@ mod grillings;
 /// session runs on — every sandbox binds one — so standing a router up that runs
 /// sessions means saying where they live.
 pub mod handoffs;
+/// The Workbench Key: the secret the human's browser holds and a session cannot
+/// read, and the gate that answers 401 to everything which has not shown it.
+///
+/// Public for the reason [`sandbox`] is — what stands between a session and the
+/// workbench is the product's boundary rather than an implementation detail of
+/// an endpoint, and standing the served router up means saying which key it is
+/// keyed with.
+pub mod key;
 mod limits;
 /// Watching a pull request go on merging after the work on it is Done — see
 /// [`checks`] for the watcher that covers a wrap-up, which this takes over from.
@@ -78,9 +86,16 @@ mod merges;
 mod nudge;
 /// Telling a session idling on a stored ask that its Answers are there to fetch.
 mod nudging;
-/// Every Watched Path and every Sandbox Configuration bind as the settings page
-/// reads them: which of the two places said each one, and whether the server can
-/// see it.
+/// Whether this Verkstead can do anything yet: the objective a fresh one is
+/// short of, and the mode it enters at startup where it is.
+///
+/// Public for the reason the sandbox is — what says a machine is ready is the
+/// product's own answer rather than an endpoint's, and what proves each arm of
+/// it is a server stood up over a stated machine, which is a test standing
+/// where a start does.
+pub mod onboarding;
+/// Every Sandbox Configuration bind as the settings page reads them: which of
+/// the two places said each one, and whether the server can see it.
 mod paths;
 /// The named pipe the server listens on beside its socket, which is the whole
 /// of what a sandboxed Windows session will have to ask through — an
@@ -109,6 +124,9 @@ mod publishing;
 mod push;
 /// The store an OpenCode session keeps of itself, followed while it runs.
 mod records;
+/// Whether this machine can be reached from a phone: what its Tailscale is
+/// doing, and whether the tailnet name is in front of the workbench.
+pub mod remote;
 /// Following a Conversation's branch to the name a session renamed it to,
 /// rather than repairing a checkout that has not come adrift after all.
 mod renames;
@@ -116,6 +134,9 @@ mod reply;
 mod repos;
 /// Speaking to a session that has gone idle without asking anything.
 mod rescues;
+/// A path as the filesystem has it, which is the one a Repo and an Agent
+/// Profile are recorded under.
+mod resolved;
 /// Getting a finished Conversation's merge conflict resolved, at the human's
 /// press.
 mod resolving;
@@ -185,7 +206,6 @@ mod typing;
 mod ui;
 mod updates;
 mod viewer;
-mod watched;
 mod worktrees;
 mod wrapping;
 
@@ -201,11 +221,6 @@ pub use github::Gh;
 /// How fast the backlog is worked, which is part of the same choice — see
 /// [`Agents::at_pace`].
 pub use runner::Pace;
-
-/// The security boundary every filesystem path is decided against. Public
-/// because starting the server is choosing what it may touch, and a caller
-/// standing up a router has to say so.
-pub use watched::{Admission, WatchedPaths};
 
 /// Persistence lives in its own crate so the viewer's endpoints can reach it
 /// without depending on the binary that links them. It is re-exported here
@@ -275,7 +290,6 @@ pub(crate) struct AppState {
     drivers: drivers::Drivers,
 
     updates: updates::Updates,
-    watched: WatchedPaths,
 
     /// And the Sandbox Configuration the installation was started with, which is
     /// here for the settings page rather than for a session: a session's binds
@@ -287,16 +301,41 @@ pub(crate) struct AppState {
     /// authenticating as the configured token.
     github: Gh,
 
+    /// And how it asks this machine whether a phone can reach the workbench —
+    /// the host's `tailscale`, in front of the port this server is listening
+    /// on. A handle rather than a reading: what it answers is read at the moment
+    /// the Remote access pane asks, so a `tailscale up` run in a terminal shows
+    /// on the next load rather than on the next restart — see [`remote`].
+    remote: remote::Tailscale,
+
+    /// The Workbench Key the gate in front of this router stands on, where it
+    /// stands on one — see [`key`].
+    ///
+    /// Held for the one press that changes it, which is **Reset key** on the
+    /// Remote access pane: the gate reads this handle on every request, so
+    /// re-issuing through it logs every device holding the old secret out at
+    /// once. `None` is a router with no gate over it, where there is no key to
+    /// re-issue and nothing a re-issue would mean.
+    key: Option<key::WorkbenchKey>,
+
+    /// Whether this Verkstead can do anything yet, and the machine that is
+    /// probed to say so — see [`onboarding`].
+    ///
+    /// A handle rather than a reading, like the two above it, and with one
+    /// thing in it that is neither: the mode, which is settled once at startup
+    /// and held for the length of the run. Everything else it answers is
+    /// probed at the moment the wizard asks.
+    onboarding: onboarding::Onboarding,
+
     /// The two files the human tells Verkstead their credentials and their
     /// identity in. A handle rather than what is in them: the files are read at
     /// the moment they are wanted, so the settings page and the next session to
     /// spawn see the same thing — see [`settings`].
     settings: settings::Settings,
 
-    /// Where Verkstead keeps what it makes — the worktrees, for now — which is
-    /// not a Watched Path and is not meant to be: the Watched Paths bound what
-    /// the human may point Verkstead at, and this is the directory Verkstead was
-    /// given for its own things.
+    /// Where Verkstead keeps what it makes — the worktrees, for now. Not one of
+    /// the directories the human points Verkstead at: this is the one Verkstead
+    /// was given for its own things.
     data_dir: PathBuf,
 
     /// Held across the window between a checkout being made and the record
@@ -330,6 +369,14 @@ pub(crate) struct AppState {
     checkouts: Arc<tokio::sync::Mutex<()>>,
 }
 
+/// The port Verkstead is served on when nobody has said otherwise, and so the
+/// port `tailscale serve` is put in front of — see the Remote access pane in
+/// [`remote`], which is what the adoption docs point at for it.
+///
+/// Written once and read twice: it is the `--listen` default below, and what a
+/// router stood up without a listening socket reads a serve against.
+const WORKBENCH_PORT: u16 = 8422;
+
 /// The one name the database is ever kept under, inside the Data Directory.
 /// Fixed rather than configurable: the directory is what an operator points
 /// Verkstead at, and a file inside it is Verkstead's own business.
@@ -342,7 +389,7 @@ const DATABASE_NAME: &str = "verkstead.db";
 /// not absolute.
 ///
 /// clap applies a delimiter to the flag as well as to the variable, so this is
-/// what `--watched-path` is parsed with too: wrong on Windows, it refuses
+/// what `--sandbox-bind` is parsed with too: wrong on Windows, it refuses
 /// every startup that names a real directory.
 #[cfg(windows)]
 const PATH_LIST_SEPARATOR: char = ';';
@@ -362,9 +409,9 @@ pub struct Config {
     /// Skills, the handoff directories and the settings files. Created if it
     /// does not exist.
     ///
-    /// This is the Data Directory. Not a Watched Path and not one to point at a
-    /// directory the human works in: the Watched Paths bound what Verkstead may
-    /// be pointed at, and this is Verkstead's own.
+    /// This is the Data Directory, and not one to point at a directory the
+    /// human works in: a Repo and an Agent Profile are what the human points
+    /// Verkstead at, and this is Verkstead's own.
     ///
     /// Unsaid, it is the platform's own place for it — `~/.local/share/verkstead`
     /// on Linux, `~/Library/Application Support/Verkstead` on macOS,
@@ -382,31 +429,12 @@ pub struct Config {
 
     /// Address and port to bind. Bind a tailnet address to reach the server
     /// from other devices.
-    #[arg(long, env = "VERKSTEAD_LISTEN", default_value = "127.0.0.1:8422")]
-    pub listen: SocketAddr,
-
-    /// A directory Verkstead may operate inside. Repeat the flag, or separate
-    /// several in the environment variable the way the platform writes `PATH` —
-    /// `:` on Unix, `;` on Windows.
-    ///
-    /// This is a security boundary and not a convenience: nothing outside these
-    /// directories is ever touched, and a Repo is registered only from within
-    /// one. There is no default and no scan — guessing at what a machine's owner
-    /// meant to expose is not a guess worth making.
-    ///
-    /// Nor is there a requirement. The workbench settings say Watched Paths too,
-    /// and the boundary is the union of the two — see [`WatchedPaths`] — so a
-    /// standalone install comes up with none of these, admits nothing at all,
-    /// and is pointed at its first directory from its own settings page. A
-    /// service unit goes on saying them here, where a directory that is not
-    /// there still refuses to start.
     #[arg(
-        long = "watched-path",
-        env = "VERKSTEAD_WATCHED_PATHS",
-        value_delimiter = PATH_LIST_SEPARATOR,
-        value_name = "DIR"
+        long,
+        env = "VERKSTEAD_LISTEN",
+        default_value_t = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), WORKBENCH_PORT),
     )]
-    pub watched_paths: Vec<PathBuf>,
+    pub listen: SocketAddr,
 
     /// An extra read-write bind every sandbox gets, or `name=DIR` for one only
     /// the Repo registered under that name gets. Repeat the flag, or separate
@@ -478,6 +506,43 @@ impl Config {
     pub fn releases(&self) -> Option<&'static str> {
         (!self.no_update_check).then_some(updates::LATEST_RELEASE)
     }
+
+    /// The Data Directory this configuration comes to, made where it is not
+    /// there yet.
+    ///
+    /// What the flag holds is what was *said*, which may be nothing at all: a
+    /// machine with nowhere to resolve one to is refused here, where a refusal
+    /// still has somewhere to be worded — see [`platform::data_dir`].
+    ///
+    /// Resolving it is what a caller that is not the server itself comes for.
+    /// The desktop app has to reach the Workbench Key before it has started
+    /// serving, and both halves arriving at one directory is what makes it the
+    /// same key rather than two.
+    pub fn data_directory(&self) -> Result<PathBuf> {
+        let data_dir = platform::data_dir(self.data_dir.as_deref())?;
+
+        std::fs::create_dir_all(&data_dir)
+            .with_context(|| format!("creating data directory {}", data_dir.display()))?;
+
+        Ok(data_dir)
+    }
+
+    /// The Workbench Key this configuration's Data Directory holds: whatever is
+    /// in there, or a new one written where a first start finds nothing.
+    ///
+    /// **The one call both halves of a start make.** `verkstead serve` reaches
+    /// it through [`run_on`] and the desktop app reaches it before it spawns
+    /// the server, because the browser it opens has to be opened on the link —
+    /// and a desktop that invented a key of its own would be locked out of the
+    /// Data Directory it restarts against. What comes back is a handle each of
+    /// them holds a clone of, so a key re-issued through one of them is the key
+    /// the other hands out — see [`key::WorkbenchKey`].
+    pub fn workbench_key(&self) -> Result<key::WorkbenchKey> {
+        let data_dir = self.data_directory()?;
+
+        key::WorkbenchKey::issued(&data_dir)
+            .with_context(|| format!("keeping the workbench key in {}", data_dir.display()))
+    }
 }
 
 /// The SQLite file, which is [`DATABASE_NAME`] inside the Data Directory and is
@@ -496,42 +561,44 @@ pub fn database(data_dir: &Path) -> PathBuf {
 /// Both live under `/api/`, which is also the one prefix the viewer's fallback
 /// refuses to answer with the document — see [`viewer`].
 ///
-/// Watching nothing, which is the closed state: no path is inside a Watched
-/// Path, so no Repo can be registered. That is what everything but the server
-/// itself and the Repo tests wants — see [`router_watching`] for the other one.
+/// Keeping nothing: it is given no Data Directory, so it has nowhere to put a
+/// worktree. That is what everything with no checkout to make wants — see
+/// [`router_keeping`] for the other one.
 pub fn router(pool: SqlitePool) -> Router {
     routed(
         pool,
         updates::Updates::nothing_learned(),
-        WatchedPaths::none(),
         nothing_bound(),
         nowhere(),
         sessions::Sessions::none(),
         Gh::on_path(),
+        tailnet(),
+        key::Gate::open(),
+        onboarding::Machine::here(),
     )
 }
 
-/// The same, permitted inside `watched` — the directories a Repo may be
-/// registered from — and keeping what it makes in `data_dir`.
+/// The same, keeping what it makes in `data_dir`.
 ///
 /// It runs no sessions: starting a grilling makes the branch and the worktree
 /// and records that it did, and there is nothing here to launch inside them.
 /// See [`router_running_sessions`] for the one that does.
-pub fn router_watching(pool: SqlitePool, watched: WatchedPaths, data_dir: PathBuf) -> Router {
+pub fn router_keeping(pool: SqlitePool, data_dir: PathBuf) -> Router {
     routed(
         pool,
         updates::Updates::nothing_learned(),
-        watched,
         nothing_bound(),
         data_dir,
         sessions::Sessions::none(),
         Gh::on_path(),
+        tailnet(),
+        key::Gate::open(),
+        onboarding::Machine::here(),
     )
 }
 
-/// The same, over the whole of what the *installation* configured — the Watched
-/// Paths its flags named and the Sandbox Configuration binds beside them — and
-/// reaching GitHub through `gh`.
+/// The same, over what the *installation* configured — the Sandbox Configuration
+/// binds its flags named — and reaching GitHub through `gh`.
 ///
 /// What the settings endpoints are stood up over where the question is about
 /// paths: the page draws both sources at once and says which of the two said
@@ -539,7 +606,6 @@ pub fn router_watching(pool: SqlitePool, watched: WatchedPaths, data_dir: PathBu
 /// an installation as well as by a file — see [`paths`].
 pub fn router_installed(
     pool: SqlitePool,
-    watched: WatchedPaths,
     binds: sandbox::SandboxConfig,
     data_dir: PathBuf,
     gh: Gh,
@@ -547,11 +613,13 @@ pub fn router_installed(
     routed(
         pool,
         updates::Updates::nothing_learned(),
-        watched,
         binds,
         data_dir,
         sessions::Sessions::none(),
         gh,
+        tailnet(),
+        key::Gate::open(),
+        onboarding::Machine::here(),
     )
 }
 
@@ -564,7 +632,6 @@ pub fn router_installed(
 /// one would be a test that needed a network and an account.
 pub fn router_running_sessions(
     pool: SqlitePool,
-    watched: WatchedPaths,
     data_dir: PathBuf,
     agents: Agents,
     gh: Gh,
@@ -577,11 +644,13 @@ pub fn router_running_sessions(
     routed(
         pool,
         updates::Updates::nothing_learned(),
-        watched,
         binds,
         data_dir,
         sessions::Sessions::under(agents),
         gh,
+        tailnet(),
+        key::Gate::open(),
+        onboarding::Machine::here(),
     )
 }
 
@@ -596,11 +665,13 @@ pub fn router_asking_github(pool: SqlitePool, data_dir: PathBuf, gh: Gh) -> Rout
     routed(
         pool,
         updates::Updates::nothing_learned(),
-        WatchedPaths::none(),
         nothing_bound(),
         data_dir,
         sessions::Sessions::none(),
         gh,
+        tailnet(),
+        key::Gate::open(),
+        onboarding::Machine::here(),
     )
 }
 
@@ -611,11 +682,142 @@ fn nothing_bound() -> sandbox::SandboxConfig {
     sandbox::SandboxConfig::default()
 }
 
+/// A router whose onboarding probes `machine` rather than the one the tests are
+/// running on, keeping its settings files in `data_dir`.
+///
+/// The seam the onboarding suite is stood up over, and a parameter for the
+/// reason [`router_reading_tailscale`]'s Tailscale is one: what the wizard
+/// answers is a fact about the machine underneath it, and a wizard that has to
+/// say something about three platforms, eight distributions and a `bwrap` that
+/// will not run cannot be asked about any of them on the one machine the suite
+/// happens to be on. See [`onboarding::Machine::stated`].
+///
+/// The Data Directory because two of the three steps are read from there: the
+/// git author is in `config.yaml`, and the Profiles are in the database beside
+/// it.
+pub fn router_onboarding(
+    pool: SqlitePool,
+    data_dir: PathBuf,
+    machine: onboarding::Machine,
+) -> Router {
+    router_onboarding_asking_github(pool, data_dir, machine, Gh::on_path())
+}
+
+/// The same, reaching GitHub through `gh`.
+///
+/// What the wizard's last step is stood up over: its token field is prefilled
+/// from the host `gh`'s own login where the environment holds nothing, and
+/// asking the real one would be a test that answered differently on every box
+/// — see [`router_asking_github`], which is a parameter for the same reason.
+pub fn router_onboarding_asking_github(
+    pool: SqlitePool,
+    data_dir: PathBuf,
+    machine: onboarding::Machine,
+    gh: Gh,
+) -> Router {
+    routed(
+        pool,
+        updates::Updates::nothing_learned(),
+        nothing_bound(),
+        data_dir,
+        sessions::Sessions::none(),
+        gh,
+        tailnet(),
+        key::Gate::open(),
+        machine,
+    )
+}
+
+/// A router reading this machine's Tailscale through `remote`, over a database
+/// with nothing in it.
+///
+/// What the Remote access pane's own suite is stood up over, and a parameter for
+/// the reason the `gh` above is one: what it answers is a fact about the machine
+/// running the tests, and a pane that has to say four different things about
+/// four different machines cannot be asked about any of them on the one machine
+/// it happens to be running on. See [`remote::Tailscale::running`].
+pub fn router_reading_tailscale(pool: SqlitePool, remote: remote::Tailscale) -> Router {
+    routed(
+        pool,
+        updates::Updates::nothing_learned(),
+        nothing_bound(),
+        nowhere(),
+        sessions::Sessions::none(),
+        Gh::on_path(),
+        remote,
+        key::Gate::open(),
+        onboarding::Machine::here(),
+    )
+}
+
+/// The same, gated on `key` — which is what the half of that suite about the
+/// login link stands up.
+///
+/// Both halves rather than one, because the two are the same fact: the link the
+/// pane draws is the served address with the key on it, and **Reset key** is the
+/// press that changes what every request is checked against. A router reading a
+/// stated machine and holding no key could be asked neither question.
+///
+/// Requests to it carry the cookie, the way a browser's do — see
+/// [`key::WorkbenchKey::cookie`].
+pub fn router_reading_tailscale_keyed(
+    pool: SqlitePool,
+    remote: remote::Tailscale,
+    key: key::WorkbenchKey,
+) -> Router {
+    routed(
+        pool,
+        updates::Updates::nothing_learned(),
+        nothing_bound(),
+        nowhere(),
+        sessions::Sessions::none(),
+        Gh::on_path(),
+        remote,
+        key::Gate::keyed(key),
+        onboarding::Machine::here(),
+    )
+}
+
+/// The Tailscale of a router that was not stood up to be reached from a phone:
+/// the host's own binary, in front of the port the workbench takes when nobody
+/// has said otherwise.
+///
+/// Never asked anything, in practice — nothing but the served router answers the
+/// Remote access pane — and honest where it is: what a suite that wants a
+/// stated answer stands up is [`router_reading_tailscale`].
+fn tailnet() -> remote::Tailscale {
+    remote::Tailscale::on_path(WORKBENCH_PORT)
+}
+
+/// The served router's own: the host's `tailscale` in front of the port this
+/// server bound, taking the operator grant through `escalation` where whatever
+/// started the process handed one over.
+///
+/// One place rather than two, because the two arms are one behaviour: what the
+/// pane does about a refused serve is show the line, and an app that can ask for
+/// the grant asks for it first — see [`remote::Elevate`].
+///
+/// And holding the Workbench Key, because the pane draws more than the serve:
+/// the address a serve puts in front of the workbench is only half of what a
+/// phone needs, and the key on the end of it is the other half — see [`key`].
+fn tailnet_over(
+    port: u16,
+    escalation: Option<Arc<dyn remote::Elevate>>,
+    key: key::WorkbenchKey,
+) -> remote::Tailscale {
+    let tailscale = remote::Tailscale::on_path(port).keyed(key);
+
+    match escalation {
+        Some(escalation) => tailscale.escalating(escalation),
+        None => tailscale,
+    }
+}
+
 /// The data directory of a router that has no use for one.
 ///
 /// The empty path, which nothing is created in — and nothing tries: a router
-/// watching nothing can register no Repo, so it has no Conversation to start and
-/// no worktree to put anywhere.
+/// stood up for a question about neither a Conversation nor a checkout has no
+/// worktree to put anywhere.
 fn nowhere() -> PathBuf {
     PathBuf::new()
 }
@@ -632,28 +834,38 @@ pub fn router_checking_updates(pool: SqlitePool, releases: Option<&str>) -> Rout
     routed(
         pool,
         updates::watching(releases),
-        WatchedPaths::none(),
         nothing_bound(),
         nowhere(),
         sessions::Sessions::none(),
         Gh::on_path(),
+        tailnet(),
+        key::Gate::open(),
+        onboarding::Machine::here(),
     )
 }
 
+/// Nine, because the state a router holds is what a router is built out of:
+/// each of these is one thing the served router was given and every other one
+/// stands in for. A struct of them would be this list with a name on it.
+#[allow(clippy::too_many_arguments)]
 fn routed(
     pool: SqlitePool,
     updates: updates::Updates,
-    watched: WatchedPaths,
     binds: sandbox::SandboxConfig,
     data_dir: PathBuf,
     sessions: sessions::Sessions,
     github: Gh,
+    remote: remote::Tailscale,
+    gate: key::Gate,
+    machine: onboarding::Machine,
 ) -> Router {
-    let settings = settings::Settings::in_data_dir(&data_dir);
-
     let state = AppState {
         pool,
-        settings: settings.clone(),
+
+        // A handle on the two files rather than what is in them: they are read
+        // at the moment they are wanted, so what the settings page saves reaches
+        // the next session without a restart — see [`settings`].
+        settings: settings::Settings::in_data_dir(&data_dir),
         nudges: nudge::Nudges::new(),
         settlements: Settlements::new(SETTLEMENT_BACKLOG),
         waits: Waits::new(),
@@ -663,17 +875,26 @@ fn routed(
         drivers: drivers::Drivers::new(),
         updates,
 
-        // The boundary the installation drew, widened by whatever the human has
-        // put in `config.yaml` — read at each admission rather than here, so a
-        // directory added on the settings page admits from the next request on.
-        watched: watched.reading(settings),
-
-        // And what the installation asked every sandbox to bind, kept whole for
+        // What the installation asked every sandbox to bind, kept whole for
         // the settings page: what a session gets is this composed with whatever
         // the file holds at the moment it spawns — see [`sandbox`].
         binds,
 
         github,
+
+        // And the host's `tailscale`, which is the whole of what the Remote access
+        // pane reads — see [`remote`].
+        remote,
+
+        // And the key the gate below stands on, so that the one press that
+        // re-issues it goes through the very handle every request is checked
+        // against — see [`key::Gate::held`].
+        key: gate.held(),
+
+        // And the machine the onboarding probes are made against, held with the
+        // verdict they settle at startup — see [`onboarding`].
+        onboarding: onboarding::Onboarding::probing(machine),
+
         data_dir,
         checkouts: Arc::new(tokio::sync::Mutex::new(())),
     };
@@ -730,6 +951,12 @@ fn routed(
     // waiting for a line nobody is going to type.
     nudging::listening(&state);
 
+    // And the verdict about the machine itself, which is the one sweep here
+    // that decides something rather than tidying something: whether this
+    // Verkstead has what it takes to run a session at all, reached once, now,
+    // and held for the length of the run — see [`onboarding::at_startup`].
+    onboarding::at_startup(&state);
+
     Router::new()
         // The one route that is nobody's Conversation: whether the server is up
         // is not a question about a piece of work.
@@ -748,7 +975,14 @@ fn routed(
         // a submit or a locking from the browser has to reach an agent
         // waiting on the endpoint above, and both halves have to agree about
         // which Sets a wait is being held on.
-        .merge(ui::routes())
+        //
+        // And it is behind the gate, where the two routes above are not: this
+        // namespace is the human's browser asking about everybody's work, and a
+        // session reaching the loopback must not be able to ask any of it. The
+        // first of the gate's two attachments — the other is over the fallback
+        // that answers every page of the workbench, which is put on in
+        // [`router_with_ui`]. See [`key`].
+        .merge(gate.guarding(ui::routes()))
         .with_state(state)
 }
 
@@ -766,34 +1000,88 @@ async fn health() -> &'static str {
 /// This is also the only router that checks for updates, because it is the only
 /// one with a viewer to draw the Notice in — see [`router_checking_updates`] for
 /// what `releases` is.
+///
+/// And the only one that is keyed, because it is the only one anybody is served
+/// by: `key` is the Workbench Key this Data Directory holds, and the gate over
+/// the viewer's namespace and over the fallback is what a session reaching the
+/// loopback finds instead of the workbench — see [`key`].
+///
+/// `remote` is the host's `tailscale` in front of the port this router is being
+/// served on, which is the one thing here that has to be told where the server
+/// is listening: a serve is this workbench's when it proxies to that port — see
+/// [`remote`].
 pub fn router_with_ui(
     pool: SqlitePool,
     releases: Option<&str>,
-    watched: WatchedPaths,
     data_dir: PathBuf,
     agents: Agents,
     gh: Gh,
+    remote: remote::Tailscale,
+    key: key::WorkbenchKey,
 ) -> Router {
     // Off the agents, for the reason [`router_running_sessions`] takes it off
     // them: one configured set, said once.
     let binds = agents.binds().clone();
+    let gate = key::Gate::keyed(key);
 
     routed(
         pool,
         updates::watching(releases),
-        watched,
         binds,
         data_dir,
         sessions::Sessions::under(agents),
         gh,
+        remote,
+        gate.clone(),
+        onboarding::Machine::here(),
     )
-    .fallback(viewer::serve::<viewer::Built>)
+    .fallback_service(guarded_viewer::<viewer::Built>(&gate))
 }
 
 /// The same, over a site named by the caller, which is how the tests ask what the
 /// server does with one without waiting on `pnpm build` to produce it.
 pub fn router_with_viewer<V: Embed + 'static>(pool: SqlitePool) -> Router {
     router(pool).fallback(viewer::serve::<V>)
+}
+
+/// [`router`], keyed: what the suite that asks about the gate itself stands up.
+///
+/// A constructor of its own rather than a flag on the others, because the others
+/// are what several hundred requests across the suites are built on and every
+/// one of them assumes an answer rather than a 401 — see [`key::Gate`].
+pub fn router_keyed(pool: SqlitePool, key: key::WorkbenchKey) -> Router {
+    routed(
+        pool,
+        updates::Updates::nothing_learned(),
+        nothing_bound(),
+        nowhere(),
+        sessions::Sessions::none(),
+        Gh::on_path(),
+        tailnet().keyed(key.clone()),
+        key::Gate::keyed(key),
+        onboarding::Machine::here(),
+    )
+}
+
+/// And the same with a site behind it, which is what the workbench's own pages
+/// are asked for through: the gate's second attachment is over the fallback, so
+/// a suite asking whether a page is gated needs a router that has one.
+pub fn router_keyed_with_viewer<V: Embed + 'static>(
+    pool: SqlitePool,
+    key: key::WorkbenchKey,
+) -> Router {
+    let gate = key::Gate::keyed(key.clone());
+
+    router_keyed(pool, key).fallback_service(guarded_viewer::<V>(&gate))
+}
+
+/// The viewer's fallback with the gate over it.
+///
+/// A router of its own rather than a layer on the outer one: the two routes the
+/// gate is not over — the health check and a session's own Conversation-scoped
+/// API — are on the outer router, and a layer there would cover them too.
+fn guarded_viewer<V: Embed + 'static>(gate: &key::Gate) -> Router {
+    gate.guarding(Router::new().fallback(viewer::serve::<V>))
 }
 
 /// Take the address, open the database, and serve until the process is stopped.
@@ -822,39 +1110,61 @@ pub async fn run(config: Config) -> Result<()> {
 /// that has one bound it before there was a runtime to bind it on — see [`run`]
 /// for why the address is settled first.
 ///
-/// The installation's Watched Paths are resolved before anything else: a
-/// directory that is not there is a misconfiguration to report at startup,
-/// where it can be fixed, rather than one to discover as a refusal weeks later.
-/// Being given none of them is not a misconfiguration — the settings file says
-/// Watched Paths too, and a standalone install starts with nothing configured
-/// anywhere and admits nothing until it is.
+/// A bare `verkstead serve` is configured by nobody and comes up all the same:
+/// there is nothing here that has to be said before the server can be reached,
+/// and everything that *was* said is resolved before it is served over.
 pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<()> {
-    let watched = WatchedPaths::resolve(&config.watched_paths)?;
+    // The Data Directory resolved and made, and the key in it read or written,
+    // before anything else this start does — see [`Config::workbench_key`], and
+    // [`run_on_keyed`] for the caller that arrives having already made this call.
+    let key = config.workbench_key()?;
 
-    // Both resolved at startup for the reason the Watched Paths are: a bind that
-    // names nothing, and a HOME the unit never said, are misconfigurations to
-    // report now rather than sessions that fail to start weeks later with nobody
-    // watching. The home is where a sandbox reads who git commits as, and it is
-    // what `~` means inside one, so a server without one can run no session at
-    // all.
+    // And nothing to escalate with: a server started this way was started from a
+    // shell or a unit file, where there is nobody at the machine to put a
+    // password dialog in front of — see [`remote::Elevate`].
+    run_on_keyed(listener, config, key, None).await
+}
+
+/// The same again, with the Workbench Key already in hand — and with whatever
+/// way of escalating the caller has.
+///
+/// Which is the desktop app's way in. The browser it opens is opened on the
+/// login link, so it has to hold the key before there is a server to ask one of
+/// — and what it hands over here is therefore the key the workbench is gated on,
+/// by being the same handle rather than by being read a second time. See
+/// `verkstead_desktop::Desktop::run`.
+///
+/// `escalation` is the other thing only that caller has: the operator grant the
+/// Remote access pane asks for is a command run with a privilege this process
+/// has not got, and the desktop app can ask the platform for one where a daemon
+/// cannot. `None` is every other way in, and is what the pane behaved as before
+/// there was an app to hand one over — see [`remote::Elevate`].
+pub async fn run_on_keyed(
+    listener: std::net::TcpListener,
+    config: Config,
+    key: key::WorkbenchKey,
+    escalation: Option<Arc<dyn remote::Elevate>>,
+) -> Result<()> {
+    // Resolved at startup: a bind that names nothing, and a HOME the unit never
+    // said, are misconfigurations to report now rather than sessions that fail
+    // to start weeks later with nobody watching. The home is where a sandbox
+    // reads who git commits as, and it is what `~` means inside one, so a server
+    // without one can run no session at all.
     let binds = sandbox::SandboxConfig::resolve(&config.sandbox_binds)?;
 
-    // Resolved and then made at startup, for the reason the Watched Paths are
-    // resolved at startup: a machine with nowhere to keep a Data Directory, and
-    // a directory Verkstead cannot write to, are misconfigurations to report now
-    // rather than ones to discover as a failed grilling weeks later. Where the
-    // flag said nothing this is the platform's own directory — see
-    // [`platform::data_dir`] — so the startup line below is now the only place a
+    // The same directory the key was kept in, resolved again rather than
+    // threaded through: what it comes to is the flag or the platform's own place
+    // for it, and neither of those changes between two calls a moment apart.
+    // Where the flag said nothing this is the platform's own directory — see
+    // [`platform::data_dir`] — so the startup line below is the only place a
     // human finds out which one that turned out to be.
-    let data_dir = platform::data_dir(config.data_dir.as_deref())?;
-    std::fs::create_dir_all(&data_dir)
-        .with_context(|| format!("creating data directory {}", data_dir.display()))?;
+    let data_dir = config.data_directory()?;
 
     // And where a session's HOME comes from, which wants the Data Directory
     // above on the platform that makes a real one under it — see
-    // [`sandbox::Homes`]. Refused for the reason the Watched Paths are: a HOME
-    // the unit never said is a misconfiguration to report now rather than a
-    // session that fails to start weeks later with nobody watching.
+    // [`sandbox::Homes`]. Refused for the reason the binds are: a HOME the unit
+    // never said is a misconfiguration to report now rather than a session that
+    // fails to start weeks later with nobody watching.
     let homes = sandbox::Homes::of_the_server(&data_dir).with_context(|| {
         format!(
             "no {} is set: a session's `~` is the home directory of whoever runs Verkstead, \
@@ -948,12 +1258,21 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
     let pipe = pipe::Listener::open(&data_dir, &pipe::Grants::of_this_process())
         .context("opening the named pipe a Windows session asks through")?;
 
+    // The one line an operator reads as Verkstead comes up, and so the daemon's
+    // whole way of handing the login link over: the address with the key on it,
+    // which is what a browser has to be pointed at to be let in at all
+    // (ADR-0015). A machine started from a unit file has no tray to press Open
+    // in, and this is what somebody reading the journal can paste.
+    //
+    // The secret is in the log, therefore, and that is the point of it. The
+    // journal is read by whoever the machine lets read it, which is where every
+    // other credential this server was started with is too — and re-issuing the
+    // key is what takes a link back off somebody who has read one.
     tracing::info!(
         listen = %config.listen,
+        workbench = %key::login_link(config.listen, &key),
         data_dir = %data_dir.display(),
         update_check = config.releases().is_some(),
-        watched = ?watched.paths(),
-        settings_watched = ?settings.config().watched_paths(),
         home = %homes.servers().display(),
         sandbox_binds = binds.count(),
         build_cache = ?cache.dir(),
@@ -984,7 +1303,6 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
     let app = router_with_ui(
         pool,
         config.releases(),
-        watched,
         data_dir,
         Agents::new(
             homes,
@@ -1001,6 +1319,15 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
         // token — the same one the sessions get, so one token is the whole
         // of Verkstead's GitHub auth.
         Gh::on_path().authenticated_by(settings),
+        // And whatever `tailscale` it has, asked about the port this server just
+        // bound: a serve is this workbench's when it proxies there, and an
+        // install told to listen somewhere else is one whose serve has to point
+        // somewhere else too — see [`remote`]. With whatever this process was
+        // started with a way to escalate through, where it was started with one.
+        tailnet_over(config.listen.port(), escalation, key.clone()),
+        // And the key this Data Directory holds, which is what the workbench
+        // and the viewer's own namespace are behind.
+        key,
     );
 
     // Two listeners over one router here, so that everything a request can ask

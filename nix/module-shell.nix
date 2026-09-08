@@ -23,8 +23,10 @@
 
 let
   # The `verkstead` user's login shell, in a configuration holding `chosen` and
-  # otherwise the least the module will evaluate with: it refuses a build with no
-  # Watched Path, and nothing else here is asked for.
+  # otherwise the least the module will evaluate with — which is `enable` and
+  # nothing else at all. That is worth a word: the module names no `paths`, and
+  # a build with none of them evaluating is the other thing this check proves,
+  # since it is the one that instantiates the module rather than booting it.
   #
   # The package, which is what the option holds; NixOS writes the path inside it
   # into passwd, `shellPath` being the attribute that says which file that is —
@@ -39,7 +41,6 @@ let
         {
           services.verkstead = {
             enable = true;
-            watchedPaths = [ "/srv/repos" ];
           }
           // chosen;
         }

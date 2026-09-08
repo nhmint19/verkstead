@@ -1,11 +1,11 @@
 //! Where a Conversation's work is done: the branch it is on and the worktree it
 //! is checked out in, made when grilling starts and removed when it is closed.
 //!
-//! Worktrees live under Verkstead's own data directory rather than inside a
-//! Watched Path. The Watched Paths are the boundary on what the *human* may
-//! point Verkstead at — repositories to register, accounts to run under — and a
+//! Worktrees live under Verkstead's own data directory rather than beside the
+//! repository they are cut from. What the *human* points Verkstead at — the
+//! repositories they register, the accounts they run under — is theirs, and a
 //! worktree is neither: it is something Verkstead made, in the one directory the
-//! packaged unit is given to write. Putting it inside a Watched Path would mean
+//! packaged unit is given to write. Putting it beside the repository would mean
 //! Verkstead's own scratch space appearing under a directory the human is also
 //! working in.
 //!

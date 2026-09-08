@@ -40,7 +40,7 @@
 
 import { A } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import { Show, createSignal, type JSX } from "solid-js";
+import { Show, type JSX } from "solid-js";
 
 import { publishShare, sharePath, shareToPullRequests } from "../api/client";
 import type {
@@ -50,6 +50,7 @@ import type {
   ShareCommented,
   SharePublished,
 } from "../api/types";
+import { Copy } from "../Copy";
 import { toast } from "../Toasts";
 import { utcStamp } from "../set/when";
 import { PaneSticky } from "../Panes";
@@ -224,7 +225,7 @@ export function Share(props: {
               <a href={shared().url} target="_blank" rel="noreferrer">
                 {shared().url}
               </a>
-              <Copy of={shared().url} />
+              <Copy of={shared().url} class={styles.copy} />
             </p>
 
             <p class={styles.when}>Taken {utcStamp(shared().at)}.</p>
@@ -305,36 +306,5 @@ export function Share(props: {
         on standing where it was.
       </Note>
     </>
-  );
-}
-
-/// The copy button beside the viewer's link: the whole of what most visits to
-/// this pane are for.
-///
-/// It says it copied and then stops saying it, because a clipboard write is
-/// silent — nothing on the screen changes, and a press that looks like it did
-/// nothing gets pressed again. A word for two seconds is the whole of the
-/// feedback; there is nothing to undo and nothing to report.
-///
-/// A clipboard the browser refuses — an insecure origin, a permission denied —
-/// leaves the link itself, which is selectable text beside the button. So a
-/// failure says nothing rather than opening a notice about a convenience.
-function Copy(props: { of: string }): JSX.Element {
-  const [copied, setCopied] = createSignal(false);
-
-  const copy = () => {
-    void navigator.clipboard
-      ?.writeText(props.of)
-      .then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      })
-      .catch(() => {});
-  };
-
-  return (
-    <button type="button" class={styles.copy} onClick={copy}>
-      {copied() ? "Copied" : "Copy"}
-    </button>
   );
 }

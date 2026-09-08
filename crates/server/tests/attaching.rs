@@ -22,17 +22,15 @@ use verkstead_render::{
     Attached, AttachmentOrigin, AttachmentRemoved, AttachmentView, ConversationView, Registered,
     Started,
 };
-use verkstead_server::{
-    WatchedPaths, attachments::MAX_BYTES, open_database, router_watching, store,
-};
+use verkstead_server::{attachments::MAX_BYTES, open_database, router_keeping, store};
 
-/// A watched directory holding one registered repository, a Conversation
-/// drafting on it, and the app over both.
+/// A directory holding one registered repository, a Conversation drafting on
+/// it, and the app over both.
 ///
-/// Hands back the watched directory, the Data Directory, the app, the pool and
-/// the Conversation — the last two because half of what these tests assert is
-/// on disk under the Data Directory and the other half is a state only the
-/// store can put a Conversation into.
+/// Hands back that directory, the Data Directory, the app, the pool and the
+/// Conversation — the last two because half of what these tests assert is on
+/// disk under the Data Directory and the other half is a state only the store
+/// can put a Conversation into.
 async fn drafting() -> (
     tempfile::TempDir,
     tempfile::TempDir,
@@ -40,19 +38,15 @@ async fn drafting() -> (
     SqlitePool,
     i64,
 ) {
-    let watched = tempfile::tempdir().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
     let dir = tempfile::tempdir().unwrap();
 
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
-    let app = router_watching(
-        pool.clone(),
-        WatchedPaths::resolve(&[watched.path().to_owned()]).unwrap(),
-        dir.path().to_owned(),
-    );
+    let app = router_keeping(pool.clone(), dir.path().to_owned());
 
-    let repo = repository(watched.path().join("verkstead"));
+    let repo = repository(elsewhere.path().join("verkstead"));
     let registered: Registered =
         post(&app, "/api/ui/repos", &serde_json::json!({ "path": repo })).await;
     assert_eq!(registered, Registered::Added);
@@ -68,7 +62,7 @@ async fn drafting() -> (
         panic!("expected the Conversation to start, got {started:?}");
     };
 
-    (watched, dir, app, pool, id)
+    (elsewhere, dir, app, pool, id)
 }
 
 /// A git repository at `path`, with one commit on `main` so it has a branch to
@@ -221,7 +215,7 @@ fn read<T: DeserializeOwned>(body: &str) -> T {
 /// every read after it.
 #[tokio::test]
 async fn a_file_lands_in_the_conversations_directory_and_on_its_record() {
-    let (_watched, dir, app, _pool, id) = drafting().await;
+    let (_elsewhere, dir, app, _pool, id) = drafting().await;
 
     let attachment = kept(attach(&app, id, "wireframe.png", b"PNG bytes").await);
 
@@ -239,7 +233,7 @@ async fn a_file_lands_in_the_conversations_directory_and_on_its_record() {
 /// The record survives a fresh read, which is what a reload is.
 #[tokio::test]
 async fn several_files_come_back_in_the_order_they_were_attached() {
-    let (_watched, _dir, app, _pool, id) = drafting().await;
+    let (_elsewhere, _dir, app, _pool, id) = drafting().await;
 
     for name in ["zebra.csv", "apple.png"] {
         kept(attach(&app, id, name, b"...").await);
@@ -258,7 +252,7 @@ async fn several_files_come_back_in_the_order_they_were_attached() {
 /// its own stem, and both files are records.
 #[tokio::test]
 async fn the_same_name_twice_is_two_files_and_the_second_is_renamed() {
-    let (_watched, dir, app, _pool, id) = drafting().await;
+    let (_elsewhere, dir, app, _pool, id) = drafting().await;
 
     let first = kept(attach(&app, id, "notes.md", b"first").await);
     let second = kept(attach(&app, id, "notes.md", b"second").await);
@@ -279,7 +273,7 @@ async fn the_same_name_twice_is_two_files_and_the_second_is_renamed() {
 /// Removing a pill takes the row and the file together.
 #[tokio::test]
 async fn removing_one_takes_the_row_and_the_file() {
-    let (_watched, dir, app, _pool, id) = drafting().await;
+    let (_elsewhere, dir, app, _pool, id) = drafting().await;
 
     let attachment = kept(attach(&app, id, "notes.md", b"first").await);
 
@@ -295,7 +289,7 @@ async fn removing_one_takes_the_row_and_the_file() {
 /// a refusal — the companion rows' rule, said again.
 #[tokio::test]
 async fn removing_one_that_has_already_gone_is_the_state_that_was_asked_for() {
-    let (_watched, _dir, app, _pool, id) = drafting().await;
+    let (_elsewhere, _dir, app, _pool, id) = drafting().await;
 
     let attachment = kept(attach(&app, id, "notes.md", b"first").await);
 
@@ -309,7 +303,7 @@ async fn removing_one_that_has_already_gone_is_the_state_that_was_asked_for() {
 /// One Conversation's file is not another's to remove.
 #[tokio::test]
 async fn another_conversations_attachment_is_not_this_ones_to_remove() {
-    let (_watched, dir, app, pool, mine) = drafting().await;
+    let (_elsewhere, dir, app, pool, mine) = drafting().await;
 
     let repos: Vec<verkstead_render::RepoEntry> = get(&app, "/api/ui/repos").await;
     let theirs = store::start_conversation(&pool, repos[0].id, "elsewhere")
@@ -336,7 +330,7 @@ async fn another_conversations_attachment_is_not_this_ones_to_remove() {
 /// say — and nothing lands on disk.
 #[tokio::test]
 async fn a_file_over_the_cap_is_refused() {
-    let (_watched, dir, app, _pool, id) = drafting().await;
+    let (_elsewhere, dir, app, _pool, id) = drafting().await;
 
     let too_much = vec![0u8; MAX_BYTES + 1];
 
@@ -352,7 +346,7 @@ async fn a_file_over_the_cap_is_refused() {
 /// freeze with it.
 #[tokio::test]
 async fn an_upload_to_a_frozen_brief_is_refused() {
-    let (_watched, dir, app, pool, id) = drafting().await;
+    let (_elsewhere, dir, app, pool, id) = drafting().await;
 
     store::set_state(&pool, id, store::Lifecycle::Implementing)
         .await
@@ -369,7 +363,7 @@ async fn an_upload_to_a_frozen_brief_is_refused() {
 /// cannot be attached cannot be taken off either.
 #[tokio::test]
 async fn a_removal_on_a_frozen_brief_is_refused() {
-    let (_watched, dir, app, pool, id) = drafting().await;
+    let (_elsewhere, dir, app, pool, id) = drafting().await;
 
     let attachment = kept(attach(&app, id, "notes.md", b"first").await);
 
@@ -388,7 +382,7 @@ async fn a_removal_on_a_frozen_brief_is_refused() {
 /// one — and nothing lands anywhere, which is the whole point of the check.
 #[tokio::test]
 async fn a_name_that_is_not_a_plain_base_name_is_refused() {
-    let (_watched, dir, app, _pool, id) = drafting().await;
+    let (_elsewhere, dir, app, _pool, id) = drafting().await;
 
     for name in [
         "../escape.md",
@@ -416,7 +410,7 @@ async fn a_name_that_is_not_a_plain_base_name_is_refused() {
 /// An upload to a Conversation that is not there says so.
 #[tokio::test]
 async fn an_upload_to_no_conversation_says_so() {
-    let (_watched, _dir, app, _pool, _id) = drafting().await;
+    let (_elsewhere, _dir, app, _pool, _id) = drafting().await;
 
     assert_eq!(
         attach(&app, 404, "notes.md", b"nobody").await,
@@ -441,7 +435,7 @@ async fn an_upload_to_no_conversation_says_so() {
 /// what a restart is — the sweep runs as the router is built.
 #[tokio::test]
 async fn a_stray_directory_is_swept_at_a_server_start_and_a_live_ones_is_not() {
-    let (watched, dir, app, pool, id) = drafting().await;
+    let (_elsewhere, dir, app, pool, id) = drafting().await;
 
     kept(attach(&app, id, "notes.md", b"the human's own").await);
 
@@ -451,11 +445,7 @@ async fn a_stray_directory_is_swept_at_a_server_start_and_a_live_ones_is_not() {
     std::fs::create_dir_all(&stray).unwrap();
     std::fs::write(stray.join("forgotten.md"), "nobody's\n").unwrap();
 
-    let restarted = router_watching(
-        pool.clone(),
-        WatchedPaths::resolve(&[watched.path().to_owned()]).unwrap(),
-        dir.path().to_owned(),
-    );
+    let restarted = router_keeping(pool.clone(), dir.path().to_owned());
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
 

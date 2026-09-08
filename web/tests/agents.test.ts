@@ -15,9 +15,9 @@ import { briefly, reading } from "../src/agents";
 import type { ProfileEntry } from "../src/api/types";
 
 /// One saved profile of a backend, which is all this cares about them: a name
-/// and an agent type.
+/// and an agent type. `null` for the name is a profile nobody named.
 const profile = (
-  name: string,
+  name: string | null,
   agent_type: ProfileEntry["account"]["agent_type"],
 ): ProfileEntry => ({
   id: 1,
@@ -144,6 +144,45 @@ describe("the reading of who runs a session", () => {
     expect(reading({ agent: null, model: null, profile: "Work" }, TWO)).toBe(
       "Work",
     );
+  });
+
+  /// A profile nobody named is the one account on its backend in the ordinary
+  /// case, and the backend's own name and the model say the whole of what it is:
+  /// the same rule that drops a name drops this one, so nothing has to be
+  /// invented for it.
+  it("says nothing for a profile nobody named where nothing has to be said", () => {
+    expect(
+      reading({ agent: "Claude", model: "claude-fable-5", profile: null }, [
+        profile(null, "Claude"),
+      ]),
+    ).toBe("Claude Code Fable 5");
+  });
+
+  /// And *Default* where the name has to be said after all: a second account on
+  /// the backend, where the name is the whole of the difference between the
+  /// rows, and an em dash with nothing after it would be no difference at all.
+  it("reads a profile nobody named as Default where the name has to be shown", () => {
+    const both = [profile(null, "Claude"), profile("Work", "Claude")];
+
+    expect(
+      reading({ agent: "Claude", model: "claude-fable-5", profile: null }, both),
+    ).toBe("Claude Code Fable 5 — Default");
+    expect(
+      briefly({ agent: "Claude", model: "claude-fable-5", profile: null }, both),
+    ).toBe("Fable 5 — Default");
+  });
+
+  /// A *record* with no name in it is not an account to point at — a run from
+  /// before Verkstead wrote the name down, and a run under a profile nobody
+  /// named, arrive the same way — so it reads as the backend and the model
+  /// alone rather than as Default.
+  it("draws a record with no name in it as the backend and the model", () => {
+    expect(
+      reading(
+        { agent: "Claude", model: "claude-fable-5", profile: "" },
+        [profile(null, "Claude"), profile("Work", "Claude")],
+      ),
+    ).toBe("Claude Code Fable 5");
   });
 });
 

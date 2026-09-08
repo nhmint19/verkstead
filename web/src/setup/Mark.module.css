@@ -1,0 +1,31 @@
+/* The three marks — see `Mark.tsx`.
+
+   Their own sheet because the mark is its own component: a step's heading and a
+   dependency row both draw one, and the paint belongs with the shape rather
+   than with whichever of the two happened to want it first. */
+
+/* The tick is the accent's own green rather than the ember: it is an outcome,
+   and it is the same green a Diff's additions are drawn in. */
+.done {
+  flex: none;
+  width: 1em;
+  color: var(--added);
+}
+
+/* And a thing still to do, as the empty ring a tick is cut into. */
+.waiting {
+  flex: none;
+  box-sizing: border-box;
+  width: 0.85em;
+  height: 0.85em;
+  border: 2px solid var(--edge);
+  border-radius: 50%;
+}
+
+/* And the one there is nothing to wait for, in the quiet the rest of a moot row
+   is drawn in: neither an outcome nor a thing anybody is going to do. */
+.moot {
+  flex: none;
+  width: 1em;
+  color: var(--ink-soft);
+}

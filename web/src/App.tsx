@@ -1,15 +1,18 @@
 //! The application: everything under the API routes the agents use.
 
-import { Route, Router } from "@solidjs/router";
+import { Navigate, Route, Router } from "@solidjs/router";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
-import { onCleanup, onMount, type JSX } from "solid-js";
+import { Show, onCleanup, onMount, type JSX } from "solid-js";
 
 import styles from "./App.module.css";
 import { Toasts } from "./Toasts";
-import { retrying } from "./api/client";
+import { loadOnboarding, retrying } from "./api/client";
+import { useReading } from "./freshness";
 import { Empty } from "./notices";
 import { listenForNudges } from "./nudge";
 import { SettingsPage, panes } from "./settings/SettingsPage";
+import { SetupPage } from "./setup/SetupPage";
+import { SETUP } from "./setup/steps";
 import { ComposePage } from "./workbench/Compose";
 import { forget } from "./workbench/eager";
 import { Workbench } from "./workbench/Workbench";
@@ -47,61 +50,128 @@ export function App(): JSX.Element {
 
   return (
     <QueryClientProvider client={queries}>
-      <Router root={Shell}>
-        {/* The workbench has the root: it is what Verkstead is for, and what a
-            device with a window opens on. The Conversation in the URL is a
-            record of which one is open rather than a document of its own — the
-            same page draws both. */}
-        <Route path="/" component={Workbench} />
-        {/* And each of that Conversation's details panes under it, so what is
-            open survives a reload and can be linked to. Nested rather than
-            written out as five routes of their own, because the workbench is
-            one page across all of them: a route the router swaps for another
-            takes its component down with it, and everything the middle pane was
-            holding — a Brief half typed into above all — would go every time a
-            card was pressed. A parent route stays up while the leaf under it
-            changes, and these leaves draw nothing: what they are is what the
-            path says, and the page reads that off the URL.
-
-            The `events/` segment keeps the ids apart from the panes named by a
-            word beside them — see `openings.ts`. */}
-        <Route path="/conversations/:id" component={Workbench}>
-          <Route path="/" />
-          <Route path="/events/:event" />
-          <Route path="/backlog" />
-          <Route path="/share" />
-          <Route path="/terminal" />
-          <Route path="/roadmaps/:name" />
-        </Route>
-        {/* And the composer before there is anything for it to be about: the
-            same page, working what the device is holding rather than a record.
-            A page of its own rather than a pane of the workbench, because there
-            is no Conversation for the workbench to be about — what it shares
-            with it is the sidebar and the frame, both of which it draws. */}
-        <Route path="/compose" component={ComposePage} />
-        {/* Everything the human configures, on one page: the GitHub token and
-            the git author Verkstead was told, the Agent Profiles a session runs
-            under, and the Repos a Conversation is started against. The Repos
-            and the Profiles had routes of their own until they were folded in
-            here; those paths are no such page now, rather than redirects to
-            this one.
-
-            With a details pane of its own for each thing on it that is opened
-            rather than read, nested for the reason the Conversation's are: the
-            settings are one page across all of them, and a route the router
-            swapped for another would take the middle pane down with it every
-            time a card was pressed.
-
-            Which panes there are is that page's own — see `panes` in
-            `SettingsPage.tsx`. Written out here, this list was a second opinion
-            about where a card leads, and a section added to the page without a
-            line added here answered its own path with the catch-all below. */}
-        <Route path="/settings" component={SettingsPage}>
-          {panes()}
-        </Route>
-        <Route path="*" component={NoSuchPage} />
-      </Router>
+      <Gate />
     </QueryClientProvider>
+  );
+}
+
+/// Which of the two apps this is: the wizard, or the workbench.
+///
+/// The gate sits here, around the router, rather than inside any page — see
+/// ADR-0016. While onboarding mode is on there is nowhere to be but `/setup`,
+/// and the way to say that once is to give the router a table with one page in
+/// it and a redirect for everything else. A guard written into each page would
+/// be the same sentence said eight times, and the ninth page added would be the
+/// one nobody said it on.
+///
+/// Which also settles the other half: while the mode is off there is no
+/// `/setup` route at all, so the path falls to the catch-all exactly as any
+/// other path nothing answers does. The wizard is a first run rather than a
+/// page to visit.
+///
+/// **Nothing at all until the verdict has landed.** The mode is one small read
+/// off the machine this page is served by, and the alternative to waiting for
+/// it is drawing the workbench and then taking it away — a fresh install's
+/// first sight of Verkstead being a flash of somebody else's empty lists. A
+/// read that fails is not a verdict either: the app draws as it always did,
+/// because a server that cannot say whether it is set up is one that has been
+/// answering everything else for months.
+///
+/// Exported for the reason [`Shell`] is: what a test about the route tables has
+/// to mount is the gate the app really has, and [`App`] carries a query client
+/// of its own that outlives every render — a verdict cached by one test would
+/// be the wrong app drawn for a moment in the next, with a redirect fired out
+/// of it.
+export function Gate(): JSX.Element {
+  const onboarding = useReading(() => ({
+    queryKey: ["onboarding"],
+    queryFn: loadOnboarding,
+    // The same query the wizard reads, under the same key: one read of the
+    // machine between the two of them, and the interval that keeps it fresh is
+    // the wizard's own — see `SetupPage.tsx`.
+    freshness: { reconcile: "dependency" },
+  }));
+
+  return (
+    <Show when={!onboarding.isPending}>
+      <Show when={onboarding.data?.mode} fallback={<Verkstead />}>
+        <Onboarding />
+      </Show>
+    </Show>
+  );
+}
+
+/// The wizard and nothing else: `/setup`, and every other URL redirected onto
+/// it.
+///
+/// A replace rather than a push, so that the back button does not walk into a
+/// page that will only redirect again.
+function Onboarding(): JSX.Element {
+  return (
+    <Router root={Shell}>
+      <Route path={SETUP} component={SetupPage} />
+      <Route path="*" component={() => <Navigate href={SETUP} />} />
+    </Router>
+  );
+}
+
+/// And the app as it has always been.
+function Verkstead(): JSX.Element {
+  return (
+    <Router root={Shell}>
+      {/* The workbench has the root: it is what Verkstead is for, and what a
+          device with a window opens on. The Conversation in the URL is a
+          record of which one is open rather than a document of its own — the
+          same page draws both. */}
+      <Route path="/" component={Workbench} />
+      {/* And each of that Conversation's details panes under it, so what is
+          open survives a reload and can be linked to. Nested rather than
+          written out as five routes of their own, because the workbench is
+          one page across all of them: a route the router swaps for another
+          takes its component down with it, and everything the middle pane was
+          holding — a Brief half typed into above all — would go every time a
+          card was pressed. A parent route stays up while the leaf under it
+          changes, and these leaves draw nothing: what they are is what the
+          path says, and the page reads that off the URL.
+
+          The `events/` segment keeps the ids apart from the panes named by a
+          word beside them — see `openings.ts`. */}
+      <Route path="/conversations/:id" component={Workbench}>
+        <Route path="/" />
+        <Route path="/events/:event" />
+        <Route path="/backlog" />
+        <Route path="/share" />
+        <Route path="/terminal" />
+        <Route path="/roadmaps/:name" />
+      </Route>
+      {/* And the composer before there is anything for it to be about: the
+          same page, working what the device is holding rather than a record.
+          A page of its own rather than a pane of the workbench, because there
+          is no Conversation for the workbench to be about — what it shares
+          with it is the sidebar and the frame, both of which it draws. */}
+      <Route path="/compose" component={ComposePage} />
+      {/* Everything the human configures, on one page: the GitHub token and
+          the git author Verkstead was told, the Agent Profiles a session runs
+          under, and the Repos a Conversation is started against. The Repos
+          and the Profiles had routes of their own until they were folded in
+          here; those paths are no such page now, rather than redirects to
+          this one.
+
+          With a details pane of its own for each thing on it that is opened
+          rather than read, nested for the reason the Conversation's are: the
+          settings are one page across all of them, and a route the router
+          swapped for another would take the middle pane down with it every
+          time a card was pressed.
+
+          Which panes there are is that page's own — see `panes` in
+          `SettingsPage.tsx`. Written out here, this list was a second opinion
+          about where a card leads, and a section added to the page without a
+          line added here answered its own path with the catch-all below. */}
+      <Route path="/settings" component={SettingsPage}>
+        {panes()}
+      </Route>
+      <Route path="*" component={NoSuchPage} />
+    </Router>
   );
 }
 

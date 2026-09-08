@@ -1,12 +1,12 @@
-//! The paths on the settings page: what the card says of the two lists, what the
+//! The paths on the settings page: what the card says of the binds, what the
 //! pane draws of each row, and what adding or taking one away puts on the wire —
 //! and the same rows on one Repo's own pane, which is where a bind scoped to a
 //! Repo is drawn.
 //!
 //! Three things mounted apart, because that is what they are: a card in the
-//! middle pane saying how the lists stand and whether anything is wrong with
-//! them, the rows that rewrite them in the details pane it opens, and one Repo's
-//! own binds in a section of the pane that Repo is opened at. All three read the
+//! middle pane saying how the list stands and whether anything is wrong with it,
+//! the rows that rewrite it in the details pane it opens, and one Repo's own
+//! binds in a section of the pane that Repo is opened at. All three read the
 //! one settings query and all three save through the one endpoint, which is what
 //! the last group below is about: a press on one of them must not cost what the
 //! others are drawn from.
@@ -19,13 +19,13 @@
 //!   that offered to remove one would be a page offering something the server
 //!   would silently ignore.
 //! - **What a save carries.** One request writes the whole of `config.yaml`, so
-//!   adding a watched path must not cost a bind, a token or a build cache size —
-//!   and it must not cost a Repo's own bind either, which is a row this pane
-//!   never draws and still has to send back.
+//!   adding a bind must not cost a token or a build cache size — and it must not
+//!   cost a Repo's own bind either, which is a row this pane never draws and
+//!   still has to send back.
 //! - **What a row reports.** Whether the server can see what an entry names is
 //!   the one thing a human cannot check from a phone, and it is said in the
 //!   server's own words on the row itself.
-//! - **What a browse writes.** All three fields browse, and what a browse leaves
+//! - **What a browse writes.** Both fields browse, and what a browse leaves
 //!   in one goes to the server exactly as a typed path does — the dropdown is a
 //!   way of writing the box rather than a second way of saving. How the dropdown
 //!   itself behaves is asked in `browsing.test.tsx`, where the field is driven
@@ -64,10 +64,8 @@ const UNSET = unset as SettingsView;
 const REPOS = repos as RepoEntry[];
 
 /// The settings' own entries the fixture holds, as a save puts them back on the
-/// wire — one watched path, one bind every sandbox gets, and one a single Repo
-/// gets. The last of those is not a row on this pane and rides along on every
-/// save it makes.
-const WATCHED = "/home/ada/src";
+/// wire — one bind every sandbox gets, and one a single Repo gets. The second is
+/// not a row on this pane and rides along on every save it makes.
 const BIND = "/var/cache/verkstead-node";
 const SCOPED = "verkstead=/var/cache/verkstead-cargo";
 
@@ -77,7 +75,7 @@ const REPO = "verkstead";
 const OWN = "/var/cache/verkstead-cargo";
 
 /// The rest of the settings as every save from this pane sends them: the author
-/// as it stands, the token untouched, and the two the sections above own.
+/// as it stands, the token untouched, and what the sections above own.
 const REST = {
   git_author: TOLD.git_author,
   github_token: "Keep",
@@ -98,25 +96,17 @@ const REST = {
   share_on_done: TOLD.share_on_done,
 };
 
-/// The same settings with the installation having said one of each as well,
+/// The same settings with the installation having said one of its own as well,
 /// which no fixture carries: the router that writes them is started with none of
 /// its own, the way a standalone install is.
 ///
-/// They go in front of the settings' own, which is the order the server composes
-/// the lists in: a flag is said once when the machine is set up, and the file is
+/// It goes in front of the settings' own, which is the order the server composes
+/// the list in: a flag is said once when the machine is set up, and the file is
 /// where somebody has been adding to it since.
 function installed(standing: SettingsView): SettingsView {
   return {
     ...standing,
     paths: {
-      watched: [
-        {
-          path: "/srv/work",
-          source: "Installation",
-          resolution: "Resolves",
-        },
-        ...standing.paths.watched,
-      ],
       binds: [
         {
           path: "/etc/verkstead/certs",
@@ -157,10 +147,6 @@ function seen(standing: SettingsView): SettingsView {
   return {
     ...standing,
     paths: {
-      watched: standing.paths.watched.map((entry) => ({
-        ...entry,
-        resolution: "Resolves" as const,
-      })),
       binds: standing.paths.binds.map((entry) => ({
         ...entry,
         resolution: "Resolves" as const,
@@ -192,7 +178,7 @@ function mountCard(open = false) {
   };
 }
 
-/// The two lists in the details pane, and what its way back asked for.
+/// The binds in the details pane, and what its way back asked for.
 function mountPane() {
   const back = vi.fn();
   return { ...mounting(() => <PathsPane back={back} />), back };
@@ -259,13 +245,12 @@ async function theCard(container: ParentNode): Promise<HTMLElement> {
   });
 }
 
-/// The two lists of the pane, in the order they are read down: the watched paths
-/// and then the binds.
-async function lists(container: ParentNode): Promise<HTMLElement[]> {
+/// The one list of the pane, which is the binds every sandbox gets.
+async function list(container: ParentNode): Promise<HTMLElement> {
   return await waitFor(() => {
-    const both = [...container.querySelectorAll<HTMLElement>(`.${styles.list}`)];
-    expect(both, "expected both lists to be drawn").toHaveLength(2);
-    return both;
+    const drawn = [...container.querySelectorAll<HTMLElement>(`.${styles.list}`)];
+    expect(drawn, "expected the list to be drawn").toHaveLength(1);
+    return drawn[0]!;
   });
 }
 
@@ -280,33 +265,33 @@ function path(row: ParentNode): string {
 }
 
 describe("the card", () => {
-  /// What somebody scanning the page is after: how much of each list stands.
-  /// The binds counted are the ones every sandbox gets — a Repo's own is on that
+  /// What somebody scanning the page is after: how much of the list stands. The
+  /// binds counted are the ones every sandbox gets — a Repo's own is on that
   /// Repo's pane, and counting it here would be counting a row this section
   /// cannot show.
-  it("says how many watched paths and binds stand", async () => {
+  it("says how many binds stand", async () => {
     theSettings(seen(TOLD));
     const { container } = mountCard();
 
     await theCard(container);
 
     expect(container.querySelector(`.${styles.standing}`)!.textContent).toBe(
-      "1 watched path, and 1 bind every sandbox gets.",
+      "1 bind every sandbox gets.",
     );
   });
 
-  /// The state a fresh standalone install opens in, said with what it costs
-  /// rather than as two empty lists that would read as a page with nothing left
-  /// to ask for.
-  it("says with no watched path that no repo can be registered", async () => {
+  /// A machine nobody has added one to is the ordinary state rather than one
+  /// half set up, so the card counts and says nothing else.
+  it("says nothing is wrong where nothing is configured at all", async () => {
     theSettings(UNSET);
     const { container } = mountCard();
 
     await theCard(container);
 
-    await waitFor(() => screen.getByText(/No watched path is configured/));
-    expect(screen.getByText(/no repo can be registered/)).toBeTruthy();
-    expect(container.querySelector(`.${styles.warning}`)).not.toBeNull();
+    expect(container.querySelector(`.${styles.standing}`)!.textContent).toBe(
+      "0 binds every sandbox gets.",
+    );
+    expect(container.querySelector(`.${styles.warning}`)).toBeNull();
   });
 
   /// And the other thing the browser can see and the human cannot: an entry that
@@ -322,12 +307,12 @@ describe("the card", () => {
 
     await theCard(container);
 
-    // The watched path, the bind every sandbox gets, and the one written for a
-    // Repo — which this section does not list and does count.
-    await waitFor(() => screen.getByText(/3 entries the server cannot see/));
+    // The bind every sandbox gets, and the one written for a Repo — which this
+    // section does not list and does count.
+    await waitFor(() => screen.getByText(/2 entries the server cannot see/));
   });
 
-  /// And it says which pane to open, because one of the three is not on this
+  /// And it says which pane to open, because one of the two is not on this
   /// one: sending somebody to a list the row is not in is the warning that
   /// wastes the trip.
   it("sends the human to the repo's pane where one of them is a repo's", async () => {
@@ -357,7 +342,7 @@ describe("the card", () => {
     await theCard(container);
 
     await waitFor(() =>
-      screen.getByText(/2 entries the server cannot see\. Open this section/),
+      screen.getByText(/1 entry the server cannot see\. Open this section/),
     );
     expect(screen.queryByText(/the repo a bind is written for/)).toBeNull();
   });
@@ -402,24 +387,22 @@ describe("the card", () => {
 });
 
 describe("the pane", () => {
-  it("draws the two lists apart", async () => {
+  it("draws the binds under a heading of their own", async () => {
     theSettings(TOLD);
     const { container } = mountPane();
 
-    const [watched, binds] = await lists(container);
+    const binds = await list(container);
 
-    expect(watched!.querySelector("h2")!.textContent).toBe("Watched paths");
-    expect(binds!.querySelector("h2")!.textContent).toBe("Sandbox binds");
+    expect(binds.querySelector("h2")!.textContent).toBe("Sandbox binds");
   });
 
-  it("draws every watched path and every global bind", async () => {
+  it("draws every global bind", async () => {
     theSettings(installed(TOLD));
     const { container } = mountPane();
 
-    const [watched, binds] = await lists(container);
+    const binds = await list(container);
 
-    expect(rows(watched!).map(path)).toEqual(["/srv/work", WATCHED]);
-    expect(rows(binds!).map(path)).toEqual(["/etc/verkstead/certs", BIND]);
+    expect(rows(binds).map(path)).toEqual(["/etc/verkstead/certs", BIND]);
   });
 
   /// A bind scoped to one Repo is that Repo's pane's, so it is no row here — and
@@ -428,9 +411,9 @@ describe("the pane", () => {
     theSettings(TOLD);
     const { container } = mountPane();
 
-    const [, binds] = await lists(container);
+    const binds = await list(container);
 
-    expect(rows(binds!).map(path)).toEqual([BIND]);
+    expect(rows(binds).map(path)).toEqual([BIND]);
     expect(screen.queryByText("/var/cache/verkstead-cargo")).toBeNull();
   });
 
@@ -443,10 +426,10 @@ describe("the pane", () => {
     registered(TOLD, WITHOUT_THE_REPO);
     const { container } = mountPane();
 
-    const [, binds] = await lists(container);
+    const binds = await list(container);
 
-    await waitFor(() => expect(rows(binds!)).toHaveLength(2));
-    expect(rows(binds!).map(path)).toEqual([BIND, OWN]);
+    await waitFor(() => expect(rows(binds)).toHaveLength(2));
+    expect(rows(binds).map(path)).toEqual([BIND, OWN]);
   });
 
   /// And says both things about it: which name it was written for, and that
@@ -455,16 +438,16 @@ describe("the pane", () => {
     registered(TOLD, WITHOUT_THE_REPO);
     const { container } = mountPane();
 
-    const [, binds] = await lists(container);
-    await waitFor(() => expect(rows(binds!)).toHaveLength(2));
+    const binds = await list(container);
+    await waitFor(() => expect(rows(binds)).toHaveLength(2));
 
-    const stray = rows(binds!)[1]!;
+    const stray = rows(binds)[1]!;
 
     expect(stray.textContent).toContain(`written for ${REPO}`);
     expect(stray.textContent).toContain("No repo is registered under that name");
 
     // And the row beside it, which is nobody's, says neither.
-    expect(rows(binds!)[0]!.textContent).not.toContain("written for");
+    expect(rows(binds)[0]!.textContent).not.toContain("written for");
   });
 
   /// Nothing is a stray until the registry has been read. A row that appeared
@@ -474,9 +457,9 @@ describe("the pane", () => {
     registered(TOLD, hangs());
     const { container } = mountPane();
 
-    const [, binds] = await lists(container);
+    const binds = await list(container);
 
-    expect(rows(binds!).map(path)).toEqual([BIND]);
+    expect(rows(binds).map(path)).toEqual([BIND]);
   });
 
   /// And it can be taken away, which is the whole point of drawing it. What a
@@ -490,15 +473,14 @@ describe("the pane", () => {
     );
     const { container } = mountPane();
 
-    const [, binds] = await lists(container);
-    await waitFor(() => expect(rows(binds!)).toHaveLength(2));
+    const binds = await list(container);
+    await waitFor(() => expect(rows(binds)).toHaveLength(2));
 
-    fireEvent.click(rows(binds!)[1]!.querySelector("button")!);
+    fireEvent.click(rows(binds)[1]!.querySelector("button")!);
 
     await waitFor(() =>
       expect(sent(fetching)).toMatchObject({
         ...REST,
-        watched_paths: [WATCHED],
         sandbox_binds: [BIND],
       }),
     );
@@ -511,8 +493,7 @@ describe("the pane", () => {
     theSettings(installed(TOLD));
     const { container } = mountPane();
 
-    const [watched] = await lists(container);
-    const [installation, settings] = rows(watched!);
+    const [installation, settings] = rows(await list(container));
 
     expect(installation!.querySelector(`.${rowStyles.source}`)!.textContent).toBe(
       "the installation's",
@@ -531,37 +512,32 @@ describe("the pane", () => {
     theSettings(TOLD);
     const { container } = mountPane();
 
-    const [watched] = await lists(container);
+    const binds = await list(container);
 
-    expect(rows(watched!)[0]!.querySelector(`.${rowStyles.unresolved}`)!.textContent)
-      .toBe(
-        "the server cannot see it: No such file or directory (os error 2)",
-      );
+    expect(rows(binds)[0]!.querySelector(`.${rowStyles.unresolved}`)!.textContent)
+      .toBe("the server cannot see it: there is nothing at that path");
   });
 
   it("says nothing on a row the server can see", async () => {
     theSettings(seen(TOLD));
     const { container } = mountPane();
 
-    const [watched] = await lists(container);
+    const binds = await list(container);
 
-    expect(rows(watched!)[0]!.querySelector(`.${rowStyles.unresolved}`)).toBeNull();
+    expect(rows(binds)[0]!.querySelector(`.${rowStyles.unresolved}`)).toBeNull();
   });
 
-  /// The state a fresh standalone install opens in, with what it costs said
-  /// beside it.
-  it("says with no watched path that nothing can be registered", async () => {
+  /// A machine nobody has added a bind to: the empty line rather than a warning,
+  /// because there is nothing wrong with a sandbox that needs no extra directory.
+  it("draws the empty line where nothing is configured at all", async () => {
     theSettings(UNSET);
     const { container } = mountPane();
 
-    const [watched, binds] = await lists(container);
+    const binds = await list(container);
 
-    await waitFor(() =>
-      screen.getByText(/No watched path is configured anywhere/),
-    );
-    expect(screen.getByText(/nothing can be registered/)).toBeTruthy();
-    expect(rows(watched!)).toHaveLength(0);
-    expect(rows(binds!)).toHaveLength(0);
+    await waitFor(() => screen.getByText("No binds every sandbox gets."));
+    expect(rows(binds)).toHaveLength(0);
+    expect(container.querySelector(`.${styles.warning}`)).toBeNull();
   });
 
   /// What every entry on the bind list costs, said beside the editor rather than
@@ -587,40 +563,20 @@ describe("the pane", () => {
 
 describe("adding a row", () => {
   /// The round trip, and the whole of what a save from this pane has to get
-  /// right: the new entry on the end of its own list, and everything else — the
-  /// binds, the Repo's own among them, the author, the token and the build cache
-  /// — exactly as it stood.
-  it("saves a watched path without disturbing anything else", async () => {
-    const fetching = theSettings(TOLD, json(answering(TOLD)));
-    mountPane();
-
-    const field = await waitFor(() =>
-      screen.getByLabelText("Add a watched path"),
-    );
-    fireEvent.input(field, { target: { value: "/home/ada/work" } });
-    fireEvent.click(screen.getAllByRole("button", { name: "Add" })[0]!);
-
-    await waitFor(() =>
-      expect(sent(fetching)).toEqual({
-        ...REST,
-        watched_paths: [WATCHED, "/home/ada/work"],
-        sandbox_binds: [BIND, SCOPED],
-      }),
-    );
-  });
-
-  it("saves a bind the same way", async () => {
+  /// right: the new entry on the end of the list, and everything else — the
+  /// Repo's own bind among them, the author, the token and the build cache —
+  /// exactly as it stood.
+  it("saves a bind without disturbing anything else", async () => {
     const fetching = theSettings(TOLD, json(answering(TOLD)));
     mountPane();
 
     const field = await waitFor(() => screen.getByLabelText("Add a bind"));
     fireEvent.input(field, { target: { value: "/var/cache/npm" } });
-    fireEvent.click(screen.getAllByRole("button", { name: "Add" })[1]!);
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
     await waitFor(() =>
       expect(sent(fetching)).toEqual({
         ...REST,
-        watched_paths: [WATCHED],
         sandbox_binds: [BIND, SCOPED, "/var/cache/npm"],
       }),
     );
@@ -633,17 +589,14 @@ describe("adding a row", () => {
     const fetching = theSettings(standing, json(answering(standing)));
     mountPane();
 
-    const field = await waitFor(() =>
-      screen.getByLabelText("Add a watched path"),
-    );
-    fireEvent.input(field, { target: { value: "/home/ada/work" } });
-    fireEvent.click(screen.getAllByRole("button", { name: "Add" })[0]!);
+    const field = await waitFor(() => screen.getByLabelText("Add a bind"));
+    fireEvent.input(field, { target: { value: "/var/cache/npm" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
     await waitFor(() =>
       expect(sent(fetching)).toEqual({
         ...REST,
-        watched_paths: [WATCHED, "/home/ada/work"],
-        sandbox_binds: [BIND, SCOPED],
+        sandbox_binds: [BIND, SCOPED, "/var/cache/npm"],
       }),
     );
   });
@@ -654,11 +607,11 @@ describe("adding a row", () => {
     const now: SettingsView = {
       ...TOLD,
       paths: {
-        ...TOLD.paths,
-        watched: [
-          ...TOLD.paths.watched,
+        binds: [
+          ...TOLD.paths.binds,
           {
-            path: "/home/ada/work",
+            path: "/var/cache/npm",
+            repo: null,
             source: "Settings",
             resolution: "Resolves",
           },
@@ -668,15 +621,13 @@ describe("adding a row", () => {
     theSettings(TOLD, json(answering(now)));
     const { container } = mountPane();
 
-    const field = await waitFor(() =>
-      screen.getByLabelText("Add a watched path"),
-    );
-    fireEvent.input(field, { target: { value: "/home/ada/work" } });
-    fireEvent.click(screen.getAllByRole("button", { name: "Add" })[0]!);
+    const field = await waitFor(() => screen.getByLabelText("Add a bind"));
+    fireEvent.input(field, { target: { value: "/var/cache/npm" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
     await waitFor(async () => {
-      const [watched] = await lists(container);
-      expect(rows(watched!).map(path)).toEqual([WATCHED, "/home/ada/work"]);
+      const binds = await list(container);
+      expect(rows(binds).map(path)).toEqual([BIND, "/var/cache/npm"]);
     });
 
     // And the box is empty again: what was in it has gone to the server, and the
@@ -688,8 +639,8 @@ describe("adding a row", () => {
     const fetching = theSettings(TOLD, json(answering(TOLD)));
     mountPane();
 
-    await waitFor(() => screen.getByLabelText("Add a watched path"));
-    fireEvent.click(screen.getAllByRole("button", { name: "Add" })[0]!);
+    await waitFor(() => screen.getByLabelText("Add a bind"));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
     expect(
       fetching.mock.calls.some(([, init]) => init?.method === "POST"),
@@ -704,11 +655,9 @@ describe("adding a row", () => {
     );
     mountPane();
 
-    const field = await waitFor(() =>
-      screen.getByLabelText("Add a watched path"),
-    );
-    fireEvent.input(field, { target: { value: "/home/ada/work" } });
-    fireEvent.click(screen.getAllByRole("button", { name: "Add" })[0]!);
+    const field = await waitFor(() => screen.getByLabelText("Add a bind"));
+    fireEvent.input(field, { target: { value: "/var/cache/npm" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
     await waitFor(() => screen.getByText(/could not be saved/));
   });
@@ -716,8 +665,7 @@ describe("adding a row", () => {
 
 describe("browsing for one", () => {
   /// One level of the filesystem, as the endpoint behind the dropdown answers
-  /// for it: where the fixture's own watched path lives, and one directory
-  /// beside it to browse to.
+  /// for it: the human's own home, and two directories inside it to browse to.
   const HOME: DirectoryListing = {
     Listed: {
       path: "/home/ada",
@@ -729,8 +677,7 @@ describe("browsing for one", () => {
   };
 
   /// The one directory every browse here reaches, held for the request the
-  /// field makes: all three fields ask in the anywhere scope, none of these
-  /// values being bounded by the Watched Paths.
+  /// field makes: every path field asks anywhere the server can read.
   const inHome = whenever(listingAt("/home/ada"), json(HOME));
 
   /// Browse a field down to `/home/ada` and tap `work`, which is what leaves a
@@ -750,39 +697,22 @@ describe("browsing for one", () => {
   /// The point of the whole component: what a browse leaves in the field is
   /// what Add sends, and it is sent the way a typed path is — the same one
   /// request that writes the whole file, with everything else riding along.
-  it("saves a watched path a browse wrote, as a typed one is saved", async () => {
-    const fetching = theSettings(TOLD, inHome, json(answering(TOLD)));
-    mountPane();
-
-    await browsed("Add a watched path");
-    fireEvent.click(screen.getAllByRole("button", { name: "Add" })[0]!);
-
-    await waitFor(() =>
-      expect(sent(fetching)).toEqual({
-        ...REST,
-        watched_paths: [WATCHED, "/home/ada/work"],
-        sandbox_binds: [BIND, SCOPED],
-      }),
-    );
-  });
-
-  it("browses the binds every sandbox gets the same way", async () => {
+  it("saves a bind a browse wrote, as a typed one is saved", async () => {
     const fetching = theSettings(TOLD, inHome, json(answering(TOLD)));
     mountPane();
 
     await browsed("Add a bind");
-    fireEvent.click(screen.getAllByRole("button", { name: "Add" })[1]!);
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
     await waitFor(() =>
       expect(sent(fetching)).toEqual({
         ...REST,
-        watched_paths: [WATCHED],
         sandbox_binds: [BIND, SCOPED, "/home/ada/work"],
       }),
     );
   });
 
-  /// And the third of them, on the Repo's own pane — where the pane's grammar
+  /// And the other of them, on the Repo's own pane — where the pane's grammar
   /// is put around whatever the field holds, browsed or typed.
   it("browses a Repo's own binds, and writes them against its name", async () => {
     const fetching = theSettings(TOLD, inHome, json(answering(TOLD)));
@@ -794,7 +724,6 @@ describe("browsing for one", () => {
     await waitFor(() =>
       expect(sent(fetching)).toEqual({
         ...REST,
-        watched_paths: [WATCHED],
         sandbox_binds: [BIND, SCOPED, `${REPO}=/home/ada/work`],
       }),
     );
@@ -802,26 +731,6 @@ describe("browsing for one", () => {
 });
 
 describe("taking a row away", () => {
-  it("sends the list without the row that was pressed", async () => {
-    const fetching = theSettings(TOLD, json(answering(UNSET)));
-    const { container } = mountPane();
-
-    const [watched] = await lists(container);
-    fireEvent.click(
-      rows(watched!)[0]!.querySelector<HTMLButtonElement>(
-        `.${rowStyles.remove}`,
-      )!,
-    );
-
-    await waitFor(() =>
-      expect(sent(fetching)).toEqual({
-        ...REST,
-        watched_paths: [],
-        sandbox_binds: [BIND, SCOPED],
-      }),
-    );
-  });
-
   /// Where the row stands on this pane is not where it stands in the file: a
   /// Repo's own bind sits among the settings' binds and is not drawn here, so a
   /// removal counted off the page would take the wrong one away.
@@ -829,15 +738,14 @@ describe("taking a row away", () => {
     const fetching = theSettings(TOLD, json(answering(TOLD)));
     const { container } = mountPane();
 
-    const [, binds] = await lists(container);
+    const binds = await list(container);
     fireEvent.click(
-      rows(binds!)[0]!.querySelector<HTMLButtonElement>(`.${rowStyles.remove}`)!,
+      rows(binds)[0]!.querySelector<HTMLButtonElement>(`.${rowStyles.remove}`)!,
     );
 
     await waitFor(() =>
       expect(sent(fetching)).toEqual({
         ...REST,
-        watched_paths: [WATCHED],
         sandbox_binds: [SCOPED],
       }),
     );
@@ -850,19 +758,16 @@ describe("taking a row away", () => {
     const fetching = theSettings(standing, json(answering(standing)));
     const { container } = mountPane();
 
-    const [watched] = await lists(container);
-    // The second row, which is the only one the settings own.
+    const binds = await list(container);
+    // The second row, which is the first the settings own.
     fireEvent.click(
-      rows(watched!)[1]!.querySelector<HTMLButtonElement>(
-        `.${rowStyles.remove}`,
-      )!,
+      rows(binds)[1]!.querySelector<HTMLButtonElement>(`.${rowStyles.remove}`)!,
     );
 
     await waitFor(() =>
       expect(sent(fetching)).toEqual({
         ...REST,
-        watched_paths: [],
-        sandbox_binds: [BIND, SCOPED],
+        sandbox_binds: [SCOPED],
       }),
     );
   });
@@ -952,7 +857,7 @@ describe("a repo's own binds", () => {
 
   /// What the field on this section writes: the directory typed, against the
   /// name of the Repo whose pane it was typed on — and everything else in the
-  /// file exactly as it stood, the watched path and the global bind included.
+  /// file exactly as it stood, the global bind included.
   it("saves a bind against this repo's name", async () => {
     const fetching = theSettings(TOLD, json(answering(TOLD)));
     mountOwn();
@@ -966,7 +871,6 @@ describe("a repo's own binds", () => {
     await waitFor(() =>
       expect(sent(fetching)).toEqual({
         ...REST,
-        watched_paths: [WATCHED],
         sandbox_binds: [BIND, SCOPED, `${REPO}=/var/cache/npm`],
       }),
     );
@@ -989,7 +893,6 @@ describe("a repo's own binds", () => {
     await waitFor(() =>
       expect(sent(fetching)).toEqual({
         ...REST,
-        watched_paths: [WATCHED],
         sandbox_binds: [BIND, SCOPED, `${REPO}=/var/cache/npm`],
       }),
     );
@@ -1012,7 +915,6 @@ describe("a repo's own binds", () => {
     await waitFor(() =>
       expect(sent(fetching)).toEqual({
         ...REST,
-        watched_paths: [WATCHED],
         sandbox_binds: [BIND],
       }),
     );

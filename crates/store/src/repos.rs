@@ -1,5 +1,5 @@
 //! The Repos registered with Verkstead: the git repositories it has been told
-//! about, from inside a Watched Path.
+//! about.
 //!
 //! A registration is three facts and nothing else — where the repository is,
 //! what to call it, and which branch it works from — because that is the whole
@@ -110,8 +110,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 }
 
 /// Record a repository, which is expected to have been checked already: that it
-/// is inside a Watched Path, and that it is a git repository, is decided above
-/// the store.
+/// is a git repository with a default branch is decided above the store.
 ///
 /// `None` means this path is registered already. Refused by the unique index
 /// rather than by looking first, so two tabs cannot both get past the look.

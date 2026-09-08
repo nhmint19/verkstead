@@ -23,25 +23,26 @@
 use axum::Json;
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::StatusCode;
-use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
+use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE, SET_COOKIE};
 use axum::response::{IntoResponse, Response as HttpResponse};
 use axum::routing::{delete, get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
     Adopted, Attached, AttachmentRemoved, Author, BaseBranchChoice, BranchRename, BriefEdit,
-    BrowseScope, BuildCacheView, CheckRollup, CleanupStepView, CleanupView, CommentedOn,
-    CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
-    CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView, CompileCaching,
-    ConflictResolutionEdit, ConversationArchived, ConversationClosed, ConversationEntry,
-    ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Cursor,
-    GrillingStarted, IgnoreRule, IgnoredCommentsEdit, Lifecycle, Locked, Merging, MissedOut,
-    NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry,
-    PushKey, Registration, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice,
-    RuleField, RuleRefused, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
-    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowingArchived, Standing,
-    SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TerminalOpened,
-    TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    BuildCacheView, CheckRollup, CleanupStepView, CleanupView, CommentedOn, CompanionAdded,
+    CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode, CompanionModeChoice,
+    CompanionModeChosen, CompanionRemoved, CompanionView, CompileCaching, ConflictResolutionEdit,
+    ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
+    ConversationStopped, ConversationUnarchived, ConversationView, Cursor, GrillingStarted,
+    IgnoreRule, IgnoredCommentsEdit, Lifecycle, Locked, Merging, MissedOut, NewAdoption,
+    NewCompanion, NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
+    Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed,
+    RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress, SetReading, SetView, SettingsEdit,
+    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation,
+    ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription,
+    TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice,
+    Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -382,10 +383,57 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // One directory of the filesystem, for a path field's browse dropdown.
         // Not a route under anything it belongs to: it serves every field that
         // takes a path — the settings' own, the Repos' form, an Agent Profile's
-        // account — and what bounds it is the scope asked for rather than
-        // whatever page is asking.
+        // account — and it answers each of them the same way, whatever page is
+        // asking.
         .route("/api/ui/directories", get(directories))
         .route("/api/ui/update", get(update))
+        // And whether this Verkstead can do anything yet, which is the same
+        // kind of read one step further out: what the machine has on it, and
+        // what Verkstead has been told, judged against the objective a session
+        // needs. Not folded into the settings above for the reason the read
+        // below is not — the verdict is a different question from what is
+        // configured, and a wizard drawn off the settings page's payload would
+        // be a wizard saying what somebody typed rather than what is there.
+        .route("/api/ui/onboarding", get(onboarding))
+        // And what that machine can offer the wizard's last step, which is a
+        // read of its own for what it costs and what it carries: two `git
+        // config` runs and a `gh`, and a GitHub token found on the machine. The
+        // reading above is made every ten seconds while a step is unmet and by
+        // the workbench's gate at every start, and neither wants any of that —
+        // see [`crate::onboarding::Onboarding::prefill`].
+        .route("/api/ui/onboarding/git", get(onboarding_git))
+        // And the wizard finishing, which is the one thing inside a run that
+        // takes the mode off. A press rather than a save: what it writes is
+        // nothing at all — the author and the token went through the settings
+        // save a moment before — and what it changes is which app the browser
+        // is holding, so it answers with the reading made again.
+        .route("/api/ui/onboarding/finished", post(onboarding_finished))
+        // And whether a phone can reach this workbench: what the machine's own
+        // Tailscale is doing, read at the moment the pane is opened. Not under
+        // the settings above, and deliberately: nothing here is configured, and
+        // a read that answered off the settings files would be a page saying
+        // what somebody once typed rather than what the machine is doing now.
+        .route("/api/ui/remote", get(remote))
+        // And the one thing on that section that is pressed: `tailscale serve`,
+        // put on and taken off. A route of its own rather than a body on the
+        // read, because it is the one half of the section that changes the
+        // machine — and what it answers with is that read, made again.
+        .route("/api/ui/remote/serve", post(press_serve))
+        // And the other thing on it that is pressed, which is the key the link
+        // hands over: re-issued, so that everything holding the old one is out.
+        // Under the section it is drawn in rather than under a namespace of its
+        // own, because that is the one place it is pressed from.
+        .route("/api/ui/remote/key", post(reset_key))
+        // And the banner that points at this section, which is the one thing
+        // about it that is stored: whether the human is done with it. Under the
+        // section it points at rather than under the Conversation it is drawn
+        // on, because what it is about is Remote access — every Conversation
+        // page reads the one flag, and one press on any device ends it on all
+        // of them.
+        .route(
+            "/api/ui/remote/banner",
+            get(remote_banner).post(dismiss_remote_banner),
+        )
 }
 
 /// `GET /api/ui/sets/{id}` — one Set, rendered, with where it stands.
@@ -726,14 +774,14 @@ async fn repo(State(state): State<AppState>, Path(id): Path<String>) -> HttpResp
 
 /// `POST /api/ui/repos` — take on the repository at a path.
 ///
-/// Every refusal is the server's: the Watched Paths are a security boundary, and
-/// a boundary a request could reach around by not going through the form would
-/// not be one. See [`crate::repos`] for what is checked.
+/// Every refusal is the server's: a check the browser made is a courtesy, and
+/// this endpoint is reachable without one. See [`crate::repos`] for what is
+/// checked.
 async fn register_repo(
     State(state): State<AppState>,
     Json(registration): Json<Registration>,
 ) -> HttpResponse {
-    match crate::repos::register(&state.pool, &state.watched, &registration.path).await {
+    match crate::repos::register(&state.pool, &registration.path).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "registering a Repo failed");
@@ -1050,12 +1098,7 @@ pub(crate) async fn conversation_view(
     // The Pairings are read as rows rather than as ids: what the pane says
     // about a Profile, and whether it can still be run under, is the same
     // reading the Profile list gets.
-    let grilling_pairing = match crate::profiles::picked(
-        &state.watched,
-        conversation.grilling_pairing,
-    )
-    .await
-    {
+    let grilling_pairing = match crate::profiles::picked(conversation.grilling_pairing).await {
         Ok(pairing) => pairing,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a grilling Pairing failed");
@@ -1063,11 +1106,8 @@ pub(crate) async fn conversation_view(
         }
     };
 
-    let implementation_pairing = match crate::profiles::pairing(
-        &state.watched,
-        conversation.implementation_pairing,
-    )
-    .await
+    let implementation_pairing = match crate::profiles::pairing(conversation.implementation_pairing)
+        .await
     {
         Ok(pairing) => pairing,
         Err(error) => {
@@ -1076,9 +1116,7 @@ pub(crate) async fn conversation_view(
         }
     };
 
-    let review_pairing = match crate::profiles::picked(&state.watched, conversation.review_pairing)
-        .await
-    {
+    let review_pairing = match crate::profiles::picked(conversation.review_pairing).await {
         Ok(pairing) => pairing,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a review Pairing failed");
@@ -3482,7 +3520,7 @@ async fn choose_review_pairing(
 /// `GET /api/ui/profiles` — the Agent Profiles, by name, each saying whether its
 /// pair is still where it was left.
 async fn profiles(State(state): State<AppState>) -> HttpResponse {
-    match crate::profiles::listed(&state.pool, &state.watched).await {
+    match crate::profiles::listed(&state.pool).await {
         Ok(rows) => Json::<Vec<ProfileEntry>>(rows).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "reading the Agent Profiles failed");
@@ -3494,14 +3532,13 @@ async fn profiles(State(state): State<AppState>) -> HttpResponse {
 /// `POST /api/ui/profiles` — take on an account, named by the pair that is
 /// mounted for it.
 ///
-/// Every refusal is the server's, as a registration's is: the Watched Paths are
-/// a security boundary, and one a request could reach around by not going
-/// through the form would not be one.
+/// Every refusal is the server's, as a registration's is: a check the browser
+/// made is a courtesy, and this endpoint is reachable without one.
 async fn create_profile(
     State(state): State<AppState>,
     Json(edit): Json<ProfileEdit>,
 ) -> HttpResponse {
-    match crate::profiles::create(&state.pool, &state.watched, &edit).await {
+    match crate::profiles::create(&state.pool, &edit).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "saving an Agent Profile failed");
@@ -3520,7 +3557,7 @@ async fn edit_profile(
         return Json(verkstead_render::ProfileSaved::NoSuchProfile).into_response();
     };
 
-    match crate::profiles::edit(&state.pool, &state.watched, id, &edit).await {
+    match crate::profiles::edit(&state.pool, id, &edit).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, profile_id = id, "rewriting an Agent Profile failed");
@@ -3635,7 +3672,7 @@ fn session(
 ) -> verkstead_render::AgentSession {
     let (profile, model, agent_type) = match ran_under {
         Some(ran_under) => (
-            Some(ran_under.profile),
+            ran_under.profile,
             ran_under.model,
             ran_under.agent_type.map(crate::profiles::agent_type),
         ),
@@ -3757,13 +3794,13 @@ async fn unsubscribe(
 }
 
 /// `GET /api/ui/settings` — what Verkstead has been told: the git author, that
-/// there is a GitHub token, and every path either place has said.
+/// there is a GitHub token, and every bind either place has said.
 ///
 /// Read off the two files at the moment it is asked for, like everything else
 /// that reads them: the files are the source of truth, so a token or an author
 /// somebody hand-edited into place is what this comes back with.
 ///
-/// The paths are the one part read from more than the files: the installation's
+/// The binds are the one part read from more than the files: the installation's
 /// own were said on the command line, and each entry comes back saying which of
 /// the two said it and whether the server can see what it names — see
 /// [`crate::paths`].
@@ -3771,7 +3808,6 @@ async fn settings(State(state): State<AppState>) -> HttpResponse {
     Json(as_told(
         &state.settings,
         state.sessions.caches_compiles(),
-        &state.watched,
         &state.binds,
     ))
     .into_response()
@@ -3810,9 +3846,8 @@ async fn save_settings(
     let caches_compiles = state.sessions.caches_compiles();
 
     // And what the installation configured, for the read that rides back with
-    // the save: the page draws both sources, and neither of these is anything a
-    // save can touch.
-    let watched = state.watched.clone();
+    // the save: the page draws both sources, and this is not anything a save
+    // can touch.
     let installed = state.binds.clone();
 
     let saved = tokio::task::spawn_blocking(move || {
@@ -3844,7 +3879,7 @@ async fn save_settings(
                 // How things stand, which is how they stood: nothing was
                 // written, and the page draws the errors over what the human
                 // still has in front of them.
-                settings: as_told(&settings, caches_compiles, &watched, &installed),
+                settings: as_told(&settings, caches_compiles, &installed),
                 verified: None,
                 refused,
             });
@@ -3875,13 +3910,12 @@ async fn save_settings(
             // And whether Done shares the record to the pull request, which is
             // a switch: two answers, and the save says which of them this is.
             edit.share_on_done,
-            // And the paths as values too: what is sent is what the file holds
+            // And the binds as values too: what is sent is what the file holds
             // afterwards, so a row taken off the page is a row taken out of the
             // file. Only the settings' own — the installation's are the unit's
             // word, they are not in this file, and nothing here could rewrite
             // them if they were.
             edit.sandbox_binds,
-            edit.watched_paths,
             // And the rules, decided above: either what was already written down
             // or the whole list the page sent, in the order it sent it.
             rules,
@@ -3919,7 +3953,7 @@ async fn save_settings(
         });
 
         Ok::<_, std::io::Error>(SettingsSaved {
-            settings: as_told(&settings, caches_compiles, &watched, &installed),
+            settings: as_told(&settings, caches_compiles, &installed),
             verified,
             // Nothing turned down: a save that got this far was one there was
             // nothing wrong with.
@@ -3993,7 +4027,6 @@ fn compile_caching(cached: bool) -> CompileCaching {
 fn as_told(
     settings: &crate::settings::Settings,
     caches_compiles: bool,
-    watched: &crate::WatchedPaths,
     binds: &crate::sandbox::SandboxConfig,
 ) -> SettingsView {
     let secrets = settings.secrets();
@@ -4048,7 +4081,7 @@ fn as_told(
         // whether the server can see it now — see [`crate::paths`]. Read from
         // the file again rather than off the `config` above, because that is
         // where the whole of this one question is answered.
-        paths: crate::paths::told(watched, binds, settings),
+        paths: crate::paths::told(binds, settings),
 
         // And the ignore rules exactly as the file holds them, a pattern that
         // will not compile included: this is what the editor draws back into
@@ -4127,24 +4160,19 @@ fn last_four(token: &str) -> String {
     characters[from..].iter().collect()
 }
 
-/// Which directory a path field is asking about, and in what scope.
+/// Which directory a path field is asking about, which is the whole of what
+/// one asks.
 ///
 /// The path is optional because a field standing empty is where a browse
 /// begins, and an empty one is read as no path at all: `?path=` is what a
 /// cleared input sends, and it names the same nothing.
-///
-/// The scope is not optional. A field is one kind or the other and knows which
-/// it is, so an ask that says nothing about it is a caller with a bug rather
-/// than a browse to answer — and answering it in either scope would be answering
-/// a different question from the one asked.
 #[derive(Debug, serde::Deserialize)]
 struct Browsing {
-    scope: BrowseScope,
     path: Option<String>,
 }
 
-/// `GET /api/ui/directories?scope=<scope>&path=<path>` — what one directory
-/// holds, for the dropdown a path field browses with.
+/// `GET /api/ui/directories?path=<path>` — what one directory holds, for the
+/// dropdown a path field browses with.
 ///
 /// One directory per request and no walking: the field asks again for every
 /// level somebody drills into, so a browse costs one `read_dir` at a time
@@ -4152,31 +4180,218 @@ struct Browsing {
 ///
 /// Every refusal is a named outcome in the body rather than a status, the way
 /// registering a Repo refuses: a path that is relative, missing, not a
-/// directory, outside the Watched Paths or unreadable is a line the dropdown
-/// draws where its rows would be. Most of them are the ordinary state of a field
-/// halfway through being typed into.
+/// directory or unreadable is a line the dropdown draws where its rows would be.
+/// Most of them are the ordinary state of a field halfway through being typed
+/// into.
 ///
-/// What decides where the ask may look is [`BrowseScope`] — see
-/// [`crate::browsing`], where the boundary is consulted for one of the two.
-async fn directories(
-    State(state): State<AppState>,
-    Query(browsing): Query<Browsing>,
-) -> HttpResponse {
-    let watched = state.watched.clone();
+/// Nothing bounds where the ask may look but what the server can read, and an
+/// ask with no path at all opens on the server's own home — see
+/// [`crate::browsing`].
+async fn directories(Query(browsing): Query<Browsing>) -> HttpResponse {
     let path = browsing
         .path
         .filter(|path| !path.is_empty())
         .map(std::path::PathBuf::from);
 
-    // Off the runtime: reading the boundary is a file and a `canonicalize` per
-    // entry in it, and opening a directory is a read of its own.
-    match tokio::task::spawn_blocking(move || crate::browsing::list(&watched, browsing.scope, path))
-        .await
-    {
+    // Off the runtime: opening a directory is a read, and so is asking each of
+    // its entries what it is.
+    match tokio::task::spawn_blocking(move || crate::browsing::list(path)).await {
         Ok(listing) => Json(listing).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "listing a directory failed");
             unavailable("the directory could not be listed")
+        }
+    }
+}
+
+/// `GET /api/ui/onboarding` — whether this Verkstead can do anything yet: the
+/// mode, the machine it is standing on, and what is missing from it.
+///
+/// **Probed on every read**, like the reading below it and for the same reason:
+/// what it answers changes whenever somebody installs something in a terminal,
+/// and a cached one would be a wizard that had to be reloaded to notice. The
+/// probes are a `PATH` walk and one trivial `bwrap`, and the page asks only
+/// while a step is unmet — so nothing here runs while nobody is looking.
+///
+/// **Except the mode**, which is the verdict this server reached at startup and
+/// is not a reading at all. See [`crate::onboarding`], where the whole of that
+/// difference is written down.
+async fn onboarding(State(state): State<AppState>) -> HttpResponse {
+    match state.onboarding.read(&state.pool, &state.settings).await {
+        Ok(reading) => Json(reading).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "reading the onboarding objective failed");
+            unavailable("what this machine is missing could not be read")
+        }
+    }
+}
+
+/// `GET /api/ui/onboarding/git` — what this machine can offer the wizard's last
+/// step, for whatever Verkstead has not been told.
+///
+/// Its own read rather than a part of the one above, and asked for by the step
+/// that has the fields: the probes are two `git config` runs and a `gh`, and
+/// one of the three values is a GitHub token — none of which belongs in a
+/// payload the page re-reads every ten seconds and the workbench asks for at
+/// every start. A field Verkstead already holds a value for is not prefilled at
+/// all, which is what keeps a configured token out of this entirely.
+async fn onboarding_git(State(state): State<AppState>) -> HttpResponse {
+    match state
+        .onboarding
+        .prefill(&state.settings, &state.github)
+        .await
+    {
+        Ok(prefill) => Json(prefill).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "reading what the git step could be prefilled with failed");
+            unavailable("this machine could not be asked what to fill the fields with")
+        }
+    }
+}
+
+/// `POST /api/ui/onboarding/finished` — the wizard's last Continue: onboarding
+/// mode is off for the rest of this run.
+///
+/// **It writes nothing.** The author and the token were saved through the
+/// settings save a moment before, and the Profile through the profile create
+/// before that; what this changes is a flag beside the startup verdict — see
+/// [`crate::onboarding`], where why it is not written down is set out. The next
+/// start reaches its own verdict off a machine that now has what it was
+/// missing.
+///
+/// Answered with the reading made again — the mode now off — because that
+/// reading is what says which app the browser is holding: the page that pressed
+/// this has the answer without a second ask, and its next URL is a page again.
+async fn onboarding_finished(State(state): State<AppState>) -> HttpResponse {
+    state.onboarding.finished();
+
+    onboarding(State(state)).await
+}
+
+/// `GET /api/ui/remote` — what this machine's Tailscale is doing, and whether
+/// the tailnet name is in front of the workbench.
+///
+/// Read off the machine on every request rather than held: what it answers
+/// changes whenever somebody runs `tailscale up` or `tailscale serve` in a
+/// terminal, and a cached reading would be a pane that had to be loaded twice
+/// to tell the truth. Two short commands, and the pane is opened rarely.
+///
+/// Never a refusal. Every way the reading can fail is one of the states it
+/// answers with — no `tailscale` at all, a daemon that would not answer, an
+/// answer this build cannot read — because each of them is a different sentence
+/// the pane has to put in front of the human. See [`crate::remote`].
+async fn remote(State(state): State<AppState>) -> HttpResponse {
+    let view: RemoteView = state.remote.reading().await;
+
+    Json(view).into_response()
+}
+
+/// `POST /api/ui/remote/serve` — put this machine's tailnet name in front of the
+/// workbench, or take it off again.
+///
+/// What comes back is the machine read again, so the switch settles where the
+/// machine actually is rather than where the press meant to put it: a serve that
+/// did not take reads as off, which is the truth and the only thing worth
+/// drawing.
+///
+/// Never a refusal either, for the reason the read above is never one. Tailscale
+/// denies a serve from a process that is neither root nor the tailnet's
+/// operator, and that is not a failure to report but a sentence to put in front
+/// of the human — the line that grants it, for this machine's own user, with the
+/// next press as the re-try. See [`crate::remote`].
+async fn press_serve(State(state): State<AppState>, Json(edit): Json<ServeEdit>) -> HttpResponse {
+    let pressed: ServePress = state.remote.press(edit.on).await;
+
+    Json(pressed).into_response()
+}
+
+/// `POST /api/ui/remote/key` — a new Workbench Key over the old one, which is
+/// **Reset key** on the Remote access pane.
+///
+/// The whole of taking a link back. There is no list of devices and no expiry,
+/// so what logs a lost phone out is the secret it holds ceasing to be the
+/// secret: everything that was let in by the old link meets a 401 on its next
+/// request, and the QR code and the copyable link on the pane redraw on the
+/// new one.
+///
+/// **The browser that pressed it is let back in by the answer**, which is what
+/// the `Set-Cookie` is for. A reset made from a phone on the tailnet is a reset
+/// made from the only device that could reach this server at all, and one that
+/// logged that device out along with the rest would be a press that locks
+/// somebody out of their own workbench with nothing but the Data Directory to
+/// get back in through. Every *other* device is out, which is what the press is
+/// for.
+///
+/// What comes back is the machine read again, exactly as the serve switch's
+/// press answers — the link is a field of that reading, so the pane draws the
+/// new one from the answer rather than asking a second time.
+///
+/// A router standing behind no gate has no key to re-issue, which is every
+/// router but the served one: it is refused rather than quietly answering a
+/// reading, because a Reset that reset nothing is the one answer this press
+/// must never give. See [`crate::key`].
+async fn reset_key(State(state): State<AppState>) -> HttpResponse {
+    let Some(key) = state.key.clone() else {
+        return unavailable("this server holds no workbench key to reset");
+    };
+
+    // Off the runtime's own threads, the way every other write to the Data
+    // Directory is: it is a read of the operating system's randomness and a
+    // write to a file, and neither of them is anything to hold an executor on.
+    let written = tokio::task::spawn_blocking({
+        let key = key.clone();
+
+        move || key.reissue()
+    })
+    .await;
+
+    if !matches!(written, Ok(Ok(()))) {
+        tracing::error!(outcome = ?written, "re-issuing the workbench key failed");
+        return unavailable("the workbench key could not be re-issued");
+    }
+
+    let view: RemoteView = state.remote.reading().await;
+
+    ([(SET_COOKIE, key.set_cookie())], Json(view)).into_response()
+}
+
+/// `GET /api/ui/remote/banner` — whether the human is done with the banner that
+/// points at the Remote access section.
+///
+/// Asked by every Conversation page on load, which is what makes it worth
+/// keeping on the server at all: the banner is drawn at a desk and points at a
+/// phone, so a dismissal held in the browser it was pressed in would meet the
+/// human again on the device it had just sent them to.
+///
+/// One row read, and nothing about any Conversation in it. Which Conversation
+/// draws the banner is the page's own question — a grilling with a session
+/// running and no Question Set on its Timeline yet — and this is the one answer
+/// that silences it on all of them.
+async fn remote_banner(State(state): State<AppState>) -> HttpResponse {
+    match store::remote_banner_dismissed(&state.pool).await {
+        Ok(dismissed) => Json(RemoteBanner { dismissed }).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "reading whether the Remote access banner was dismissed failed");
+            unavailable("the banner's dismissal could not be read")
+        }
+    }
+}
+
+/// `POST /api/ui/remote/banner` — and saying they are.
+///
+/// A press rather than a position, unlike the archived switch this is written
+/// beside: nothing anywhere puts the banner back, so there is nothing for a
+/// body to say. Answered with the flag as it now stands, so the page that
+/// pressed it holds the truth without a second ask.
+///
+/// Idempotent. A second press says what the first one said, which is not
+/// something to refuse.
+async fn dismiss_remote_banner(State(state): State<AppState>) -> HttpResponse {
+    match store::dismiss_remote_banner(&state.pool).await {
+        Ok(()) => Json(RemoteBanner { dismissed: true }).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "dismissing the Remote access banner failed");
+            unavailable("the banner could not be dismissed")
         }
     }
 }

@@ -505,7 +505,7 @@ impl Agents {
 /// reason this is a mapping rather than a name written into the line. The type
 /// comes off the Pairing's Profile, so nothing has to be plumbed through to say
 /// which agent is being launched.
-fn binary(agent_type: store::AgentType) -> &'static str {
+pub(crate) fn binary(agent_type: store::AgentType) -> &'static str {
     match agent_type {
         store::AgentType::Claude => "claude",
         store::AgentType::Codex => "codex",
@@ -1895,7 +1895,7 @@ impl Sessions {
         let limits = crate::limits::Watch::on(
             conversation_id,
             event_id,
-            pairing.profile.name.clone(),
+            crate::profiles::shown(pairing.profile.name.as_deref()).to_owned(),
             pairing.profile.agent_type(),
         );
 
@@ -2580,7 +2580,7 @@ mod tests {
     fn profile() -> store::Profile {
         store::Profile {
             id: 1,
-            name: "fable".to_owned(),
+            name: Some("fable".to_owned()),
             account: store::Account::Claude {
                 claude_dir: PathBuf::from("/srv/accounts/fable/.claude"),
                 config_file: PathBuf::from("/srv/accounts/fable/.claude.json"),
@@ -2604,7 +2604,7 @@ mod tests {
         store::Pairing {
             profile: store::Profile {
                 id: 2,
-                name: "work".to_owned(),
+                name: Some("work".to_owned()),
                 account: store::Account::Codex {
                     home: PathBuf::from("/srv/accounts/work/.codex"),
                 },
@@ -2619,7 +2619,7 @@ mod tests {
         store::Pairing {
             profile: store::Profile {
                 id: 3,
-                name: "xai".to_owned(),
+                name: Some("xai".to_owned()),
                 account: store::Account::Grok {
                     home: PathBuf::from("/srv/accounts/work/.grok"),
                 },
@@ -2636,7 +2636,7 @@ mod tests {
         store::Pairing {
             profile: store::Profile {
                 id: 4,
-                name: "zen".to_owned(),
+                name: Some("zen".to_owned()),
                 account: store::Account::OpenCode {
                     home: PathBuf::from("/srv/accounts/zen/opencode"),
                 },

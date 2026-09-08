@@ -7,7 +7,7 @@ mod support;
 
 use std::io::Write;
 use std::net::TcpListener;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
@@ -53,6 +53,17 @@ fn free_port() -> u16 {
 struct Serve {
     child: Option<Child>,
     url: String,
+
+    /// Where it was told to keep what it makes, read off the flags it was
+    /// started with.
+    ///
+    /// The viewer's own namespace and every page of the workbench answer 401 to
+    /// a request that has not shown the Workbench Key (ADR-0015), and the key is
+    /// a file in there: a test standing where the browser stands holds it the
+    /// same way the browser does. `None` for a start that named no directory on
+    /// the command line, which is the test about the environment and asks the
+    /// viewer nothing.
+    data_dir: Option<PathBuf>,
 }
 
 impl Serve {
@@ -88,16 +99,46 @@ impl Serve {
         let serving = Serve {
             child: Some(child),
             url: format!("http://127.0.0.1:{port}"),
+            data_dir: data_dir_in(args),
         };
         serving.await_health();
         serving
     }
 
+    /// The cookie a browser holds, which is the Workbench Key the server wrote
+    /// into its Data Directory as it came up.
+    ///
+    /// Read back through the server's own reader rather than off a filename this
+    /// suite would have to know: what a second start over the same Data
+    /// Directory reads is what the running one is keyed with.
+    fn cookie(&self) -> String {
+        let data_dir = self
+            .data_dir
+            .as_deref()
+            .expect("a test asking for the workbench names a Data Directory");
+
+        verkstead_server::key::WorkbenchKey::issued(data_dir)
+            .expect("the server writes its key as it starts")
+            .cookie()
+    }
+
+    /// And the login link it logged as it came up: this address with the key on
+    /// it, which is the daemon's whole way of handing one over.
+    fn login_link(&self) -> String {
+        let data_dir = self
+            .data_dir
+            .as_deref()
+            .expect("a test about the login link names a Data Directory");
+
+        verkstead_server::key::WorkbenchKey::issued(data_dir)
+            .expect("the server writes its key as it starts")
+            .link(&self.url)
+    }
+
     /// The plain form: the flags every test but the environment one uses.
     ///
-    /// `dir` is the Watched Path as well as the working directory. A test that
-    /// is not about the boundary still has to give the server something real to
-    /// watch, whether or not it would have started without it.
+    /// `dir` is the working directory the server is started in, which is all it
+    /// is: nothing about where a repository may be is said on the command line.
     fn with_flags(dir: &Path, port: u16, data_dir: &Path) -> Self {
         Self::start(
             dir,
@@ -107,8 +148,6 @@ impl Serve {
                 &format!("127.0.0.1:{port}"),
                 "--data-dir",
                 data_dir.to_str().unwrap(),
-                "--watched-path",
-                dir.to_str().unwrap(),
             ],
             &[],
         )
@@ -130,7 +169,7 @@ impl Serve {
     }
 
     /// A Conversation to ask from, made the way the workbench makes one: a Repo
-    /// registered from inside the Watched Path, and a Conversation against it.
+    /// registered by its path, and a Conversation against it.
     ///
     /// Every Set is asked from one, and the base URL a session is given is what
     /// says which — so a test standing in for a session has to have one to be
@@ -157,10 +196,12 @@ impl Serve {
             .unwrap_or_else(|| panic!("the Conversation should have started: {started}"))
     }
 
-    /// Tell the viewer's namespace something, in the JSON a browser would send.
+    /// Tell the viewer's namespace something, in the JSON a browser would send —
+    /// holding the key, which is the whole of what makes it the browser.
     fn through_the_viewer(&self, path: &str, body: &serde_json::Value) -> serde_json::Value {
         let mut reply = ureq::post(format!("{}{path}", self.url))
             .header("Content-Type", "application/json")
+            .header("Cookie", self.cookie())
             .send(body.to_string())
             .unwrap_or_else(|error| panic!("POST {path}: {error}"));
 
@@ -171,6 +212,7 @@ impl Serve {
 
     fn read(&self, path: &str) -> String {
         ureq::get(format!("{}{path}", self.url))
+            .header("Cookie", self.cookie())
             .call()
             .unwrap_or_else(|error| panic!("GET {path}: {error}"))
             .body_mut()
@@ -265,7 +307,6 @@ fn refused_to_start(args: &[&str]) -> String {
         .arg("serve")
         .args(args)
         .env_remove("RUST_LOG")
-        .env_remove("VERKSTEAD_WATCHED_PATHS")
         .env_remove("VERKSTEAD_DATA_DIR")
         .env_remove("VERKSTEAD_LISTEN")
         .output()
@@ -281,12 +322,25 @@ fn refused_to_start(args: &[&str]) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
+/// The Data Directory out of the flags a server was started with, which is where
+/// the Workbench Key it made is — see [`Serve::cookie`].
+///
+/// Read off the arguments rather than threaded through [`Serve::start`]: every
+/// test that asks the workbench for anything already says where its own
+/// directory is, and a second parameter saying it again would be two places to
+/// keep in step.
+fn data_dir_in(args: &[&str]) -> Option<PathBuf> {
+    args.iter()
+        .position(|arg| *arg == "--data-dir")
+        .and_then(|at| args.get(at + 1))
+        .map(PathBuf::from)
+}
+
 /// A standalone install: no unit, no flags, nothing configured anywhere. It
-/// comes up, because a server that would not start before it was configured
-/// could never be reached to configure — and it admits nothing, because the
-/// alternative to a stated boundary is an assumed one.
+/// comes up, and it registers a repository it was never pointed at — which is
+/// the whole of what a bare binary being usable out of the box means.
 #[test]
-fn serving_without_a_watched_path_starts_and_admits_nothing() {
+fn serving_with_no_flags_at_all_starts_and_registers_anywhere() {
     let tmp = tempfile::tempdir().unwrap();
     let elsewhere = tempfile::tempdir().unwrap();
     let repo = repo_with_a_commit(elsewhere.path());
@@ -311,23 +365,23 @@ fn serving_without_a_watched_path_starts_and_admits_nothing() {
 
     assert_eq!(
         registered,
-        serde_json::json!("OutsideWatchedPaths"),
-        "a server watching nothing should hold every path outside it"
+        serde_json::json!("Added"),
+        "a server told nothing should register a repository like any other"
     );
 
     let logged = uncoloured(&serving.stop());
 
     assert!(
-        logged.contains("watched=[]"),
-        "the startup line should say what is watched, and that nothing is, \
-         got:\n{logged}"
+        !logged.contains("watched"),
+        "the startup line should say nothing about a boundary that no longer \
+         exists, got:\n{logged}"
     );
 }
 
 /// `logged` with the terminal colouring taken out.
 ///
 /// The subscriber colours its field names whether or not anything is a
-/// terminal, so `watched=[]` reaches a pipe with escapes between the name and
+/// terminal, so `data_dir=…` reaches a pipe with escapes between the name and
 /// the value. A test reading a field name has to take them off first.
 fn uncoloured(logged: &str) -> String {
     let mut plain = String::with_capacity(logged.len());
@@ -349,13 +403,20 @@ fn uncoloured(logged: &str) -> String {
     plain
 }
 
-/// A Watched Path that is not there covers nothing, so every repo inside it
-/// would be refused with no hint as to why. Said at startup instead, where it
-/// can be fixed.
+/// And the boundary that used to be said here is not a flag any more: a
+/// `--watched-path` on the command line is an unknown option rather than a
+/// second answer to where Verkstead may work.
 #[test]
-fn serving_with_a_watched_path_that_is_not_there_refuses_to_start() {
+fn the_boundary_flag_is_gone_rather_than_ignored() {
     let tmp = tempfile::tempdir().unwrap();
-    let missing = tmp.path().join("never-made");
+    let help = stdout(&run(&["serve", "--help"]));
+
+    for phrase in ["--watched-path", "VERKSTEAD_WATCHED_PATHS"] {
+        assert!(
+            !help.contains(phrase),
+            "`verkstead serve --help` should no longer mention {phrase:?}, got:\n{help}"
+        );
+    }
 
     let refusal = refused_to_start(&[
         "--listen",
@@ -363,12 +424,13 @@ fn serving_with_a_watched_path_that_is_not_there_refuses_to_start() {
         "--data-dir",
         tmp.path().to_str().unwrap(),
         "--watched-path",
-        missing.to_str().unwrap(),
+        tmp.path().to_str().unwrap(),
     ]);
 
     assert!(
-        refusal.contains(missing.to_str().unwrap()),
-        "the refusal should name the path it could not resolve, got:\n{refusal}"
+        refusal.contains("--watched-path"),
+        "starting with the flag that is gone should be refused by name, \
+         got:\n{refusal}"
     );
 }
 
@@ -418,13 +480,20 @@ fn the_served_api_round_trips_an_ask() {
 /// not claimed is the app's, so `/` is answered by the viewer rather than 404ed
 /// by the router. In a checkout that has never run `pnpm build` there is nothing
 /// to hand over, and saying so is still the viewer answering.
+///
+/// Holding the key, because the workbench's own pages are behind it: what is
+/// being asked here is which half of the server answers `/`, and a 401 would be
+/// the gate answering instead of either.
 #[test]
 fn the_viewer_is_served_beside_the_api() {
     let tmp = tempfile::tempdir().unwrap();
     let port = free_port();
     let mut serving = Serve::with_flags(tmp.path(), port, tmp.path());
 
-    match ureq::get(format!("{}/", serving.url)).call() {
+    match ureq::get(format!("{}/", serving.url))
+        .header("Cookie", serving.cookie())
+        .call()
+    {
         Ok(mut document) => {
             let body = document.body_mut().read_to_string().unwrap();
             assert!(
@@ -566,10 +635,8 @@ fn the_help_describes_the_flags_and_their_defaults() {
     for phrase in [
         "--listen",
         "--data-dir",
-        "--watched-path",
         "VERKSTEAD_LISTEN",
         "VERKSTEAD_DATA_DIR",
-        "VERKSTEAD_WATCHED_PATHS",
         "127.0.0.1:8422",
         "verkstead.db",
     ] {
@@ -600,7 +667,7 @@ fn the_options_the_data_directory_replaced_are_gone() {
         );
     }
 
-    let refusal = refused_to_start(&["--database", "verkstead.db", "--watched-path", "."]);
+    let refusal = refused_to_start(&["--database", "verkstead.db"]);
     assert!(
         refusal.contains("--database"),
         "starting with the old flag should be refused by name, got:\n{refusal}"
@@ -641,6 +708,80 @@ fn startup_logs_the_listen_address_and_the_data_directory() {
     );
 }
 
+/// And it carries the login link, which is the daemon's whole way of handing one
+/// over (ADR-0015): a human reading the journal has a link to paste, and pasting
+/// it is what makes a browser theirs.
+///
+/// There is no `verkstead remote` and no wizard step behind this. A machine
+/// started from a unit file has no tray to press **Open** in, so the line it
+/// already writes is where the link goes.
+#[test]
+fn the_startup_line_carries_a_link_that_lands_logged_in() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data_dir = tmp.path().join("linked");
+    let port = free_port();
+    let mut serving = Serve::with_flags(tmp.path(), port, &data_dir);
+    let link = serving.login_link();
+
+    // A browser that has never been here, following what was logged. The
+    // redirect is not followed and the status is not an error: what this test is
+    // about is the handshake itself, which a client that chased the redirect
+    // would land on the far side of holding nothing.
+    let browser = ureq::Agent::config_builder()
+        .max_redirects(0)
+        .http_status_as_error(false)
+        .build()
+        .new_agent();
+
+    let handshake = browser.get(&link).call().unwrap();
+
+    assert_eq!(
+        handshake.status().as_u16(),
+        303,
+        "a link carrying the key is a handshake rather than a page",
+    );
+
+    let cookie = handshake
+        .headers()
+        .get("set-cookie")
+        .expect("the handshake is where the browser is handed the key")
+        .to_str()
+        .unwrap()
+        .to_owned();
+
+    // And the same browser, holding what it was just given, is in: the page it
+    // was redirected to is answered by the viewer rather than by the gate — a
+    // 503 where `pnpm build` has never run, which is the viewer saying it was
+    // not built and so is still the far side of the gate — and the workbench's
+    // own namespace answers it too.
+    let landed = browser
+        .get(&serving.url)
+        .header("Cookie", &cookie)
+        .call()
+        .unwrap();
+
+    assert_ne!(
+        landed.status().as_u16(),
+        401,
+        "the browser followed the link, so the workbench is its to read",
+    );
+
+    let repos = browser
+        .get(format!("{}/api/ui/repos", serving.url))
+        .header("Cookie", &cookie)
+        .call()
+        .unwrap();
+
+    assert_eq!(repos.status().as_u16(), 200);
+
+    let logged = uncoloured(&serving.stop());
+
+    assert!(
+        logged.contains(&link),
+        "the link a human pastes is on the startup line, got:\n{logged}"
+    );
+}
+
 #[test]
 fn rust_log_overrides_the_default_filter() {
     let tmp = tempfile::tempdir().unwrap();
@@ -652,8 +793,6 @@ fn rust_log_overrides_the_default_filter() {
             "--listen",
             &format!("127.0.0.1:{port}"),
             "--data-dir",
-            tmp.path().to_str().unwrap(),
-            "--watched-path",
             tmp.path().to_str().unwrap(),
         ],
         &[("RUST_LOG", "error")],

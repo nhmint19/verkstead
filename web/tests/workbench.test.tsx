@@ -40,6 +40,7 @@ import type {
   ProfileEntry,
   PinnedEvent,
   PullRequestDetails,
+  RemoteBanner,
   Resolved,
   Resumed,
   RoadmapPane,
@@ -208,6 +209,9 @@ import steerModal from "../src/workbench/Steer.module.css";
 // paint that says when it is in the accent.
 import statusButton from "../src/workbench/StatusButton.module.css";
 import statusButtonCss from "../src/workbench/StatusButton.module.css?raw";
+// The banner above the record that points at Remote access — the hashed names
+// its line and its way out are queried by.
+import banner from "../src/workbench/RemoteBanner.module.css";
 import timeline from "../src/workbench/Timeline.module.css";
 import timelineCss from "../src/workbench/Timeline.module.css?raw";
 import truncatedCss from "../src/Truncated.module.css?raw";
@@ -16890,5 +16894,161 @@ describe("the terminal pane's tabs", () => {
       expect(terminalCss).toContain("max-width: 12rem;");
       expect(terminalCss).toContain("text-overflow: ellipsis;");
     });
+  });
+});
+
+/// The banner above the record that points at Remote access: the one line on a
+/// Conversation page that is about the workbench rather than about the work.
+///
+/// Its whole subject is a window. It stands while the first Question Set is
+/// being *prepared* — grilling, a session running, nothing asked yet — which is
+/// the first moment there is nothing at this desk to do, and it goes the moment
+/// a Set lands, because a Set waiting is something to do rather than a moment to
+/// be told about answering from a phone.
+///
+/// And its dismissal is the server's, which is the other half: the banner is
+/// drawn at a desk and points at a phone, so one kept in this browser would meet
+/// the human again on the very device it had just sent them to.
+describe("the remote access banner", () => {
+  /// The grilling fixture with its Question Sets taken off, which is that
+  /// conversation a few minutes earlier: the session is running and the first
+  /// Set is still being written.
+  const PREPARING: ConversationView = {
+    ...GRILLING,
+    working: true,
+    timeline: GRILLING.timeline.filter(
+      (event) => !("QuestionSet" in event) && !("UnreadableSet" in event),
+    ),
+  };
+
+  /// The workbench over a Conversation in whatever moment the test is about,
+  /// with the server holding the banner wherever the test says.
+  function theMoment(
+    conversation: ConversationView,
+    dismissed = false,
+    ...answers: Parameters<typeof serving>
+  ) {
+    return theGrilling(
+      whenever(`/api/ui/conversations/${GRILLING.id}`, json(conversation)),
+      whenever(
+        "/api/ui/remote/banner",
+        json({ dismissed } satisfies RemoteBanner),
+      ),
+      ...answers,
+    );
+  }
+
+  /// The line itself, and where it leads.
+  it("stands above the record while the first questions are written", async () => {
+    theMoment(PREPARING);
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const line = await drawn(container, `.${banner.banner}`);
+
+    expect(line.textContent).toContain("from your phone");
+
+    // And it leads to the section a phone is let in from, which is the whole of
+    // what the banner is for.
+    expect(line.querySelector("a")!.getAttribute("href")).toBe(
+      "/settings/remote",
+    );
+  });
+
+  /// Above the record and under the block that stays: the header, the pinned
+  /// cards and the status button are what the pane sticks to its top edge, and
+  /// the banner is the first thing under them.
+  it("stands between the sticky block and the record", async () => {
+    theMoment(PREPARING);
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const line = await drawn(container, `.${banner.banner}`);
+    const record = container.querySelector(`.${timeline.timeline}`)!;
+
+    expect(line.previousElementSibling!.classList).toContain(shell.paneChrome);
+    expect(record.previousElementSibling).toBe(line);
+  });
+
+  /// And it goes the moment the first Set lands, which is the fixture as it
+  /// really stands: there is something at the desk to do again.
+  it("goes as soon as the first question set lands", async () => {
+    theMoment({ ...GRILLING, working: true });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${timeline.questionSet}`);
+
+    expect(container.querySelector(`.${banner.banner}`)).toBeNull();
+  });
+
+  /// Nor is it drawn where nothing is being prepared at all: a grilling nothing
+  /// is running is one that has stopped, and a human at this desk has something
+  /// to do about that rather than a moment to spend elsewhere.
+  it("is not drawn where no session is running", async () => {
+    theMoment({ ...PREPARING, working: false });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${timeline.timeline}`);
+
+    expect(container.querySelector(`.${banner.banner}`)).toBeNull();
+  });
+
+  /// And where it is not drawn it is nothing at all: no reserved strip, and the
+  /// record starts exactly where it starts on every other page.
+  it("leaves nothing behind on a page it is not drawn on", async () => {
+    theMoment({ ...PREPARING, working: false });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const record = await drawn(container, `.${timeline.timeline}`);
+
+    expect(record.previousElementSibling!.classList).toContain(
+      shell.paneChrome,
+    );
+  });
+
+  /// Outside that window nothing is even asked for: a Conversation the banner
+  /// could not be drawn on has no question to put to the server.
+  it("asks nothing of the server outside its window", async () => {
+    const fetching = theMoment({ ...GRILLING, working: true });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${timeline.questionSet}`);
+
+    expect(askedFor(fetching, "/api/ui/remote/banner")).toBe(0);
+  });
+
+  /// The press goes to the server rather than into this browser, and the line
+  /// goes with it — without waiting for the round trip, a press that left it
+  /// standing reading as a press that did nothing.
+  it("presses the dismissal through to the server", async () => {
+    const fetching = theMoment(
+      PREPARING,
+      false,
+      whenever(
+        "/api/ui/remote/banner",
+        json({ dismissed: true } satisfies RemoteBanner),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const line = await drawn(container, `.${banner.banner}`);
+    fireEvent.click(line.querySelector(`.${banner.done}`)!);
+
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/remote/banner")).toEqual({}),
+    );
+    await waitFor(() =>
+      expect(container.querySelector(`.${banner.banner}`)).toBeNull(),
+    );
+  });
+
+  /// Which is what makes the next device's load a quiet one: dismissed on one,
+  /// the server says so to the next, and the banner is not drawn there at all.
+  it("is absent on another device once it has been dismissed", async () => {
+    theMoment(PREPARING, true);
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${timeline.timeline}`);
+
+    expect(container.querySelector(`.${banner.banner}`)).toBeNull();
   });
 });
