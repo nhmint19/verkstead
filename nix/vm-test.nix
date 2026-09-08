@@ -659,6 +659,18 @@ testers.runNixOSTest {
         ).strip()
 
 
+    def named(answer):
+        """The outcome an answer names, whichever of the two shapes it came in.
+
+        An outcome that carries something is an object under its own name — a
+        registration hands back the Repo it made — and one that carries nothing
+        is the name by itself. What every assertion here is about is which of
+        them was said, so the name is what this reads out."""
+        said = json.loads(answer)
+
+        return said if isinstance(said, str) else next(iter(said))
+
+
     def post(path, body):
         """POST a JSON body to the viewer's own namespace, and hand back what
         came back — which is what the workbench would have received."""
@@ -762,7 +774,7 @@ testers.runNixOSTest {
         for bound in ["/srv/repos/inside", "/home/bound/inside"]:
             committed(bound)
             outcome = register(bound)
-            assert outcome == '"Added"', f"{bound} was answered {outcome}"
+            assert named(outcome) == "Added", f"{bound} was answered {outcome}"
 
     with subtest("a repo the unit was not told to bind is answered missing"):
         # The other half of `paths`: nothing admits or refuses on Verkstead's
@@ -779,7 +791,7 @@ testers.runNixOSTest {
         committed("/home/unbound/outside")
 
         outcome = register("/home/unbound/outside")
-        assert outcome == '"Missing"', f"/home/unbound/outside was answered {outcome}"
+        assert named(outcome) == "Missing", f"/home/unbound/outside was answered {outcome}"
 
         # And it is genuinely the namespace rather than the repository: the same
         # directory is a real repository seen from outside the unit. As the user
@@ -897,7 +909,7 @@ testers.runNixOSTest {
         committed("${grillingRepo}")
 
         outcome = post("/api/ui/repos", {"path": "${grillingRepo}"})
-        assert outcome == '"Added"', f"${grillingRepo} was answered {outcome}"
+        assert named(outcome) == "Added", f"${grillingRepo} was answered {outcome}"
 
         repos = json.loads(machine.succeed("curl -sf http://127.0.0.1:8422/api/ui/repos"))
         repo_id = next(row["id"] for row in repos if row["path"] == "${grillingRepo}")
