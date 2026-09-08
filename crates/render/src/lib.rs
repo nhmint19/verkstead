@@ -61,7 +61,7 @@ pub use conversations::{
 };
 pub use onboarding::{
     AccountView, Dependency, DependencyState, DependencyView, Distro, OnboardingView, Platform,
-    PrefillView, Prefilled, Source, StepsView,
+    PrefillView, Prefilled, Seen, Source, StepsView,
 };
 pub use profiles::{
     AgentType, Broken, PairingView, PickedView, ProfileAccount, ProfileChoice, ProfileChosen,

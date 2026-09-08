@@ -84,11 +84,17 @@ async fn the_servers_path_is_read_once_and_both_the_probes_and_a_session_get_it(
         .unwrap();
     let app = router_keeping(pool, data.path().to_owned());
 
+    let install = DependencyState::Present {
+        at: Some(local.join("claude").to_string_lossy().into_owned()),
+        target: None,
+    };
+
     assert_eq!(
         claude(&reading(&app).await),
-        DependencyState::Present,
+        install,
         "and the wizard's row is that same list walked, so it says a session \
-         would find it",
+         would find it — and says it is the human's own install rather than \
+         whatever else answers to the name",
     );
 
     // And now the environment moves out from under both of them — a `PATH`
@@ -107,7 +113,7 @@ async fn the_servers_path_is_read_once_and_both_the_probes_and_a_session_get_it(
     );
     assert_eq!(
         claude(&reading(&app).await),
-        DependencyState::Present,
+        install,
         "and the probes are the same value, so the row cannot come to disagree \
          with what a session would find",
     );

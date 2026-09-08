@@ -436,6 +436,18 @@ nowhere a session looks is a row that ticks and a session that cannot start. The
 GitHub token is not part of it — GitHub may not be in use at all, where git is
 not optional and its author is what git asks for.
 
+**A row says where, and not only whether.** One that is there carries the path
+the name resolved to and the file that path lands on, where it is a link: a
+distribution's `claude` too old to connect and the human's own under
+`~/.local/bin` are the same tick and two different programs. One that is not
+there says where the name was seen, where it was seen at all — on an entry of
+the server's own `PATH` that a session's is not composed with, or at the end of
+a link a session could not follow — because each of those is a `PATH` to fix
+rather than a program to install. A name on no list at all is absent with
+nothing said. And where a session looks is the composed list itself, drawn
+above the rows on every platform, a session's `PATH` being the server's own
+rather than anything the wizard could write down.
+
 **The verdict is reached once, at startup**, and the mode stays on until the
 wizard's last Continue takes it off. There is no skip and no re-entry: nothing
 inside a run puts it back on, so deleting the last Profile mid-run is the

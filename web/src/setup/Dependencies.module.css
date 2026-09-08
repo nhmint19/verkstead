@@ -58,6 +58,37 @@
   list-style: none;
 }
 
+/* Where a session looks for a program, which is the server's own list rather
+   than a sentence about one — see `Dependencies.tsx`. Drawn above the rows and
+   under the tabs, because it is a fact about this machine whichever tab is
+   showing. */
+.looks {
+  padding: 0.6rem 0.7rem;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.5rem;
+}
+
+.looking {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The directories themselves, numbered: the order is the whole of what the list
+   says, the first entry holding the program a session gets. */
+.path {
+  margin: 0.4rem 0 0;
+  padding-left: 1.4rem;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.8rem;
+}
+
+.path li {
+  white-space: nowrap;
+}
+
 /* One thing a session needs. Separated by a rule rather than by cards inside a
    card: the step is already one surface, and seven boxes on it would be a page
    of borders. */
@@ -111,6 +142,33 @@
   border: 1px solid var(--edge);
   border-radius: 0.4rem;
   white-space: pre-wrap;
+}
+
+/* Which file a row that is there found, under its name: quiet, monospace, and
+   allowed to wrap — a path is long and a phone is narrow, and a path that
+   scrolled sideways under a row nobody has to act on would be a control where
+   there is nothing to control. */
+.where {
+  margin: 0.35rem 0 0;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+/* And what it links into, in the same line and a shade further back: the name a
+   session resolved is what somebody is looking for, and the version behind it
+   is what they read next. */
+.into {
+  color: var(--ink-soft);
+  opacity: 0.85;
+}
+
+/* And where a name that is missing was seen, which is a sentence with paths in
+   it rather than a path on its own. */
+.seen code {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  overflow-wrap: anywhere;
 }
 
 .instruction {

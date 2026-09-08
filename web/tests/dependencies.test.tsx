@@ -25,6 +25,7 @@ import type {
   DependencyState,
   Distro,
   OnboardingView,
+  Seen,
 } from "../src/api/types";
 import { Dependencies } from "../src/setup/Dependencies";
 import { SetupPage } from "../src/setup/SetupPage";
@@ -69,9 +70,14 @@ function stating(
   };
 }
 
+/// A row that is there, where which file it is, is not what the test is about
+/// — the sandbox on the two platforms that have no program to find is exactly
+/// this on the wire.
+const THERE: DependencyState = { state: "Present", at: null, target: null };
+
 /// A Mac, where the sandbox is Apple's own and there is nothing to install.
 const A_MAC: OnboardingView = {
-  ...stating(FRESH, "Sandbox", { state: "Present" }),
+  ...stating(FRESH, "Sandbox", THERE),
   platform: "MacOs",
   distro: "MacOs",
 };
@@ -96,6 +102,12 @@ function mount(machine: OnboardingView) {
     ...render(() => <Dependencies reading={machine} onwards={onwards} />),
     onwards,
   };
+}
+
+/// A row that is absent because the name was seen somewhere a session cannot
+/// use it — which is a `PATH` to fix rather than a program to install.
+function elsewhere(seen: Seen): DependencyState {
+  return { state: "Absent", trouble: null, seen };
 }
 
 /// One row of the step.
@@ -161,7 +173,11 @@ describe("the rows", () => {
   /// own words, and the line naming the sysctl to set is the one worth reading.
   it("puts the failed run's own words under the sandbox row", () => {
     const { container } = mount(
-      stating(FRESH, "Sandbox", { state: "Absent", trouble: REFUSAL }),
+      stating(FRESH, "Sandbox", {
+        state: "Absent",
+        trouble: REFUSAL,
+        seen: null,
+      }),
     );
 
     expect(row(container, "Sandbox").querySelector("pre")!.textContent).toBe(
@@ -204,7 +220,7 @@ describe("the rows", () => {
 
     // And a machine that has one draws the row ticked, with nothing left to
     // say about it.
-    const has = mount(stating(PART_WAY, "Gh", { state: "Present" }));
+    const has = mount(stating(PART_WAY, "Gh", THERE));
     const ticked = row(has.container, "Gh");
 
     expect(ticked.querySelector('[aria-label="done"]')).not.toBeNull();
@@ -296,13 +312,141 @@ describe("what each machine is told to run", () => {
     }
   });
 
-  it("says where a binary has to land, and calls out Claude's own installer", () => {
+  it("says where a binary has to land on the row it belongs to", () => {
     for (const distro of DISTROS) {
-      expect(GUIDES[distro].landing).toBeTruthy();
-      // The one installer that lands somewhere no session looks, said on the
-      // row it belongs to rather than under the tab.
+      // Where a session looks is the server's own list, drawn above the rows
+      // from the wire — no tab says it. What a tab still says is where each
+      // installer puts its binary.
       expect(GUIDES[distro].rows.Claude.note).toContain("~/.local/bin");
     }
+  });
+});
+
+describe("where each program was found", () => {
+  /// Which `claude` a session got is the whole of what this feature is about: a
+  /// distribution's, too old to connect, and the human's own under
+  /// `~/.local/bin` are the same tick and two different programs.
+  it("draws the resolved path under a row that is there", () => {
+    const { container } = mount(PART_WAY);
+    const git = row(container, "Git").querySelector("[data-where]")!;
+
+    expect(git.querySelector("[data-at]")!.textContent).toBe("/machine/bin/git");
+    expect(git.querySelector("[data-target]")).toBeNull();
+  });
+
+  /// And the file at the end of the link, which is what the vendor's own
+  /// installer leaves: the name a session resolved, and the version it really
+  /// runs.
+  it("draws the link's target after it where the two differ", () => {
+    const { container } = mount(PART_WAY);
+    const claude = row(container, "Claude").querySelector("[data-where]")!;
+
+    expect(claude.querySelector("[data-at]")!.textContent).toBe(
+      "/machine/bin/claude",
+    );
+    expect(claude.querySelector("[data-target]")!.textContent).toBe(
+      "/home/you/.local/share/claude/versions/0.0.0/claude",
+    );
+  });
+
+  /// A row that named no file has nothing to draw: the sandbox on a Mac is
+  /// Apple's own rather than a program anybody went looking for.
+  it("draws nothing under a row that named no file", () => {
+    const { container } = mount(A_MAC);
+
+    expect(
+      row(container, "Sandbox").querySelector("[data-where]"),
+    ).toBeNull();
+  });
+
+  /// A program on the server's own `PATH` that no session's holds: the human
+  /// has it, and what is wanted is the directory on the `PATH` Verkstead is
+  /// started with rather than another install.
+  it("says where a name was seen when a session cannot reach it", () => {
+    const { container } = mount(
+      stating(
+        PART_WAY,
+        "Codex",
+        elsewhere({ seen: "Beyond", at: "/opt/foo/bin/codex" }),
+      ),
+    );
+    const codex = row(container, "Codex");
+    const note = codex.querySelector('[data-seen="Beyond"]')!;
+
+    expect(codex.dataset.state).toBe("Absent");
+    expect(note.textContent).toContain("/opt/foo/bin/codex");
+    expect(note.textContent).toContain("not on the PATH a session gets");
+
+    // And the instruction is still under it: a program somewhere a session
+    // cannot open is a row that has not been met.
+    expect(codex.textContent).toContain("npm install -g @openai/codex");
+  });
+
+  /// A link into an install nothing binds, and one with nothing at the end of
+  /// it: two different things to do about, so two different sentences.
+  it("says where a link leads, and when it leads nowhere", () => {
+    const { container } = mount(
+      stating(
+        stating(
+          PART_WAY,
+          "Codex",
+          elsewhere({
+            seen: "Leading",
+            at: "/home/you/.local/bin/codex",
+            target: "/opt/codex/codex",
+          }),
+        ),
+        "Grok",
+        elsewhere({ seen: "Dangling", at: "/home/you/.local/bin/grok" }),
+      ),
+    );
+
+    const leading = row(container, "Codex").querySelector(
+      '[data-seen="Leading"]',
+    )!;
+
+    expect(leading.textContent).toContain("/home/you/.local/bin/codex");
+    expect(leading.textContent).toContain("/opt/codex/codex");
+    expect(leading.textContent).toContain("a session cannot reach");
+
+    const dangling = row(container, "Grok").querySelector(
+      '[data-seen="Dangling"]',
+    )!;
+
+    expect(dangling.textContent).toContain("/home/you/.local/bin/grok");
+    expect(dangling.textContent).toContain("nothing at the end of it");
+  });
+
+  /// And a name on no `PATH` at all was seen nowhere: nothing is said under it
+  /// but what to install.
+  it("says nothing under a name that was seen nowhere", () => {
+    const { container } = mount(PART_WAY);
+    const grok = row(container, "Grok");
+
+    expect(grok.dataset.state).toBe("Absent");
+    expect(grok.querySelector("[data-seen]")).toBeNull();
+  });
+});
+
+describe("where a session looks", () => {
+  /// The list the server composed rather than a sentence about the fixed one a
+  /// session's `PATH` used to be: it is a fact about this machine, so no tab
+  /// could say it.
+  it("lists the PATH a session is given, in order, on every tab", () => {
+    const { container } = mount(PART_WAY);
+    const drawn = () => [
+      ...container.querySelectorAll("ol li code"),
+    ].map((entry) => entry.textContent);
+
+    expect(drawn()).toEqual(PART_WAY.path);
+
+    // And the tab is which machine the commands are for, which the list is not
+    // about: pressing another one leaves it where it was.
+    fireEvent.click(
+      tabs(container).find((tab) => tab.dataset.distro === "Windows")!,
+    );
+
+    expect(drawn()).toEqual(PART_WAY.path);
   });
 });
 

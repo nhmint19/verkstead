@@ -9,12 +9,12 @@
 //! Build is a link on all eight tabs.
 //!
 //! **Every instruction says where the binary has to land**, because installing
-//! one is only half of it: a session resolves its programs on the sandbox's own
-//! `PATH` (`crates/server/src/sandbox.rs`'s `LINUX_PATH` and `APPLE_PATH`)
-//! rather than on the shell's, so an agent under `~/.local/bin` is a program
-//! that runs perfectly in a terminal and is not there at all for a session.
-//! Claude Code's own installer puts one exactly there, which is why the caveat
-//! is on its row on every tab.
+//! one is only half of it: a session resolves its programs on the `PATH` the
+//! server itself was started with, composed for a session — see
+//! `crates/server/src/sandbox.rs`'s `composed`. Which directories those are is a
+//! fact about the machine rather than about the tab, so the wizard draws the
+//! server's own list above the rows and nothing here says it: see
+//! `OnboardingView.path`, which is where that list comes from.
 //!
 //! **Eight tabs and not one**, because the detection is a guess. It comes off
 //! `/etc/os-release`'s `ID` and then `ID_LIKE`, so a derivative names its parent
@@ -47,18 +47,19 @@ export type Instruction = {
   note?: string;
 };
 
-/// One operating system's answers: what the tab is called, where a session
-/// looks on it, and an instruction for each of the seven rows.
+/// One operating system's answers: what the tab is called, and an instruction
+/// for each of the seven rows.
+///
+/// Where a session looks is not among them. That was a sentence per tab naming
+/// the fixed list a session's `PATH` used to be; a session's `PATH` is now the
+/// server's own, so the wizard draws the real list from the wire above the rows
+/// — see `Dependencies.tsx`.
 export type Guide = {
   /// What the tab is called.
   title: string;
 
-  /// Where a session's `PATH` goes on this machine, said once above the rows
-  /// rather than seven times inside them.
-  landing: string;
-
-  /// And one instruction per row. Every row, on every OS: a tab with a gap in
-  /// it is a row somebody is left staring at.
+  /// One instruction per row. Every row, on every OS: a tab with a gap in it is
+  /// a row somebody is left staring at.
   rows: Record<Dependency, Instruction>;
 };
 
@@ -76,40 +77,12 @@ export const DISTROS: readonly Distro[] = [
   "OtherLinux",
 ];
 
-/// Where a session looks on a Linux machine, which is the machine's own
-/// directories and not the shell's.
-///
-/// `LINUX_PATH` in `crates/server/src/sandbox.rs`, said in words. `~/.local/bin`
-/// and `~/.nix-profile/bin` are the two an install is most likely to land in and
-/// neither is on it, which is what the caveats below are about.
-const LINUX_LANDS =
-  "A session's PATH is /run/current-system/sw/bin, " +
-  "/nix/var/nix/profiles/default/bin, /usr/local/bin, /usr/bin and /bin — the " +
-  "machine's own directories rather than your shell's. A program installed " +
-  "under your home directory runs in your terminal and is not there for a " +
-  "session at all.";
-
-/// And on a Mac, where Homebrew's own prefix is the first thing on it.
-const APPLE_LANDS =
-  "A session's PATH is /opt/homebrew/bin, /usr/local/bin, /usr/bin and /bin, " +
-  "and nix's directories after them. Homebrew installs into the first of " +
-  "those on Apple silicon and into /usr/local/bin on an Intel Mac, so " +
-  "anything brew put there is somewhere a session looks.";
-
-/// And on Windows, where there is no list to write down: a session gets the
-/// `PATH` the server was started with.
-const WINDOWS_LANDS =
-  "A session on Windows runs on the PATH the server itself was started with, " +
-  "so anywhere on the machine's PATH will do. A PATH that changed while " +
-  "Verkstead was running is one it has not read: restart the server once the " +
-  "install has landed.";
-
 /// What Claude Code's own installer does, which is the one caveat that belongs
 /// on a row rather than under the tab.
 ///
-/// `~/.local/bin` is on nobody's sandbox `PATH` — see [`LINUX_LANDS`] — so the
-/// native installer leaves a `claude` that works in a terminal and cannot be
-/// launched by a session. Said on every tab, because the installer is the same
+/// `~/.local/bin` is on the `PATH` a session gets only where the server was
+/// started with it on its own, so the native installer can leave a `claude`
+/// that works in a terminal and cannot be launched by a session. Said on every tab, because the installer is the same
 /// one everywhere and it is the way most people already have it.
 const CLAUDE_ELSEWHERE =
   "Claude's own installer — curl -fsSL https://claude.ai/install.sh | bash — " +
@@ -201,7 +174,6 @@ function nixos(attribute: string, note?: string): Instruction {
 export const GUIDES: Record<Distro, Guide> = {
   MacOs: {
     title: "macOS",
-    landing: APPLE_LANDS,
     rows: {
       Sandbox: {
         note:
@@ -233,7 +205,6 @@ export const GUIDES: Record<Distro, Guide> = {
 
   Windows: {
     title: "Windows",
-    landing: WINDOWS_LANDS,
     rows: {
       Sandbox: {
         note:
@@ -252,7 +223,6 @@ export const GUIDES: Record<Distro, Guide> = {
 
   NixOs: {
     title: "NixOS",
-    landing: LINUX_LANDS,
     rows: {
       Sandbox: nixos(
         "bubblewrap",
@@ -272,7 +242,6 @@ export const GUIDES: Record<Distro, Guide> = {
 
   Ubuntu: {
     title: "Ubuntu",
-    landing: LINUX_LANDS,
     rows: {
       Sandbox: { command: "sudo apt install bubblewrap" },
       Git: { command: "sudo apt install git" },
@@ -289,7 +258,6 @@ export const GUIDES: Record<Distro, Guide> = {
 
   Fedora: {
     title: "Fedora",
-    landing: LINUX_LANDS,
     rows: {
       Sandbox: { command: "sudo dnf install bubblewrap" },
       Git: { command: "sudo dnf install git" },
@@ -306,7 +274,6 @@ export const GUIDES: Record<Distro, Guide> = {
 
   Debian: {
     title: "Debian",
-    landing: LINUX_LANDS,
     rows: {
       Sandbox: { command: "sudo apt install bubblewrap" },
       Git: { command: "sudo apt install git" },
@@ -323,7 +290,6 @@ export const GUIDES: Record<Distro, Guide> = {
 
   Arch: {
     title: "Arch",
-    landing: LINUX_LANDS,
     rows: {
       Sandbox: { command: "sudo pacman -S bubblewrap" },
       Git: { command: "sudo pacman -S git" },
@@ -342,7 +308,6 @@ export const GUIDES: Record<Distro, Guide> = {
   /// command that would be wrong on the machine it was pasted into.
   OtherLinux: {
     title: "Other Linux",
-    landing: LINUX_LANDS,
     rows: {
       Sandbox: {
         note:
