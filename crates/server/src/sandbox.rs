@@ -4406,6 +4406,15 @@ mod tests {
     /// about: the human's own, in the order they were written, and nothing of
     /// the machine's — which needs no grant, being the system every session
     /// already reaches.
+    ///
+    /// **Unix alone, as every test here that stands a home on the disk is.**
+    /// This arm reads a Unix `PATH` wherever the suite runs — see [`apart`] —
+    /// and what it keeps are entries naming directories that are really there,
+    /// so the home has to be one the machine really has. A Windows machine
+    /// spells that `C:\Users\…`, which a split on colons takes apart at the
+    /// drive letter: a fixture this arm cannot be handed rather than an answer
+    /// it gives differently.
+    #[cfg(unix)]
     #[test]
     fn what_a_session_is_granted_is_the_path_entries_under_the_servers_home() {
         let home = tempfile::tempdir().unwrap();
@@ -4435,6 +4444,7 @@ mod tests {
     /// And an entry naming a directory that is not there is skipped rather than
     /// refused: a line left in somebody's shell profile is not a reason a
     /// session cannot start, and on Linux a bind of one would be exactly that.
+    #[cfg(unix)]
     #[test]
     fn a_path_entry_that_is_not_there_is_no_grant_and_no_refusal() {
         let home = tempfile::tempdir().unwrap();
