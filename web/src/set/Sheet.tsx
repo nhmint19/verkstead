@@ -4,14 +4,17 @@
 //!
 //! A Set that has settled gets the same sheet read rather than filled in: its own
 //! material above, and under it what was decided — the Option chosen beside the
-//! one the agent recommended, whatever was written, and the questions that went
-//! back open. A Set is answered once, so there is nothing here to press. Which of
+//! one the agent recommended, whatever was written, the files that were put on
+//! each Answer, and the questions that went back open. A Set is answered once, so
+//! there is nothing here to press: the pills are the frozen Brief pane's, name
+//! and size and no ×, and there is no paperclip anywhere on the page. Which of
 //! the two is drawn is decided from the Set as the server loads it, so an
 //! answered Set never flashes a form.
 //!
 //! A Set that was locked reads like an answered one — permanently, and with
 //! nothing to press — except that there is no Response to show, because there
-//! never was one.
+//! never was one. What was attached before it was locked is still drawn: the
+//! files are on the record whether or not a Response ever landed.
 //!
 //! Its own module rather than the pane's, because what a Set looks like is one
 //! question and where it is read is another: the pane fetches the Set and says
@@ -22,11 +25,13 @@ import type { JSX } from "solid-js";
 import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 
 import app from "../App.module.css";
+import { Attachments } from "../Attaching";
 import { Card } from "../Card";
 import { PaneSticky } from "../Panes";
 import type {
   Answer,
   AskView,
+  AttachmentView,
   Direction,
   Liveness,
   OptionView,
@@ -267,6 +272,7 @@ export function Sheet(props: {
           open={!decided()}
           postscript={props.set.postscript_html}
           proposal={props.set.proposal}
+          attachments={props.set.attachments}
         />
       </Show>
     </>
@@ -292,15 +298,24 @@ function Questions(props: {
   open?: boolean;
   postscript: string | null;
   proposal: ProposalView | null;
+
+  /// The files the human put on this Set's Answers, each naming the Question it
+  /// was put under. Read here as the record of what was sent, which is what a
+  /// settled Set's own row of pills is.
+  attachments: AttachmentView[];
 }): JSX.Element {
   /// A Set that settled with no Response behind it, which is the one standing
   /// that was never answered by anybody.
   const orphaned = () => props.response === null && !props.open;
 
-  /// What to say at the head of a Response that resolved nothing.
+  /// What to say at the head of a Response that resolved nothing, which is a
+  /// reading of the files as well as of the Answers: a file is an Answer, so a
+  /// question with one on it resolved something.
   const nothing = () => {
     const response = props.response;
-    return response === null ? null : nothingAnswered(response);
+    return response === null
+      ? null
+      : nothingAnswered(response, props.attachments);
   };
 
   /// Shown only when there is one, exactly as the submit only ever sends one that
@@ -343,6 +358,7 @@ function Questions(props: {
               question={question}
               position={index() + 1}
               response={props.response}
+              attachments={props.attachments}
             />
           )}
         </For>
@@ -446,6 +462,7 @@ function Question(props: {
   question: QuestionView;
   position: number;
   response: Response | null;
+  attachments: AttachmentView[];
 }): JSX.Element {
   return (
     <li
@@ -468,7 +485,11 @@ function Question(props: {
           </div>
         }
       >
-        <Ask ask={props.question.ask} response={props.response} />
+        <Ask
+          ask={props.question.ask}
+          response={props.response}
+          attachments={props.attachments}
+        />
       </Show>
       {/* Sub-questions get no anchor of their own: one scrolls into view with
           its parent. */}
@@ -477,7 +498,11 @@ function Question(props: {
           <For each={props.question.subquestions}>
             {(subquestion) => (
               <li class={styles.subquestion}>
-                <Ask ask={subquestion} response={props.response} />
+                <Ask
+                  ask={subquestion}
+                  response={props.response}
+                  attachments={props.attachments}
+                />
               </li>
             )}
           </For>
@@ -501,6 +526,12 @@ function Question(props: {
 function Ask(props: {
   ask: AskView;
   response: Response | null;
+
+  /// Every file on the Set, of which this question's are the ones naming it.
+  /// Filtered here rather than handed over grouped, because that is how the
+  /// record holds them: one list for the whole Set, each row naming the
+  /// Question it was put under.
+  attachments: AttachmentView[];
 }): JSX.Element {
   const answer = () => {
     const response = props.response;
@@ -514,12 +545,26 @@ function Ask(props: {
     return words === undefined || words === "" ? null : words;
   };
 
-  // No Option and no words is the Unanswered marker, whether or not the flag is
-  // set: either way nothing was answered here. Only a Response can leave a
-  // question open, though — a locked Set says so once, at the head of the
-  // page, rather than claiming the agent was told anything.
-  const open = () =>
-    props.response !== null && selected() === null && said() === null;
+  /// What was put on this question, oldest first — the order the row was drawn
+  /// in on the sheet, and the order it is read back in.
+  const files = () =>
+    props.attachments.filter((file) => file.label === props.ask.name);
+
+  // Whether this question went back open, which is the entry read the way the
+  // server reads one — see [`isAnswer`]. Only a Response can leave a question
+  // open: a locked Set says so once, at the head of the page, rather than
+  // claiming the agent was told anything.
+  const open = () => {
+    const response = props.response;
+    if (response === null) {
+      return false;
+    }
+
+    // An entry the Response has none of reads as one carrying nothing, which is
+    // what a question with nothing to show is.
+    const entry = answer() ?? { label: props.ask.name };
+    return !isAnswer(entry, files().length);
+  };
 
   // The form's own wording, minus the name of the Question it prefixes there: a
   // field in a column of five needs telling apart from the other four, and this
@@ -557,6 +602,16 @@ function Ask(props: {
           </p>
         )}
       </Show>
+      {/* And what was put on this Answer, under what was written the way it
+          stood under the field on the sheet: the same pills the frozen Brief
+          pane draws, each saying how large the file is, with nothing left to
+          press on one. Drawn on a locked Set too — nobody answered it, and
+          what was attached before it was locked is still on the record. */}
+      <Attachments
+        files={files()}
+        onto={props.ask.name}
+        class={styles.attachments}
+      />
       <Show when={open()}>
         <p class={styles.unanswered}>
           Unanswered — the agent was told this one is still open.
@@ -706,12 +761,20 @@ function answerTo(response: Response, name: string): Answer | undefined {
   return response.answers.find((answer) => answer.label.trim() === name);
 }
 
-/// Whether an entry carries an Answer at all — an Option was selected or something
-/// was written. One that carries neither is the Unanswered marker.
-function isAnswer(answer: Answer): boolean {
+/// Whether an entry carries an Answer at all — an Option was selected, something
+/// was written, or a file was put on the question. One that carries none of the
+/// three is the Unanswered marker.
+///
+/// `files` is how many the record holds under this label, which is an Answer on
+/// its own: handing something over is answering. The marker is still taken at
+/// its word, though — the human may leave a question open and hand a file over
+/// with it, and the agent was told it is open. Which is exactly how the server
+/// reads one; see `check_answer` in `crates/schema/src/validate.rs`.
+function isAnswer(answer: Answer, files: number): boolean {
   return (
     (answer.selected ?? null) !== null ||
-    (answer.free_text ?? "").trim() !== ""
+    (answer.free_text ?? "").trim() !== "" ||
+    (files > 0 && answer.unanswered !== true)
   );
 }
 
@@ -727,8 +790,18 @@ function isAnswer(answer: Answer): boolean {
 /// Which is the whole of what this says, so a Set answered in silence gets
 /// nothing: with no comment there is no counter-question to explain, and the
 /// line was only the column of Unanswered read back at whoever was reading it.
-function nothingAnswered(response: Response): string | null {
-  if (response.answers.some(isAnswer)) {
+function nothingAnswered(
+  response: Response,
+  attachments: AttachmentView[],
+): string | null {
+  const files = (label: string) =>
+    attachments.filter((file) => file.label === label).length;
+
+  if (
+    response.answers.some((answer) =>
+      isAnswer(answer, files(answer.label.trim())),
+    )
+  ) {
     return null;
   }
 

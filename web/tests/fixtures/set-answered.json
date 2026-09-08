@@ -1,6 +1,21 @@
 {
   "Set": {
-    "attachments": [],
+    "attachments": [
+      {
+        "bytes": 2184,
+        "id": 1,
+        "label": "Q1",
+        "name": "the-counter-we-have.rs",
+        "origin": "Answer"
+      },
+      {
+        "bytes": 618,
+        "id": 2,
+        "label": "Q2b",
+        "name": "429-as-we-send-it.json",
+        "origin": "Answer"
+      }
+    ],
     "branch": "solid-viewer",
     "conversation": 1,
     "diagrams": false,

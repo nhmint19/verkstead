@@ -679,7 +679,11 @@ removed while the round drafts and fixed once the work starts, and the frozen
 Brief pane draws them as a read-only row under the text. An Answer's are
 attached and removed while the Set waits, and fixed the moment it settles —
 answered or locked unanswered — or its Conversation is Closed; a Set the agent
-locked unanswered keeps what was put on it as record. A file may only be put
+locked unanswered keeps what was put on it as record. **A settled Set draws
+them the way the frozen Brief does**: the record under each Answer, name and
+size and nothing to press, with no paperclip anywhere on the page — the sheet
+read back, the Set page reached from the Timeline and a Share all being one
+drawing of one record. A file may only be put
 under a label the Set actually asks, which is every Question that is not a
 Heading and every Sub-question. A Share carries the names and sizes and never
 the bytes. A same-named file is not replaced: the newcomer is renamed

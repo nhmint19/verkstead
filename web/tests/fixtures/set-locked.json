@@ -1,6 +1,14 @@
 {
   "Set": {
-    "attachments": [],
+    "attachments": [
+      {
+        "bytes": 128411,
+        "id": 1,
+        "label": "Q1",
+        "name": "the-window-that-stalled.log",
+        "origin": "Answer"
+      }
+    ],
     "branch": "solid-viewer",
     "conversation": 1,
     "diagrams": false,

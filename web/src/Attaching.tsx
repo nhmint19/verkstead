@@ -226,6 +226,13 @@ export function Attachments(props: {
 
   /// Where the row stands, which is the caller's — see [`Row`].
   class?: string;
+
+  /// What these files were put on, where the page draws more than one of these
+  /// rows: the Question's own name on the record of an answered Set, which is
+  /// what tells its row from the four beside it — the same naming the sheet
+  /// gives them, because it is the same row read after the fact. A Brief's row
+  /// is the one on its pane and says nothing.
+  onto?: string;
 }): JSX.Element {
   return (
     <Row
@@ -234,6 +241,7 @@ export function Attachments(props: {
         size: sized(file.bytes),
       }))}
       class={props.class}
+      label={props.onto ? `Files attached to ${props.onto}` : undefined}
     />
   );
 }

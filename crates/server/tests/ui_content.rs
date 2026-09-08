@@ -442,11 +442,28 @@ async fn answered_set(
     set: &QuestionSet,
     response: &Response,
 ) -> (SetView, String) {
+    answered_set_holding(app, pool, set, response, &[]).await
+}
+
+/// The same, with files on its Answers: the label each was put under, the name
+/// it stands on disk under and how large it is.
+///
+/// Put on before the Response lands, which is the only moment they can be put
+/// on at all — the endpoints refuse both presses once a Set has settled, and
+/// what a settled Set carries is what was attached while it waited.
+async fn answered_set_holding(
+    app: &Router,
+    pool: &SqlitePool,
+    set: &QuestionSet,
+    response: &Response,
+    files: &[(&str, &str, i64)],
+) -> (SetView, String) {
     response
         .validate(set)
         .expect("the Response a test answers with has to resolve its Set");
 
     let stored = put(pool, set).await.unwrap();
+    files_on(pool, ASKING_FROM, stored.id, files).await;
     store::insert_response(pool, stored.id, response)
         .await
         .unwrap()
@@ -455,10 +472,45 @@ async fn answered_set(
     fetch_set(app, stored.id).await
 }
 
+/// Files put on the Answers of a Set already stored.
+///
+/// The rows alone: nothing that reads these fixtures reads a file, and what a
+/// page draws a pill from is the record. Both halves together are what the
+/// endpoints write — see `tests/attaching.rs`, which is where that is asked.
+async fn files_on(pool: &SqlitePool, conversation: i64, set: i64, files: &[(&str, &str, i64)]) {
+    for (label, name, bytes) in files {
+        store::attach(
+            pool,
+            conversation,
+            store::Origin::Answer {
+                set,
+                label: (*label).to_owned(),
+            },
+            name,
+            *bytes,
+        )
+        .await
+        .unwrap();
+    }
+}
+
 /// A Set the human closed unanswered: the third standing, and the one with no
 /// Response behind it.
 async fn locked_set(app: &Router, pool: &SqlitePool, set: &QuestionSet) -> (SetView, String) {
+    locked_set_holding(app, pool, set, &[]).await
+}
+
+/// The same, with files put on it before it was locked — which a locked Set
+/// keeps: nobody answered it, and what was attached is on the record all the
+/// same.
+async fn locked_set_holding(
+    app: &Router,
+    pool: &SqlitePool,
+    set: &QuestionSet,
+    files: &[(&str, &str, i64)],
+) -> (SetView, String) {
     let stored = put(pool, set).await.unwrap();
+    files_on(pool, ASKING_FROM, stored.id, files).await;
     let locking = store::lock_set(pool, &store::Settlements::new(1), stored.id)
         .await
         .unwrap();
@@ -1637,14 +1689,34 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     let (_, json) = set_json(&app, &pool, &alongside).await;
     write("set-alongside.json", &json);
 
-    // The same Set answered, which is the same page read rather than filled in.
+    // The same Set answered, which is the same page read rather than filled in
+    // — with a file on two of its Answers, because a settled Set carries what
+    // was put on it and the record draws each Answer's own row of pills.
     let (_dir, pool, app) = fresh_app().await;
-    let (_, json) = answered_set(&app, &pool, &marked_up_set(), &decided_every_way()).await;
+    let (_, json) = answered_set_holding(
+        &app,
+        &pool,
+        &marked_up_set(),
+        &decided_every_way(),
+        &[
+            ("Q1", "the-counter-we-have.rs", 2_184),
+            ("Q2b", "429-as-we-send-it.json", 618),
+        ],
+    )
+    .await;
     write("set-answered.json", &pinned(&json));
 
-    // And closed unanswered, which is the one standing with no Response behind it.
+    // And closed unanswered, which is the one standing with no Response behind
+    // it — and which keeps what was attached before it was locked: nobody
+    // answered it, and the files are on the record all the same.
     let (_dir, pool, app) = fresh_app().await;
-    let (_, json) = locked_set(&app, &pool, &marked_up_set()).await;
+    let (_, json) = locked_set_holding(
+        &app,
+        &pool,
+        &marked_up_set(),
+        &[("Q1", "the-window-that-stalled.log", 128_411)],
+    )
+    .await;
     write("set-locked.json", &pinned(&json));
 
     // And the one that is no standing at all: a stored body this build cannot
@@ -2212,6 +2284,19 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await
         .unwrap()
         .unwrap();
+
+    // And a file handed over with the answer to its one Question, put on while
+    // the Set was still waiting — which is the only moment one can be. This is
+    // the Set the share below carries, so this row is what says a Share draws
+    // an Answer's files as the same pills and carries a byte of none of them.
+    files_on(
+        &pool,
+        directing,
+        proposed.id,
+        &[("Q9", "the-five-changes.md", 1_902)],
+    )
+    .await;
+
     store::submit_response(
         &pool,
         &verkstead_store::Settlements::new(4),

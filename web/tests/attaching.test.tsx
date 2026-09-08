@@ -992,6 +992,71 @@ describe("the files on an answer", () => {
     expect(answer("Q3")).toEqual({ label: "Q3", unanswered: true });
   });
 
+  /// And once the Response has landed, the sheet is read back as the record:
+  /// the same file, drawn as the pill the frozen Brief pane draws — the name
+  /// with its size — and no way of changing any of it. The endpoints refuse
+  /// both presses from that moment too; see `an_answered_set_takes_no_more_files`
+  /// in `crates/server/tests/attaching.rs`.
+  it("draws no paperclip and no × once the set has been answered", async () => {
+    const settled: SetView = {
+      ...holding("counter.png", "Q1"),
+      standing: {
+        Answered: {
+          submitted_at: "2026-08-03T09:07:11.000Z",
+          response: {
+            answers: [
+              // Answered with the file and nothing else, which is what was
+              // sent — and the four the human left open.
+              { label: "Q1" },
+              { label: "Q2", unanswered: true },
+              { label: "Q2a", unanswered: true },
+              { label: "Q2b", unanswered: true },
+              { label: "Q3", unanswered: true },
+            ],
+          },
+        },
+      },
+    };
+
+    const { page, settles } = await answering(
+      holding("counter.png", "Q1"),
+      whenever(`/api/ui/sets/${WAITING.id}/response`, json("Accepted"), "POST"),
+    );
+
+    // What the next read of the Set comes back with, which is what the page
+    // does after a submit: it stays where it is and reads the Set again.
+    settles(settled);
+
+    press(page, "Submit");
+    press(page, "Send anyway");
+
+    await waitFor(() =>
+      expect(
+        page.querySelector(`.${sheet.questions}.${sheet.decided}`),
+        "the record should have replaced the sheet",
+      ).toBeTruthy(),
+    );
+
+    const row = screen.getByRole("list", { name: "Files attached to Q1" });
+    expect(names(row)).toEqual(["counter.png"]);
+    expect(
+      [...row.querySelectorAll(`.${pill.attachmentSize}`)].map(
+        (size) => size.textContent,
+      ),
+      "the record says how large the file was; the sheet's own row does not",
+    ).toEqual([sized(4)]);
+
+    // Nothing to add one with and nothing to take this one off with.
+    expect(row.querySelector("button")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Attach a file to Q1" }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Remove counter.png" }),
+    ).toBeNull();
+    expect(page.querySelector('input[type="file"]')).toBeNull();
+  });
+
   /// And the warning before the submit is about what is still open, so a
   /// question carrying a file is not among them.
   it("does not warn about a question a file was put on", async () => {

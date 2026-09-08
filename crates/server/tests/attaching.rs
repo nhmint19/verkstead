@@ -779,6 +779,12 @@ async fn a_locked_set_takes_no_more_files_and_gives_none_up() {
         AnswerAttachmentRemoved::Locked,
     );
     assert_eq!(on_disk(&dir, id), ["counter.png"]);
+    assert_eq!(
+        on_the_set(&app, set).await.len(),
+        1,
+        "and the locked Set still carries what was put on it, which is what the \
+         record after it draws under the Question",
+    );
 }
 
 /// And a Closed Conversation is work nothing is going to pick up: its Sets take

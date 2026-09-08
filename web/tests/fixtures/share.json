@@ -215,7 +215,15 @@
   "exported_at": "2026-08-03T09:07:11.000Z",
   "sets": [
     {
-      "attachments": [],
+      "attachments": [
+        {
+          "bytes": 1902,
+          "id": 6,
+          "label": "Q9",
+          "name": "the-five-changes.md",
+          "origin": "Answer"
+        }
+      ],
       "branch": "usage-limits",
       "conversation": 4,
       "diagrams": false,
