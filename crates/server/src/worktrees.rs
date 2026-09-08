@@ -157,6 +157,49 @@ pub(crate) fn branch_taken(repo: &Path, branch: &str) -> bool {
     }
 }
 
+/// The name `branch` answers to on its remote: what its upstream points at,
+/// with the remote's own name taken off the front.
+///
+/// Which is not always the name it has here. A session follows the target
+/// repository's own review process, and a repository whose branch-naming rule
+/// disagrees with the name Verkstead cut is pushed under the rule rather than
+/// under the name: `git push -u origin HEAD:refs/heads/tobi/02-crm`, from a
+/// branch this end calls `modern-keystone/02-crm`. The pull request that
+/// follows has the pushed name as its head, so the local name is a name GitHub
+/// has never heard of — see [`crate::wrapping`], which is where that costs a
+/// wrap-up its ending.
+///
+/// Read off the upstream rather than off the pushed name, because the push is
+/// long over by the time anything asks: what `-u` left behind is the one record
+/// of where the branch went, and it is in the repository rather than on the
+/// network.
+///
+/// `None` where there is nothing to say and the local name is the whole answer:
+/// a branch never pushed, a branch pushed without `-u` so that nothing recorded
+/// where it went, a name no branch has, and a repository git would not read.
+///
+/// And one more that has to be said out loud, because it does not look like
+/// nothing: a branch tracking another branch of this same repository.
+/// `%(upstream:remotename)` answers `.` for those, and the `lstrip` beside it
+/// would otherwise hand back the tail of a local name — `deep/local` read as
+/// `local` — as though a remote were carrying it. So the remote is what this
+/// turns on, and the name is only taken where a real one is named.
+pub(crate) fn pushed_to(repo: &Path, branch: &str) -> Option<String> {
+    let listed = git(
+        repo,
+        &[
+            "for-each-ref",
+            "--format=%(upstream:remotename)\t%(upstream:lstrip=3)",
+            "--end-of-options",
+            &format!("refs/heads/{branch}"),
+        ],
+    )?;
+
+    let (remote, head) = listed.lines().next()?.split_once('\t')?;
+
+    (!remote.is_empty() && remote != "." && !head.is_empty()).then(|| head.to_owned())
+}
+
 /// Every branch of `repo` a Conversation could be based on: the local ones and
 /// the remote-tracking ones both, in the order git lists them — the locals
 /// first, then whatever the remotes are carrying.
@@ -2055,6 +2098,74 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         assert_eq!(merged(dir.path(), "abc123", "main"), None);
+    }
+
+    /// A branch pushed under another name answers to the name the remote has
+    /// it under, which is the whole of what a wrap-up needs to find its pull
+    /// request: the head of a pull request is the pushed name, and the pushed
+    /// name is the pushing session's to choose.
+    #[test]
+    fn a_branch_answers_to_the_name_its_remote_carries_it_under() {
+        let (dir, upstream) = repository();
+        let clone = dir.path().join("clone");
+
+        run(
+            dir.path(),
+            &[
+                "clone",
+                &upstream.to_string_lossy(),
+                &clone.to_string_lossy(),
+            ],
+        );
+
+        run(&clone, &["checkout", "-b", "modern-keystone/02-crm"]);
+        run(
+            &clone,
+            &["push", "-u", "origin", "HEAD:refs/heads/tobi/02-crm"],
+        );
+
+        assert_eq!(
+            pushed_to(&clone, "modern-keystone/02-crm").as_deref(),
+            Some("tobi/02-crm")
+        );
+
+        // And the ordinary case, where the two names are the same one: the
+        // answer is that name rather than nothing, because nothing here would
+        // read as *this went somewhere else*.
+        run(&clone, &["checkout", "-b", "rate-limiting"]);
+        run(&clone, &["push", "-u", "origin", "rate-limiting"]);
+
+        assert_eq!(
+            pushed_to(&clone, "rate-limiting").as_deref(),
+            Some("rate-limiting")
+        );
+    }
+
+    /// And a branch with no remote name of its own answers nothing, so that the
+    /// local name is what stands.
+    ///
+    /// The third of these is the one worth having a test for: a branch tracking
+    /// another branch of this same repository has an upstream, and stripping a
+    /// remote's name off it would hand back `local` for `deep/local` — a name
+    /// no remote is carrying, asked of GitHub as though one were.
+    #[test]
+    fn a_branch_with_no_remote_name_of_its_own_answers_nothing() {
+        let (_dir, repo) = repository();
+
+        run(&repo, &["branch", "unpushed"]);
+        assert_eq!(pushed_to(&repo, "unpushed"), None);
+
+        run(&repo, &["branch", "deep/local"]);
+        run(&repo, &["branch", "tracking"]);
+        run(
+            &repo,
+            &["branch", "--set-upstream-to=deep/local", "tracking"],
+        );
+        assert_eq!(pushed_to(&repo, "tracking"), None);
+
+        // A name no branch has, and a directory that is no repository at all.
+        assert_eq!(pushed_to(&repo, "nothing-here"), None);
+        assert_eq!(pushed_to(Path::new("/nowhere-at-all"), "main"), None);
     }
 
     /// A repository with one commit on it and a branch to check out, and the
