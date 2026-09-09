@@ -23,13 +23,32 @@
 //! closed workbench asks the machine nothing at all.
 //!
 //! **Present means a session would find it.** A session resolves its binaries
-//! on the `PATH` inside the Sandbox rather than on the server's, so every probe
-//! here resolves on that same list — [`crate::sandbox::machine_path`], walked
-//! by that module's own lookup. A harness found on the server's `PATH` and
-//! nowhere a session looks would be a row that ticked and a session that could
-//! not start, which is exactly the failure the wizard exists to move forward in
-//! time. The names are [`crate::sessions::binary`]'s, for the same reason:
-//! what a row is about is the program a session is launched as.
+//! on the `PATH` inside the Sandbox, so every probe here resolves on that same
+//! list — [`crate::sandbox::machine_path`], walked by that module's own lookup.
+//! That list is composed out of the `PATH` the server itself was started with,
+//! read once at startup and shared with the sandbox builder, so a row and a
+//! session cannot come to disagree: a harness found somewhere no session looks
+//! would be a row that ticked and a session that could not start, which is
+//! exactly the failure the wizard exists to move forward in time. The names are
+//! [`crate::sandbox::PROGRAMS`]'s, which is the harness names
+//! [`crate::sessions::binary`] gives with `git` and `gh` beside them: what a row
+//! is about is a program a session is launched as or reaches for, and every one
+//! of them is followed into its install by the sandbox and by the probe alike —
+//! see [`crate::sandbox::opened`]. So a name that is a link into somewhere no
+//! session can reach reads absent here, a row promising a session that starts
+//! rather than a file that happens to be on a list.
+//!
+//! **A row says where, and not only whether.** Which `claude` a session found
+//! is the whole of what this is for: a distribution's, too old to connect, and
+//! the current one under `~/.local/bin` are the same tick and two different
+//! programs, so a row that is there carries the path it resolved to and the
+//! file that path lands on. And a row that is *not* there says where the name
+//! was seen, where it was seen at all — on an entry of the server's own `PATH`
+//! that the composing dropped, or at the end of a link a session could not
+//! follow. Both of those are a `PATH` to fix rather than a program to install.
+//! See [`crate::sandbox::standing`], which decides all four, and
+//! [`Machine::looks_in`], which is the list a session searches put in front of
+//! whoever is reading the row.
 //!
 //! **The accounts are found in the server's own home**, which is where an
 //! agent that has been logged into once wrote one. What a shape is made of is
@@ -71,7 +90,7 @@ use sqlx::SqlitePool;
 use tokio::sync::OnceCell;
 use verkstead_render::{
     AccountView, Dependency, DependencyState, DependencyView, Distro, OnboardingView, PrefillView,
-    Prefilled, Source, StepsView,
+    Prefilled, Seen, Source, StepsView,
 };
 
 use crate::github::Gh;
@@ -114,13 +133,15 @@ const SHELL: &str = "/bin/sh";
 /// The program the Linux sandbox row is about.
 const BWRAP: &str = "bwrap";
 
-/// And the two rows that are neither a sandbox nor a harness: the one that
-/// gates and the one that never does.
-const GIT: &str = "git";
-const GH: &str = "gh";
-
 /// Which harness row is which agent's, so that the name each is probed under is
 /// the program a session of that type is launched as.
+///
+/// The names themselves are the sandbox module's — [`sandbox::PROGRAMS`], which
+/// holds these four with the `git` and `gh` a row is drawn for beside them —
+/// because what is done with a name is that module's: every name here is
+/// followed into its install and granted where that install is the human's own.
+/// What holds the two lists together is
+/// `every_name_the_wizard_has_a_row_for_is_a_name_a_session_is_followed_into`.
 const HARNESSES: &[(Dependency, store::AgentType)] = &[
     (Dependency::Claude, store::AgentType::Claude),
     (Dependency::Codex, store::AgentType::Codex),
@@ -144,6 +165,17 @@ pub struct Machine {
     /// The `PATH` a session resolves its binaries on — the machine's own half
     /// of it, which is the half a human installs anything into.
     path: OsString,
+
+    /// And the `PATH` the server itself was started with, which the one above
+    /// was composed out of.
+    ///
+    /// What it answers is *where was it then*: a `claude` in a directory the
+    /// composing dropped is a program on this machine that no session can open,
+    /// and a row that said only *absent* would send somebody to install what
+    /// they already have. See [`sandbox::standing`], which is where the two
+    /// lists are read against each other, and [`Seen`], which is what a row
+    /// carries about it.
+    servers: OsString,
 
     /// And `%PATHEXT%`, which is what says a name is a program on the one
     /// platform where a bare one is not. Nothing on the two Unixes reads it.
@@ -175,6 +207,7 @@ impl Machine {
         Machine::stated(
             Platform::HERE,
             sandbox::machine_path(Platform::HERE),
+            sandbox::servers_path(),
             std::env::var_os("PATHEXT"),
             std::fs::read_to_string(OS_RELEASE).ok(),
             &Environment::of_the_process(),
@@ -192,6 +225,7 @@ impl Machine {
     pub fn stated(
         platform: Platform,
         path: OsString,
+        servers: OsString,
         pathext: Option<OsString>,
         os_release: Option<String>,
         env: &Environment,
@@ -199,6 +233,7 @@ impl Machine {
         Machine {
             platform,
             path,
+            servers,
             pathext,
             os_release,
             // Read here rather than taken as a path, because which variable
@@ -219,6 +254,7 @@ impl Machine {
 
         Probed {
             dependencies,
+            path: self.looks_in(),
             accounts,
         }
     }
@@ -230,13 +266,13 @@ impl Machine {
     fn rows(&self) -> Vec<DependencyView> {
         let mut rows = vec![row(Dependency::Sandbox, self.sandbox())];
 
-        rows.push(row(Dependency::Git, self.installed(GIT)));
+        rows.push(row(Dependency::Git, self.installed(sandbox::GIT)));
 
         rows.extend(HARNESSES.iter().map(|(dependency, agent_type)| {
             row(*dependency, self.installed(sessions::binary(*agent_type)))
         }));
 
-        rows.push(row(Dependency::Gh, self.installed(GH)));
+        rows.push(row(Dependency::Gh, self.installed(sandbox::GH)));
 
         rows
     }
@@ -268,19 +304,93 @@ impl Machine {
             .collect()
     }
 
-    /// Whether a session would find `program`, said as a row's state.
+    /// Whether a session would find `program`, said as a row's state — and
+    /// where, which is the half of the answer this feature is about.
     ///
-    /// Nothing is carried about *where* it was found: what the wizard has to
-    /// say is whether to install one, and a path would be a fact about this
-    /// machine that no instruction is written from.
+    /// **A row that is there says which file it is.** A distribution's `claude`
+    /// too old to connect and the current one under `~/.local/bin` are the same
+    /// tick and two different programs, and which of them a session got is the
+    /// one thing the human cannot read off a tick.
+    ///
+    /// **And a row that is not says where it was seen**, where it was seen at
+    /// all — on a `PATH` entry the composing dropped, or at the end of a link a
+    /// session could not follow. Each of those is somebody's `PATH` to fix
+    /// rather than a program to install, and a row that said only *absent*
+    /// would send them to install what they have. See [`sandbox::standing`],
+    /// which is where all four answers are decided.
     fn installed(&self, program: &str) -> DependencyState {
-        match self.found(program) {
-            Some(_) => DependencyState::Present,
-            None => DependencyState::Absent { trouble: None },
+        match self.reaches(program) {
+            sandbox::Standing::Found { at, landed, .. } => DependencyState::Present {
+                at: Some(shown_path(&at)),
+                // The link's target, and only where it is another file: a
+                // program that is no link has one path and would read as two.
+                target: (landed != at).then(|| shown_path(&landed)),
+            },
+            sandbox::Standing::Beyond { at } => absent(Seen::Beyond {
+                at: shown_path(&at),
+            }),
+            sandbox::Standing::Leading { at, target } => absent(Seen::Leading {
+                at: shown_path(&at),
+                target: shown_path(&target),
+            }),
+            sandbox::Standing::Dangling { at } => absent(Seen::Dangling {
+                at: shown_path(&at),
+            }),
+            sandbox::Standing::Nowhere => DependencyState::Absent {
+                trouble: None,
+                seen: None,
+            },
         }
     }
 
-    /// Where `program` is on the `PATH` a session gets, or nothing.
+    /// Where `program` really is for a session: resolved on the `PATH` a
+    /// session gets and followed into whatever it links into — see
+    /// [`sandbox::standing`], which is the rule and is the same one the sandbox
+    /// grants by.
+    ///
+    /// So a `~/.local/bin/claude` linking into the versions directory the
+    /// native installer keeps is a row that ticks, and one linking into
+    /// somewhere no session can reach is a row that says absent: what a row
+    /// promises is a session that can start.
+    ///
+    /// The server's own `PATH` goes in beside a session's because the answer
+    /// runs to more than yes: where a name was seen is read off the entries the
+    /// composing dropped.
+    fn reaches(&self, program: &str) -> sandbox::Standing {
+        sandbox::standing(
+            self.platform,
+            program,
+            Some(self.path.as_os_str()),
+            Some(self.servers.as_os_str()),
+            self.pathext.as_deref(),
+            self.home.as_deref(),
+        )
+    }
+
+    /// And where a session looks, in the order it looks: a session's own `PATH`
+    /// as the directories it names.
+    fn looks_in(&self) -> Vec<String> {
+        sandbox::entries(self.platform, &self.path)
+            .iter()
+            .map(|directory| shown_path(directory))
+            .collect()
+    }
+
+    /// And `program` resolved on that same list and nothing more asked of it:
+    /// no link followed, no reach checked, no second list read.
+    ///
+    /// The shorter question, for the two rows that go and *run* something out
+    /// here rather than say whether a session could. The Linux sandbox row
+    /// starts a `bwrap` in this process, and the git step reads a `git config`
+    /// out of the machine's own — see [`Machine::sandbox`] and
+    /// [`Machine::configured`], which are both of them. What either needs is a
+    /// file this process can start, and following a link into an install a
+    /// *session* could not reach would be answering somebody else's question
+    /// with it.
+    ///
+    /// A session's `PATH` rather than the server's all the same, so that what a
+    /// row reports having run is a program on the list the row is about — see
+    /// [`Machine::reaches`], which is that list asked the whole question.
     fn found(&self, program: &str) -> Option<PathBuf> {
         sandbox::on_the_path(
             self.platform,
@@ -296,8 +406,12 @@ impl Machine {
         match self.platform {
             // Every Mac has `sandbox-exec`; it is Apple's own and there is no
             // version of macOS without it, so there is nothing to probe and
-            // nothing anybody could install.
-            Platform::MacOs => DependencyState::Present,
+            // nothing anybody could install — and so no file to name under the
+            // row either.
+            Platform::MacOs => DependencyState::Present {
+                at: None,
+                target: None,
+            },
 
             // And on Windows there is no sandbox to have: what holds a session
             // to its own work there is the identity it runs as, which Verkstead
@@ -306,7 +420,10 @@ impl Machine {
 
             Platform::Linux => match self.found(BWRAP) {
                 Some(bwrap) => trivially(&bwrap),
-                None => DependencyState::Absent { trouble: None },
+                None => DependencyState::Absent {
+                    trouble: None,
+                    seen: None,
+                },
             },
         }
     }
@@ -338,7 +455,7 @@ impl Machine {
             return None;
         }
 
-        let git = self.found(GIT)?;
+        let git = self.found(sandbox::GIT)?;
         let run = Command::new(git)
             .args(["config", "--global", "--get", key])
             .stdin(Stdio::null())
@@ -407,6 +524,10 @@ fn prefilled(value: String, source: Source) -> Prefilled {
 /// asking twice would be two `PATH` walks that could disagree.
 struct Probed {
     dependencies: Vec<DependencyView>,
+
+    /// And where those rows were looked for, which is where a session looks.
+    path: Vec<String>,
+
     accounts: Vec<AccountView>,
 }
 
@@ -477,6 +598,7 @@ impl Onboarding {
             platform: shown(self.machine.platform),
             distro: distro(self.machine.platform, self.machine.os_release.as_deref()),
             dependencies: probed.dependencies,
+            path: probed.path,
             accounts: probed.accounts,
             steps,
         })
@@ -618,7 +740,7 @@ fn there(dependencies: &[DependencyView], dependency: Dependency) -> bool {
 fn present(state: &DependencyState) -> bool {
     matches!(
         state,
-        DependencyState::Present | DependencyState::NotApplicable
+        DependencyState::Present { .. } | DependencyState::NotApplicable
     )
 }
 
@@ -702,16 +824,43 @@ fn trivially(bwrap: &Path) -> DependencyState {
         .output();
 
     match run {
-        Ok(run) if run.status.success() => DependencyState::Present,
+        // The file that was run, named the way every other present row names
+        // one: this row is the server's own `PATH` walked rather than a
+        // session's — a `bwrap` is started out here — and which `bwrap` was
+        // tried is what its words underneath are about.
+        Ok(run) if run.status.success() => DependencyState::Present {
+            at: Some(shown_path(bwrap)),
+            target: None,
+        },
         Ok(run) => DependencyState::Absent {
             trouble: words(&run.stderr),
+            seen: None,
         },
         // A `bwrap` that was found and would not start at all: a file that is
         // not executable, or one that has gone between the walk and the run.
         Err(trouble) => DependencyState::Absent {
             trouble: Some(trouble.to_string()),
+            seen: None,
         },
     }
+}
+
+/// A row that is not there because the name was seen somewhere a session
+/// cannot use it — which is a `PATH` to fix rather than a program to install.
+fn absent(seen: Seen) -> DependencyState {
+    DependencyState::Absent {
+        trouble: None,
+        seen: Some(seen),
+    }
+}
+
+/// A path as the wizard shows one.
+///
+/// Lossily, and deliberately: what this is for is somebody reading it off a
+/// page, and a directory whose name is not valid UTF-8 is still a directory
+/// worth naming. Nothing is resolved from what is drawn.
+fn shown_path(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
 }
 
 /// What a failed run said, where it said anything.
@@ -745,9 +894,24 @@ mod tests {
         Machine::stated(
             platform,
             dir.as_os_str().to_owned(),
+            dir.as_os_str().to_owned(),
             None,
             None,
             &home(platform, dir),
+        )
+    }
+
+    /// A Linux machine whose session `PATH` is `dir` and whose server is
+    /// running under `servers_home` — the two the per-user rules are read
+    /// against, which the one-directory machine above cannot say apart.
+    fn looking_in(dir: &Path, servers_home: &Path) -> Machine {
+        Machine::stated(
+            Platform::Linux,
+            dir.as_os_str().to_owned(),
+            dir.as_os_str().to_owned(),
+            None,
+            None,
+            &home(Platform::Linux, servers_home),
         )
     }
 
@@ -814,6 +978,7 @@ mod tests {
         Machine::stated(
             Platform::Linux,
             dir.as_os_str().to_owned(),
+            dir.as_os_str().to_owned(),
             None,
             None,
             &Environment {
@@ -835,7 +1000,7 @@ mod tests {
         };
 
         program(
-            &dir.join(GIT),
+            &dir.join(sandbox::GIT),
             &format!(
                 r#"#!/bin/sh
 test "$1 $2 $3" = 'config --global --get' || exit 2
@@ -854,7 +1019,7 @@ esac
     /// And a `gh` that is logged in as somebody, or is not.
     #[cfg(unix)]
     fn a_gh(dir: &Path, token: Option<&str>) -> Gh {
-        let path = dir.join(GH);
+        let path = dir.join(sandbox::GH);
 
         program(
             &path,
@@ -877,6 +1042,19 @@ echo {token}
         name: true,
         email: true,
         token: true,
+    };
+
+    /// A row that is there, where which file it is, is not what is being asked
+    /// about: the objective is met by a row's standing rather than by a path.
+    const THERE: DependencyState = DependencyState::Present {
+        at: None,
+        target: None,
+    };
+
+    /// And one that is not, with nothing seen anywhere on the machine.
+    const NOT_THERE: DependencyState = DependencyState::Absent {
+        trouble: None,
+        seen: None,
     };
 
     /// What one row of a reading says.
@@ -1006,13 +1184,267 @@ echo {token}
 
         assert_eq!(
             state(&machine, Dependency::Claude),
-            DependencyState::Present,
-            "the name a session launches Claude Code under is on this PATH",
+            DependencyState::Present {
+                at: Some(dir.path().join("claude").to_string_lossy().into_owned()),
+                target: None,
+            },
+            "the name a session launches Claude Code under is on this PATH, and \
+             the row says which file that is",
         );
         assert_eq!(
             state(&machine, Dependency::Codex),
-            DependencyState::Absent { trouble: None },
-            "and the three that are not there say so, with nothing to say about it",
+            DependencyState::Absent {
+                trouble: None,
+                seen: None,
+            },
+            "and the three that are not there say so, with nothing to say about \
+             it: a name on no `PATH` at all was seen nowhere",
+        );
+    }
+
+    /// A harness the vendor's own installer left is a link into a versions
+    /// directory, and the row that ticks for it is the row for the file that
+    /// link lands on.
+    ///
+    /// The install this whole feature is about, asked of the wizard: the sandbox
+    /// grants the directory it lands in — see [`sandbox::installs`] — so the row
+    /// and the session are saying the one thing.
+    #[cfg(unix)]
+    #[test]
+    fn a_harness_linked_into_its_own_install_under_the_home_is_present() {
+        let servers_home = tempfile::tempdir().unwrap();
+        let local = servers_home.path().join(".local/bin");
+        let version = servers_home
+            .path()
+            .join(".local/share/claude/versions/0.0.0");
+
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::create_dir_all(&version).unwrap();
+        program(&version.join("claude"), "#!/bin/sh\n");
+        std::os::unix::fs::symlink(version.join("claude"), local.join("claude")).unwrap();
+
+        let machine = looking_in(&local, servers_home.path());
+
+        assert_eq!(
+            state(&machine, Dependency::Claude),
+            DependencyState::Present {
+                at: Some(local.join("claude").to_string_lossy().into_owned()),
+                target: Some(version.join("claude").to_string_lossy().into_owned()),
+            },
+            "a session would follow that link and run what is at the end of it, \
+             and the row says both halves: the name on the `PATH` and the \
+             version it is really running",
+        );
+    }
+
+    /// And a link into somewhere no session can reach, or one that leads
+    /// nowhere at all, reads absent: what a row promises is a session that can
+    /// start, rather than a file that happens to be on a list.
+    #[cfg(unix)]
+    #[test]
+    fn a_harness_linking_out_of_the_home_or_to_nothing_is_absent() {
+        let servers_home = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let local = servers_home.path().join(".local/bin");
+
+        std::fs::create_dir_all(&local).unwrap();
+
+        // An install nothing binds — an `/opt/claude`, which a session opens
+        // and finds absent.
+        program(&elsewhere.path().join("claude"), "#!/bin/sh\n");
+        std::os::unix::fs::symlink(elsewhere.path().join("claude"), local.join("claude")).unwrap();
+
+        // And what an uninstall leaves behind.
+        std::os::unix::fs::symlink(servers_home.path().join("gone/codex"), local.join("codex"))
+            .unwrap();
+
+        let machine = looking_in(&local, servers_home.path());
+
+        assert_eq!(
+            state(&machine, Dependency::Claude),
+            DependencyState::Absent {
+                trouble: None,
+                seen: Some(Seen::Leading {
+                    at: local.join("claude").to_string_lossy().into_owned(),
+                    target: elsewhere
+                        .path()
+                        .join("claude")
+                        .to_string_lossy()
+                        .into_owned(),
+                }),
+            },
+            "a link into somewhere a session cannot reach is not a harness a \
+             session has — and the row says where it leads, that being what \
+             there is to do something about",
+        );
+        assert_eq!(
+            state(&machine, Dependency::Codex),
+            DependencyState::Absent {
+                trouble: None,
+                seen: Some(Seen::Dangling {
+                    at: local.join("codex").to_string_lossy().into_owned(),
+                }),
+            },
+            "and neither is a link with nothing at the end of it, which is what \
+             an uninstall leaves behind rather than a harness never installed",
+        );
+    }
+
+    /// A harness on the `PATH` the *server* was started with, in a directory
+    /// the composing dropped, is absent with the place it was seen: what is
+    /// wanted there is a `PATH` and a restart rather than an install.
+    ///
+    /// The `/opt/foo/bin` case, and the `/mnt/c/...` entries WSL appends with
+    /// it — a program the human really has, that no session can open.
+    #[cfg(unix)]
+    #[test]
+    fn a_harness_on_an_entry_the_composing_dropped_is_absent_with_where_it_was_seen() {
+        let servers_home = tempfile::tempdir().unwrap();
+        let beyond = tempfile::tempdir().unwrap();
+        let local = servers_home.path().join(".local/bin");
+
+        std::fs::create_dir_all(&local).unwrap();
+        program(&beyond.path().join("claude"), "#!/bin/sh\n");
+
+        // A session's own `PATH` holds the entry under the home; the server's
+        // holds that and the one the composing would drop.
+        let machine = Machine::stated(
+            Platform::Linux,
+            local.as_os_str().to_owned(),
+            OsString::from(format!("{}:{}", local.display(), beyond.path().display())),
+            None,
+            None,
+            &home(Platform::Linux, servers_home.path()),
+        );
+
+        assert_eq!(
+            state(&machine, Dependency::Claude),
+            DependencyState::Absent {
+                trouble: None,
+                seen: Some(Seen::Beyond {
+                    at: beyond.path().join("claude").to_string_lossy().into_owned(),
+                }),
+            },
+            "the program is on this machine and no session is told about the \
+             directory it is in, which is what the row has to say",
+        );
+        assert_eq!(
+            state(&machine, Dependency::Codex),
+            DependencyState::Absent {
+                trouble: None,
+                seen: None,
+            },
+            "while a name on neither list was seen nowhere at all",
+        );
+    }
+
+    /// And where a session looks is the list a session was given, in order.
+    #[cfg(unix)]
+    #[test]
+    fn the_reading_carries_the_path_a_session_is_given() {
+        let dir = tempfile::tempdir().unwrap();
+        let machine = Machine::stated(
+            Platform::Linux,
+            OsString::from(format!("{}:/usr/bin", dir.path().display())),
+            OsString::new(),
+            None,
+            None,
+            &home(Platform::Linux, dir.path()),
+        );
+
+        assert_eq!(
+            machine.probed().path,
+            vec![
+                dir.path().to_string_lossy().into_owned(),
+                "/usr/bin".to_owned()
+            ],
+            "the wizard says where a session looks by saying the directories it \
+             looks in, in the order it looks",
+        );
+    }
+
+    /// Every name the wizard draws a row for is a name the sandbox follows into
+    /// its install, because they are the one list — see [`sandbox::PROGRAMS`].
+    ///
+    /// What this holds together is a rule and its reach: a name a row ticked for
+    /// and nothing followed would be a session handed a dangling link, and a
+    /// name followed with no row would be a program nobody is told to install.
+    #[test]
+    fn every_name_the_wizard_has_a_row_for_is_a_name_a_session_is_followed_into() {
+        let mut names: Vec<&str> = std::iter::once(sandbox::GIT)
+            .chain(
+                HARNESSES
+                    .iter()
+                    .map(|(_, agent_type)| sessions::binary(*agent_type)),
+            )
+            .chain(std::iter::once(sandbox::GH))
+            .collect();
+
+        let mut followed: Vec<&str> = sandbox::PROGRAMS.to_vec();
+
+        names.sort_unstable();
+        followed.sort_unstable();
+
+        assert_eq!(
+            names, followed,
+            "one list: a backend that lands is a row and a name followed, and \
+             neither is a second place to say so",
+        );
+    }
+
+    /// And a harness the human installed for themselves is one of them: the
+    /// vendor's own installer puts Claude Code in `~/.local/bin`, which a
+    /// session searches because the `PATH` the server was started with is what
+    /// a session's is composed out of — see [`sandbox::composed`].
+    ///
+    /// Ahead of the system directories, which is the whole point: a
+    /// distribution's package too old to connect is what a session would find
+    /// otherwise, and the row would tick on the wrong one.
+    #[cfg(unix)]
+    #[test]
+    fn a_harness_under_the_servers_own_home_is_present_and_leads_the_path() {
+        let servers_home = tempfile::tempdir().unwrap();
+        let local = servers_home.path().join(".local/bin");
+
+        std::fs::create_dir_all(&local).unwrap();
+        program(&local.join("claude"), "#!/bin/sh\n");
+
+        let path = sandbox::composed(
+            Platform::Linux,
+            &OsString::from(format!("{}:/usr/bin", local.display())),
+            Some(servers_home.path()),
+        );
+
+        let machine = Machine::stated(
+            Platform::Linux,
+            path.clone(),
+            OsString::from(format!("{}:/usr/bin", local.display())),
+            None,
+            None,
+            &home(Platform::Linux, servers_home.path()),
+        );
+
+        assert_eq!(
+            state(&machine, Dependency::Claude),
+            DependencyState::Present {
+                at: Some(local.join("claude").to_string_lossy().into_owned()),
+                target: None,
+            },
+            "a session would find that install, so the row says so — and says \
+             which file it is",
+        );
+
+        let path = path.to_string_lossy();
+        let entries: Vec<&str> = path.split(':').collect();
+
+        assert_eq!(
+            entries.first().copied(),
+            local.to_str(),
+            "and it is the first place a session looks: {entries:?}",
+        );
+        assert!(
+            entries.contains(&"/usr/bin"),
+            "with the machine's own still under it: {entries:?}",
         );
     }
 
@@ -1036,6 +1468,7 @@ echo {token}
         let machine = Machine::stated(
             Platform::Windows,
             dir.path().as_os_str().to_owned(),
+            dir.path().as_os_str().to_owned(),
             Some(OsString::from(".COM;.EXE;.BAT;.CMD")),
             None,
             &Environment::default(),
@@ -1043,12 +1476,18 @@ echo {token}
 
         assert_eq!(
             state(&machine, Dependency::Claude),
-            DependencyState::Present,
+            DependencyState::Present {
+                at: Some(dir.path().join("claude.CMD").to_string_lossy().into_owned()),
+                target: None,
+            },
             "`claude.cmd` is what an npm install writes and what this platform runs",
         );
         assert_eq!(
             state(&machine, Dependency::Codex),
-            DependencyState::Absent { trouble: None },
+            DependencyState::Absent {
+                trouble: None,
+                seen: None,
+            },
             "and a file with no extension is a shell script for a Unix, which \
              nothing on this platform can start",
         );
@@ -1062,8 +1501,12 @@ echo {token}
 
         assert_eq!(
             state(&machine(Platform::MacOs, dir.path()), Dependency::Sandbox),
-            DependencyState::Present,
-            "every Mac has `sandbox-exec`, so there is nothing to install",
+            DependencyState::Present {
+                at: None,
+                target: None,
+            },
+            "every Mac has `sandbox-exec`, so there is nothing to install and no \
+             file the row had to go and find",
         );
         assert_eq!(
             state(&machine(Platform::Windows, dir.path()), Dependency::Sandbox),
@@ -1080,7 +1523,10 @@ echo {token}
 
         assert_eq!(
             state(&machine(Platform::Linux, dir.path()), Dependency::Sandbox),
-            DependencyState::Absent { trouble: None },
+            DependencyState::Absent {
+                trouble: None,
+                seen: None,
+            },
             "there is no such program, which is a thing to install rather than \
              a failure to report",
         );
@@ -1102,6 +1548,7 @@ echo {token}
             state(&machine(Platform::Linux, dir.path()), Dependency::Sandbox),
             DependencyState::Absent {
                 trouble: Some("bwrap: No permissions to creating new namespace".to_owned()),
+                seen: None,
             },
             "the machine's own words, which are the ones worth reading",
         );
@@ -1120,9 +1567,12 @@ echo {token}
 
         assert_eq!(
             state(&machine(Platform::Linux, dir.path()), Dependency::Sandbox),
-            DependencyState::Present,
+            DependencyState::Present {
+                at: Some(dir.path().join(BWRAP).to_string_lossy().into_owned()),
+                target: None,
+            },
             "it was asked for a read-only bind of the machine and the shell's \
-             own do-nothing",
+             own do-nothing, and the row names the `bwrap` that answered",
         );
     }
 
@@ -1266,6 +1716,7 @@ echo {token}
         let shells_home = Machine::stated(
             Platform::Windows,
             OsString::new(),
+            OsString::new(),
             None,
             None,
             &Environment {
@@ -1290,6 +1741,7 @@ echo {token}
             let nowhere = Machine::stated(
                 platform,
                 OsString::new(),
+                OsString::new(),
                 None,
                 None,
                 &Environment::default(),
@@ -1309,31 +1761,22 @@ echo {token}
     fn one_harness_meets_the_step_and_gh_never_gates() {
         let rows = |claude, gh| {
             vec![
-                row(Dependency::Sandbox, DependencyState::Present),
-                row(Dependency::Git, DependencyState::Present),
+                row(Dependency::Sandbox, THERE),
+                row(Dependency::Git, THERE),
                 row(Dependency::Claude, claude),
-                row(Dependency::Codex, DependencyState::Absent { trouble: None }),
-                row(Dependency::Grok, DependencyState::Absent { trouble: None }),
-                row(
-                    Dependency::OpenCode,
-                    DependencyState::Absent { trouble: None },
-                ),
+                row(Dependency::Codex, NOT_THERE),
+                row(Dependency::Grok, NOT_THERE),
+                row(Dependency::OpenCode, NOT_THERE),
                 row(Dependency::Gh, gh),
             ]
         };
 
         assert!(
-            dependencies_met(&rows(
-                DependencyState::Present,
-                DependencyState::Absent { trouble: None }
-            )),
+            dependencies_met(&rows(THERE, NOT_THERE)),
             "one harness is what a Profile runs under, and `gh` is a choice",
         );
         assert!(
-            !dependencies_met(&rows(
-                DependencyState::Absent { trouble: None },
-                DependencyState::Present
-            )),
+            !dependencies_met(&rows(NOT_THERE, THERE)),
             "and no harness at all is a machine that can run no session",
         );
     }
@@ -1345,8 +1788,8 @@ echo {token}
     fn a_windows_sandbox_row_does_not_hold_the_step() {
         let rows = vec![
             row(Dependency::Sandbox, DependencyState::NotApplicable),
-            row(Dependency::Git, DependencyState::Present),
-            row(Dependency::Claude, DependencyState::Present),
+            row(Dependency::Git, THERE),
+            row(Dependency::Claude, THERE),
         ];
 
         assert!(dependencies_met(&rows));
@@ -1500,6 +1943,7 @@ echo {token}
         let onboarding = Onboarding::probing(Machine::stated(
             Platform::Linux,
             OsString::new(),
+            OsString::new(),
             None,
             None,
             &Environment::default(),
@@ -1524,6 +1968,7 @@ echo {token}
 
         let onboarding = Onboarding::probing(Machine::stated(
             Platform::Linux,
+            OsString::new(),
             OsString::new(),
             None,
             None,

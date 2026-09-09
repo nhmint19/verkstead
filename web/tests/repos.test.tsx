@@ -456,7 +456,7 @@ describe("the pane a card opens", () => {
     theOpened({ ...OPENED, roadmaps: [] });
     mountOpened();
 
-    await waitFor(() => screen.getByText("Nothing is waiting to be adopted."));
+    await waitFor(() => screen.getByText("Nothing is waiting to be continued."));
   });
 
   /// The one section on this pane that is settings rather than facts, carrying

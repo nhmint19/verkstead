@@ -22,6 +22,8 @@
 
 use sqlx::SqlitePool;
 
+use crate::AppState;
+use crate::answer_files::OnAnswers;
 use crate::exchanges::exchange;
 use crate::store;
 
@@ -43,8 +45,14 @@ pub(crate) struct Folding {
 /// A read that fails is nothing to fold rather than a session that does not
 /// start: the Answers stay unfolded and reach the session after this one, which
 /// is late where losing the launch would be worse.
-pub(crate) async fn unfolded(pool: &SqlitePool, conversation_id: i64) -> Folding {
-    let unfolded = match store::unfolded(pool, conversation_id).await {
+///
+/// The state rather than the pool alone, because each exchange names the files
+/// the human put on its Answers at the path the session about to be started
+/// opens them — see [`OnAnswers`], which is what says where that is.
+pub(crate) async fn unfolded(state: &AppState, conversation_id: i64) -> Folding {
+    let files = OnAnswers::of(state, conversation_id).await;
+
+    let unfolded = match store::unfolded(&state.pool, conversation_id).await {
         Ok(unfolded) => unfolded,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading the answered Deferred Asks to fold into a prompt failed");
@@ -64,7 +72,11 @@ pub(crate) async fn unfolded(pool: &SqlitePool, conversation_id: i64) -> Folding
             continue;
         };
 
-        folding.digest.push_str(&exchange(set, &answered.response));
+        folding.digest.push_str(&exchange(
+            set,
+            &answered.response,
+            files.on(answered.set_id),
+        ));
         folding.sets.push(answered.set_id);
     }
 

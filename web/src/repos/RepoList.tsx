@@ -451,7 +451,7 @@ export function RepoDetails(props: {
                 <h2>Roadmaps waiting</h2>
                 <Show
                   when={repo().roadmaps.length > 0}
-                  fallback={<Empty>Nothing is waiting to be adopted.</Empty>}
+                  fallback={<Empty>Nothing is waiting to be continued.</Empty>}
                 >
                   <ul class={styles.roadmapList}>
                     <For each={repo().roadmaps}>

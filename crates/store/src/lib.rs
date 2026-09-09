@@ -59,7 +59,10 @@ pub use archives::{
     Archiving, Unarchiving, any_archived, archive_conversation, archived, show_archived,
     showing_archived, unarchive_conversation,
 };
-pub use attachments::{Attachment, Origin, attach, attachment, attachments, detach};
+pub use attachments::{
+    Attachment, Origin, attach, attached_sets, attachment, attachments, detach, detach_from_set,
+    set_attachment, set_attachments,
+};
 pub use banners::{dismiss_remote_banner, remote_banner_dismissed};
 pub use captures::{Summary, append_capture, capture, start_capture, summarise_capture};
 pub use cleanup::{
@@ -74,18 +77,20 @@ pub use companions::{
     Removing, add_companion, companions, configure_companion, remove_companion,
 };
 pub use conversations::{
-    Base, Chosen, Closable, ClosableCompanion, Closing, Conversation, ConversationRow, Directing,
-    Edited, Ending, Event, Grilling, Implementing, Landed, Lifecycle, Rebuilding, Resolving, Role,
-    RowState, SetOnTimeline, Settling, Staged, Steer, Steering, Switched, TimelineEvent, Work,
-    adopting, ask, asked_from, closable, close_conversation, conversation_branch, conversations,
-    follow_branch, follow_up_over, implement_again, last_batch_proposal, last_proposal,
-    load_conversation, note, open_set, opened_at, pick_direction, record_backlog, record_handoff,
-    record_roadmap, recorded_conversations, recorded_worktrees, reinvent_branch, rename_branch,
-    resolve_conflicts, save_brief, set_asked_from, set_base_commit, set_grilling_pairing,
-    set_implementation_pairing, set_review_pairing, set_state, settle_naming, skip_grilling,
-    skip_review, stacks_on, start_adoption, start_building, start_conversation, start_grilling,
-    start_implementing, start_stage, start_unnamed_conversation, state, steer_conversation,
-    switch_repo, timeline, unanswered_set_since, unfinished_conversations, waiting, work_on_repo,
+    AdoptedPullRequest, Base, Chosen, Closable, ClosableCompanion, Closing, Conversation,
+    ConversationRow, Directing, Edited, Ending, Event, Grilling, Implementing, Landed, Lifecycle,
+    Rebuilding, Resolving, Role, RowState, SetOnTimeline, Settling, Staged, Steer, Steering,
+    Switched, Taking, TimelineEvent, Work, adopted_pull_request, adopting, ask, asked_from,
+    closable, close_conversation, conversation_branch, conversations, follow_branch,
+    follow_up_over, implement_again, last_batch_proposal, last_proposal, load_conversation, note,
+    open_set, opened_at, pick_direction, record_backlog, record_handoff, record_roadmap,
+    recorded_conversations, recorded_worktrees, reinvent_branch, rename_branch, resolve_conflicts,
+    save_brief, set_asked_from, set_base_commit, set_grilling_pairing, set_implementation_pairing,
+    set_review_pairing, set_state, settle_naming, skip_grilling, skip_review, stacks_on,
+    start_adoption, start_building, start_conversation, start_grilling, start_implementing,
+    start_pull_request_adoption, start_stage, start_unnamed_conversation, state,
+    steer_conversation, switch_repo, take_up, timeline, unanswered_set_since,
+    unfinished_conversations, waiting, work_on_repo,
 };
 pub use deferrals::{Ask, Unfolded, asked_as, record_folded, stored_on_timeline, unfolded};
 pub use endings::{ended_on, nothing_else};
@@ -97,8 +102,8 @@ pub use profiles::{
     create_profile, delete_profile, load_profile, profiles, update_profile,
 };
 pub use pull_requests::{
-    Merging, PullRequest, Rollup, Standing, Unfinished, Wrapping, check_rollup, merges, merging,
-    pull_request, pull_request_repo, pull_requests, record_another_pull_request,
+    Merging, PullRequest, Rollup, Standing, Unfinished, Wrapping, check_rollup, held_pull_requests,
+    merges, merging, pull_request, pull_request_repo, pull_requests, record_another_pull_request,
     record_check_rollup, record_merging, record_pull_request, record_standing, standing,
     unfinished_pull_requests,
 };
@@ -122,11 +127,11 @@ pub use transcripts::{append_transcript, transcript, transcript_after};
 pub use unseen::{see_conversation, stamp_unseen};
 pub use waits::{WaitHeld, Waits};
 pub use wrap_up::{
-    Finished, Narrowing, WAITED_ON, WaitingOn, addressed_comments, conflict_fix_attempts,
-    finish_wrap_up, fix_attempts, forget_addressed_comments, forget_every_addressed_comment,
-    forget_fix_attempts, forget_narrowing, most_fix_attempts, narrowed_to_checks, narrowing,
-    record_addressed_comments, record_conflict_fix_attempt, record_fix_attempt, settle_wrap_up,
-    unsettle_wrap_up, wrap_up_settled,
+    Finished, Narrowing, WAITED_ON, WaitingOn, addressed_comments, batch_over,
+    conflict_fix_attempts, finish_wrap_up, fix_attempts, forget_addressed_comments,
+    forget_every_addressed_comment, forget_fix_attempts, forget_narrowing, most_fix_attempts,
+    narrowed_to_checks, narrowing, record_addressed_comments, record_conflict_fix_attempt,
+    record_fix_attempt, review_over, settle_wrap_up, unsettle_wrap_up, wrap_up_settled,
 };
 
 /// A Set as the store holds it: what was asked plus the identity the server
@@ -397,7 +402,21 @@ pub async fn submit_response(
     // draws an unreadable Set as a record rather than as a sheet.
     let set = stored.set.readable(set_id)?;
 
-    if let Err(invalid) = response.validate(set) {
+    // Checked against what the human handed over as well as what they wrote: a
+    // file put on a Question is an Answer to it, and the sheet sends one with a
+    // file and nothing else as answered. The rows are where that is written
+    // down — nothing about a file rides on the Response itself, which is stored
+    // exactly as it was sent.
+    let attached: Vec<String> = attachments::set_attachments(pool, set_id)
+        .await?
+        .into_iter()
+        .filter_map(|attachment| match attachment.origin {
+            Origin::Answer { label, .. } => Some(label),
+            Origin::Brief => None,
+        })
+        .collect();
+
+    if let Err(invalid) = response.validate_attached(set, &attached) {
         return Ok(Submission::Invalid(invalid));
     }
 

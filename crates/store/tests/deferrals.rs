@@ -80,6 +80,7 @@ fn picked() -> Response {
             selected: Some(1),
             free_text: None,
             unanswered: false,
+            attachments: Vec::new(),
         }],
         comment: None,
         direction: None,

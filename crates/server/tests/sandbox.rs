@@ -980,20 +980,37 @@ async fn the_attached_files_are_read_at_the_path_the_prompt_names_and_written_no
     );
 }
 
-/// And a Conversation nothing was attached to has no such directory at all: a
-/// path an agent is told about and finds empty is worse than one that is not
-/// there.
+/// And a Conversation nothing was attached to is bound over an empty directory
+/// all the same, so a session that blocked on an ask can read a file put on an
+/// Answer while it waited.
+///
+/// The sandbox is composed before the file exists, which is the whole of what
+/// this asserts: the bind is decided as a session is started, and a session
+/// blocked on an ask was started hours before the human answered it. Nothing
+/// says the path is there — the prompt lists the files there are, and a
+/// Conversation with none is told nothing at all.
 #[tokio::test]
-async fn a_conversation_with_nothing_attached_has_nothing_at_that_path() {
+async fn a_file_attached_after_a_session_started_is_read_at_that_path_too() {
     let fixture = grilling().await;
     let sandbox = fixture.sandbox(vec![]);
 
-    let reported = probe(&sandbox, "dir /verkstead/attachments attachments\n");
+    fixture.attach("rates.csv", b"1,2,3");
+
+    let reported = probe(
+        &sandbox,
+        r#"
+        dir /verkstead/attachments attachments
+        file /verkstead/attachments/rates.csv attached
+        "#,
+    );
 
     assert_eq!(
-        reported["attachments"], "absent",
-        "no bind is made, so the directory of Verkstead's own holds only `bin` and \
-         the skills"
+        reported["attachments"], "read",
+        "the directory was bound though it was empty when the session started"
+    );
+    assert_eq!(
+        reported["attached"], "read",
+        "and the file the Response names is there to be read"
     );
 }
 
@@ -1214,6 +1231,10 @@ async fn the_open_rendering_hands_a_session_the_environment_it_was_described_wit
         "TMP",
         "GIT_CONFIG_COUNT",
         "GIT_TERMINAL_PROMPT",
+        // This fixture's Profile is a Claude one, and every Claude session is
+        // told not to update the install it is running — see
+        // `a_claude_session_is_told_not_to_update_the_install_it_is_running`.
+        "DISABLE_AUTOUPDATER",
     ]
     .into_iter()
     .map(str::to_owned)
@@ -1877,6 +1898,43 @@ async fn an_opencode_session_holds_a_shell_command_far_longer_than_opencodes_own
     );
 }
 
+/// A Claude session is told not to update itself, and no other backend is told
+/// anything of the sort.
+///
+/// Claude's native binary keeps its versions under
+/// `~/.local/share/claude/versions/` and writes a new one there when it finds
+/// one — a directory a session reaches read-only, and the human's own besides:
+/// what version they run is theirs to say, and a session that moved it would
+/// move it for every session after this one. So the updater is off in every
+/// Claude session, wherever `claude` was found.
+///
+/// Codex is the other half of the claim rather than a second case: the variable
+/// is one backend's own spelling, and a session running any other has nothing
+/// to read it.
+#[tokio::test]
+async fn a_claude_session_is_told_not_to_update_the_install_it_is_running() {
+    let fixture = grilling().await;
+    let codex = fixture.codex_profile().await;
+
+    let reported = probe(
+        &fixture.sandbox(vec![]),
+        r#"say updater "${DISABLE_AUTOUPDATER-unset}""#,
+    );
+    assert_eq!(
+        reported["updater"], "1",
+        "a session never writes into the human's install",
+    );
+
+    let reported = probe(
+        &fixture.sandbox_under(&codex, LISTENING, &BuildCache::none(), vec![]),
+        r#"say updater "${DISABLE_AUTOUPDATER-unset}""#,
+    );
+    assert_eq!(
+        reported["updater"], "unset",
+        "and a backend with no such updater is told nothing about one",
+    );
+}
+
 /// Which backend a session is running is in its environment, and it is there for
 /// the Guide: `verkstead guide` inside a sandbox prints the asking instructions
 /// for the backend reading them, and nothing else inside says which that is.
@@ -1937,8 +1995,10 @@ async fn the_skills_inside_are_the_bundled_ones_and_only_those() {
         "and the whole of what this binary ships is there, at a path no backend owns"
     );
     assert_eq!(
-        reported["verkstead"], "bin skills ",
-        "in a directory the binds made, holding what the server put there and nothing else"
+        reported["verkstead"], "attachments bin skills ",
+        "in a directory the binds made, holding what the server put there and nothing \
+         else — the attachments directory among them, which every session has whether \
+         or not anything is in it"
     );
     assert_eq!(
         reported["tobico-skills"], "absent",

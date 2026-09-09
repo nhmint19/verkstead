@@ -10,6 +10,16 @@
 //! runs on their own Windows 11 machine, whose whole output is one screen they
 //! can paste back.
 //!
+//! **It starts its process with the capability, which it did not always do.**
+//! A profile is registered with the internet client and a token is built with
+//! one, and those are two calls: this probe passed the first and left the
+//! second empty, so every network answer it gave was a container holding no
+//! capability at all rather than the container a session runs in. The loopback
+//! answers were the same either way — inside is refused `127.0.0.1` and the
+//! machine's own address whether the capability is held or not — but the reach
+//! a session depends on was never asked about here until the day a session
+//! could not reach it.
+//!
 //! **It asserts nothing.** Every question here is asked by trying it and
 //! reporting what happened, and a `no` is as much of an answer as a `yes` —
 //! there is no failure mode where this program is right and the machine is
@@ -110,6 +120,11 @@ mod probe {
     /// Written as a SID rather than derived from a name, because that is what
     /// it is: `S-1-15-3-1` is `internetClient` on every Windows there is.
     const INTERNET_CLIENT: &str = "S-1-15-3-1";
+
+    /// What is dialled to ask whether a session can reach the internet: the
+    /// model's API, which is the reach a session most obviously depends on and
+    /// the one whose absence sent somebody looking at their DNS.
+    const OUTSIDE: &str = "api.anthropic.com:443";
 
     /// What an enabled group is, in the attributes half of a capability.
     const SE_GROUP_ENABLED: u32 = 0x0000_0004;
@@ -376,6 +391,7 @@ mod probe {
 
         say(&format!("loopback       = {}", dialled(&loopback)));
         say(&format!("own-address    = {}", dialled(&own)));
+        say(&format!("internet       = {}", reached(OUTSIDE)));
 
         say(&format!(
             "named-pipe     = {}",
@@ -410,6 +426,31 @@ mod probe {
         match TcpStream::connect_timeout(&address, PATIENCE) {
             Ok(_) => format!("connected to {address}"),
             Err(error) => format!("refused: {error}"),
+        }
+    }
+
+    /// A host out on the internet, looked up and then dialled.
+    ///
+    /// **The name first, which is the half that fails.** A container refused
+    /// the network does not meet a refusal at the socket — it meets a hostname
+    /// that will not resolve, because the resolver is reached over the network
+    /// it has not got. That is what a session sees, and so it is what is
+    /// reported here: the lookup and the connection said apart.
+    fn reached(host: &str) -> String {
+        use std::net::ToSocketAddrs;
+
+        let mut found = match host.to_socket_addrs() {
+            Ok(found) => found,
+            Err(error) => return format!("the name would not resolve: {error}"),
+        };
+
+        let Some(address) = found.next() else {
+            return String::from("the name resolved to nothing at all");
+        };
+
+        match TcpStream::connect_timeout(&address, PATIENCE) {
+            Ok(_) => format!("connected to {host} at {address}"),
+            Err(error) => format!("resolved {address}, then refused: {error}"),
         }
     }
 
@@ -922,6 +963,19 @@ mod probe {
         sid: PSID,
         sid_text: String,
         internet: PSID,
+
+        /// The capability list every process started in here is built with,
+        /// boxed so that a pointer to it stays good however this is held.
+        ///
+        /// **Registering the profile with a capability is not granting it.**
+        /// What `CreateAppContainerProfile` is handed says what the container
+        /// may be given; what `CreateProcessW` is handed is what the token
+        /// really carries. Passing the first and not the second — which is what
+        /// this probe did until it was asked why a session could reach nothing
+        /// — asks the machine what a container holding no capability at all can
+        /// reach, and the answer to that is nothing, whatever the machine would
+        /// otherwise have allowed.
+        capability: Box<SID_AND_ATTRIBUTES>,
     }
 
     impl Profile {
@@ -940,10 +994,10 @@ mod probe {
                 ));
             }
 
-            let capability = SID_AND_ATTRIBUTES {
+            let capability = Box::new(SID_AND_ATTRIBUTES {
                 Sid: internet,
                 Attributes: SE_GROUP_ENABLED,
-            };
+            });
 
             let name_w = wide(OsStr::new(name));
             let mut sid: PSID = ptr::null_mut();
@@ -953,7 +1007,7 @@ mod probe {
                     name_w.as_ptr(),
                     name_w.as_ptr(),
                     name_w.as_ptr(),
-                    &capability,
+                    capability.as_ref(),
                     1,
                     &mut sid,
                 )
@@ -972,6 +1026,7 @@ mod probe {
                 sid,
                 sid_text,
                 internet,
+                capability,
             })
         }
 
@@ -981,8 +1036,8 @@ mod probe {
             // is, which is what the one call that reads it needs.
             SECURITY_CAPABILITIES {
                 AppContainerSid: self.sid,
-                Capabilities: ptr::null_mut(),
-                CapabilityCount: 0,
+                Capabilities: ptr::from_ref(self.capability.as_ref()).cast_mut(),
+                CapabilityCount: 1,
                 Reserved: 0,
             }
         }

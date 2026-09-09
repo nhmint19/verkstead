@@ -1,0 +1,57 @@
+{
+  "adopting": null,
+  "adopting_pull_request": {
+    "base": "main",
+    "head": "rate-limiting",
+    "number": 41,
+    "title": "Rate limiting for the public API",
+    "url": "https://github.com/tobico/verkstead/pull/41"
+  },
+  "archived": false,
+  "attachments": [],
+  "base_commit": null,
+  "blocked_on": null,
+  "branch": "quiet-heron",
+  "branch_named": false,
+  "companions": [],
+  "compiles_uncached": false,
+  "direction": null,
+  "driven": false,
+  "grilling_pairing": "Nothing",
+  "id": 2,
+  "implementation_pairing": null,
+  "naming": false,
+  "pinned": [],
+  "ready_to_continue": false,
+  "ready_to_grill": false,
+  "ready_to_resume": false,
+  "ready_to_stop": false,
+  "repo": {
+    "default_branch": "main",
+    "id": 1,
+    "name": "verkstead",
+    "path": "/srv/repos/verkstead"
+  },
+  "resets": null,
+  "review_pairing": "Nothing",
+  "shared": null,
+  "state": "Draft",
+  "stop_asked": false,
+  "stopped_by_hand": false,
+  "timeline": [
+    {
+      "Brief": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "frozen": false,
+        "html": "<h1>Rate limiting for the public API</h1>\n<p>Counts every request against a window shared between the instances.</p>\n",
+        "id": 2,
+        "markdown": "# Rate limiting for the public API\n\nCounts every request against a window shared between the instances.\n"
+      }
+    }
+  ],
+  "trimmed": false,
+  "waiting": false,
+  "waiting_on_checks": false,
+  "working": false,
+  "worktree": null
+}

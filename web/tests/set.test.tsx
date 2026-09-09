@@ -14,10 +14,14 @@
 import { cleanup, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { Response as Decided } from "../src/api/types";
+import type { AttachmentView, Response as Decided } from "../src/api/types";
 // The page's own vocabulary, and the four components that keep names of their
 // own beside it.
 import app from "../src/App.module.css";
+// The pills a file on an Answer is drawn as, and the words a size is said in —
+// the record's row is the frozen Brief pane's row, drawn a question at a time.
+import pill from "../src/Attaching.module.css";
+import { sized } from "../src/Attaching";
 // The card a Preface and a commit's Message are both drawn as.
 import card from "../src/Card.module.css";
 import contents from "../src/set/Contents.module.css";
@@ -359,6 +363,127 @@ describe("the record of a settled Set", () => {
       "Unanswered — the agent was told this one is still open.",
       "Unanswered — the agent was told this one is still open.",
     ]);
+  });
+
+  /// The files put on an Answer, under it on the record: the frozen Brief pane's
+  /// own pills, each saying how large the file is, and nothing left to press on
+  /// one.
+  ///
+  /// Read off the Set rather than out of the Response, because that is where a
+  /// file is written down — every row naming a question is drawn under it, and
+  /// the row is named for it the way the sheet's was.
+  it("draws the files put on each Answer, with their sizes", async () => {
+    const files = ANSWERED.attachments;
+    expect(files.length, "the fixture should carry files").toBeGreaterThan(0);
+
+    const page = await reading(ANSWERED);
+
+    for (const file of files) {
+      const row = screen.getByRole("list", {
+        name: `Files attached to ${file.label}`,
+      });
+
+      expect(texts(row, `.${pill.attachmentName}`)).toEqual([file.name]);
+      expect(texts(row, `.${pill.attachmentSize}`)).toEqual([sized(file.bytes)]);
+
+      // Under the question it was put on, which is what the label on the row
+      // says and what the question it is drawn inside says back.
+      expect(
+        named(page, String(file.label)).closest(`.${sheet.ask}`)!.contains(row),
+      ).toBe(true);
+    }
+
+    // And nothing to press on any of it: the × went with the sheet, and a file
+    // on a settled Set is a record of what was sent.
+    expect(page.querySelectorAll(`.${pill.attachments} button`)).toHaveLength(0);
+  });
+
+  /// A Set locked unanswered keeps what was attached before it was locked, and
+  /// draws it the same way: nobody answered it, and the files are on the record
+  /// all the same.
+  it("keeps the files on a Set locked unanswered", async () => {
+    const files = LOCKED.attachments;
+    expect(files.length, "the fixture should carry files").toBeGreaterThan(0);
+
+    const page = await reading(LOCKED);
+
+    for (const file of files) {
+      const row = screen.getByRole("list", {
+        name: `Files attached to ${file.label}`,
+      });
+
+      expect(texts(row, `.${pill.attachmentName}`)).toEqual([file.name]);
+      expect(texts(row, `.${pill.attachmentSize}`)).toEqual([sized(file.bytes)]);
+    }
+
+    expect(page.querySelectorAll(`.${pill.attachments} button`)).toHaveLength(0);
+  });
+
+  /// A file is an Answer, and the Unanswered marker is still taken at its word:
+  /// the human may leave a question open and hand a file over with it. Which is
+  /// how the server reads a submission, so it is how the record of one reads —
+  /// see `check_answer` in `crates/schema/src/validate.rs`.
+  it("reads a question carrying only a file as answered, and one left open as open", async () => {
+    const attachments: AttachmentView[] = [
+      {
+        id: 7,
+        name: "the-header-we-send.txt",
+        bytes: 96,
+        origin: "Answer",
+        label: "Q3",
+      },
+      {
+        id: 8,
+        name: "what-we-log-now.txt",
+        bytes: 210,
+        origin: "Answer",
+        label: "Q2a",
+      },
+    ];
+    const response: Decided = {
+      answers: [
+        { label: "Q1", selected: 1 },
+        { label: "Q2", selected: 2 },
+        { label: "Q2a", unanswered: true },
+        { label: "Q2b", free_text: "keep them short" },
+        // Nothing typed and nothing picked, and no marker either: this one was
+        // answered with the file and nothing else.
+        { label: "Q3" },
+      ],
+      comment: null,
+    };
+
+    const page = await reading({
+      ...ANSWERED,
+      attachments,
+      standing: {
+        Answered: { submitted_at: "2026-08-03T09:07:11.000Z", response },
+      },
+    });
+
+    const asked = (label: string) =>
+      named(page, label).closest(`.${sheet.ask}`)!;
+
+    expect(
+      asked("Q3").querySelector(`.${sheet.unanswered}`),
+      "the file is the whole of this Answer",
+    ).toBeNull();
+    expect(
+      asked("Q2a").querySelector(`.${sheet.unanswered}`)!.textContent,
+      "and this one was left open on purpose, file or no file",
+    ).toContain("still open");
+
+    // Both draw their pills, which is what says the file was handed over either
+    // way.
+    for (const label of ["Q3", "Q2a"]) {
+      expect(
+        screen.getByRole("list", { name: `Files attached to ${label}` }),
+      ).toBeTruthy();
+    }
+
+    // And the head of the page says nothing: a question was answered here, so
+    // this is not a Response that resolved nothing.
+    expect(page.querySelector(`.${sheet.counterQuestion}`)).toBeNull();
   });
 
   it("says what was said about the Set as a whole, and when it was answered", async () => {

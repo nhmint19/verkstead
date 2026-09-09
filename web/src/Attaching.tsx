@@ -2,10 +2,11 @@
 //! the box that takes a drop.
 //!
 //! One piece rather than three, and one piece rather than one per page. There
-//! are two places a file is handed over beside some text — the composer of a
-//! draft, where a choice is a request and the record comes back, and the
-//! compose page, where nothing exists on the server yet and the files are held
-//! in the page — and an Answer sheet will be the third. What is different
+//! are three places a file is handed over beside some text — the composer of a
+//! draft, where a choice is a request and the record comes back; the compose
+//! page, where nothing exists on the server yet and the files are held in the
+//! page; and an answer sheet, where every Question carries one of these and a
+//! chosen file goes onto the Set under that Question's label. What is different
 //! between them is what *becomes* of a chosen file, which is the one thing this
 //! does not do: it is handed the list to draw and what to do when a file is put
 //! on or taken off, and everything the human touches is the same on all of
@@ -129,6 +130,13 @@ export function attaching(what: {
   /// and the box takes no drop, while the row goes on drawing what is already
   /// there. True unless said otherwise.
   offered?: () => boolean;
+
+  /// What these files are being put on, where the page draws more than one of
+  /// these: the Question's own name on an answer sheet, which is what tells its
+  /// paperclip and its row from the four beside them for a reader who cannot
+  /// see which question they are under. A composer draws one of each and says
+  /// nothing, so both are named for what they are.
+  onto?: string;
 }): Attaching {
   const offered = () => what.offered?.() ?? true;
 
@@ -177,11 +185,19 @@ export function attaching(what: {
   };
 
   const Pills = (props: { class?: string }) => (
-    <Row files={what.shown()} class={props.class} />
+    <Row
+      files={what.shown()}
+      class={props.class}
+      label={what.onto ? `Files attached to ${what.onto}` : undefined}
+    />
   );
 
   const Clip = (props: { class?: string }) => (
-    <Attach add={what.add} class={props.class} />
+    <Attach
+      add={what.add}
+      class={props.class}
+      label={what.onto ? `Attach a file to ${what.onto}` : undefined}
+    />
   );
 
   return {
@@ -210,6 +226,13 @@ export function Attachments(props: {
 
   /// Where the row stands, which is the caller's — see [`Row`].
   class?: string;
+
+  /// What these files were put on, where the page draws more than one of these
+  /// rows: the Question's own name on the record of an answered Set, which is
+  /// what tells its row from the four beside it — the same naming the sheet
+  /// gives them, because it is the same row read after the fact. A Brief's row
+  /// is the one on its pane and says nothing.
+  onto?: string;
 }): JSX.Element {
   return (
     <Row
@@ -218,6 +241,7 @@ export function Attachments(props: {
         size: sized(file.bytes),
       }))}
       class={props.class}
+      label={props.onto ? `Files attached to ${props.onto}` : undefined}
     />
   );
 }
@@ -229,7 +253,15 @@ export function Attachments(props: {
 /// compose page does the same, and the Brief pane puts it under the document at
 /// the pane's own edge. What is the same wherever it is drawn is the row and the
 /// pills in it, which is what this is.
-function Row(props: { files: Array<Shown>; class?: string }): JSX.Element {
+function Row(props: {
+  files: Array<Shown>;
+  class?: string;
+
+  /// What to call the row, where one name for every row on the page would not
+  /// tell them apart — see `onto` in [`attaching`]. *Attached files* otherwise,
+  /// which is what one row on a page is.
+  label?: string;
+}): JSX.Element {
   return (
     <Show when={props.files.length}>
       <ul
@@ -238,7 +270,7 @@ function Row(props: { files: Array<Shown>; class?: string }): JSX.Element {
             ? styles.attachments
             : `${styles.attachments} ${props.class}`
         }
-        aria-label="Attached files"
+        aria-label={props.label ?? "Attached files"}
       >
         <For each={props.files}>{(one) => <Pill file={one} />}</For>
       </ul>
@@ -303,6 +335,11 @@ function dropped(transfer: DataTransfer | null): Array<File> {
 function Attach(props: {
   add: (files: Array<File>) => void;
   class?: string;
+
+  /// What to call it, where one name for every paperclip on the page would not
+  /// tell them apart — see `onto` in [`attaching`]. *Attach a file* otherwise,
+  /// which is what one paperclip on a page is.
+  label?: string;
 }): JSX.Element {
   let picker!: HTMLInputElement;
 
@@ -310,7 +347,7 @@ function Attach(props: {
     <>
       <IconButton
         of={faPaperclip}
-        label="Attach a file"
+        label={props.label ?? "Attach a file"}
         open={false}
         press={() => picker.click()}
         class={props.class}

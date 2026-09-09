@@ -156,6 +156,18 @@ async fn over(
     // do put to the human, and whatever they accepted fixed and pushed — or the
     // batch asked for nothing and it said so. The comments are addressed either
     // way, and the watcher settles them on its next poll.
+    //
+    // And the checks go back to waiting first, because that push is a new run
+    // for GitHub to make up its mind about and the green standing over it is
+    // yesterday's. Before the watcher's poll rather than after it: that poll is
+    // what settles the last thing this wrap-up was waiting on, and the settling
+    // loop reads between the two. Which of them looked first would otherwise be
+    // cadence rather than a rule — the same thing [`store::review_over`] takes
+    // the review's own settle with. See [`store::batch_over`].
+    if let Err(error) = store::batch_over(&state.pool, conversation_id).await {
+        tracing::error!(error = ?error, conversation_id, "putting the checks a batch session pushed over back to waiting failed");
+    }
+
     tracing::info!(
         conversation_id,
         comments = which.len(),

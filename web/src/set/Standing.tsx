@@ -21,7 +21,7 @@ import type { Locked, Liveness } from "../api/types";
 import { ErrorLine, Note } from "../notices";
 import page from "./Sheet.module.css";
 import styles from "./Standing.module.css";
-import { clearDraft } from "./sheet";
+import { clearDraft } from "./filling";
 
 /// What the badge says. The word that colours it is the Liveness itself, which
 /// is the class on the span.

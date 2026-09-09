@@ -20,7 +20,13 @@
 //! A session has to reach GitHub, a registry and the model's API; it has no
 //! business on this machine's own network, and the probe found that it has none
 //! — a connection from inside to `127.0.0.1` and to the machine's own address
-//! both time out. What it asks Verkstead through instead is the named pipe.
+//! both time out, with the capability held and without it. What it asks
+//! Verkstead through instead is the named pipe.
+//!
+//! **Creating the profile with it is half of granting it.** A profile registers
+//! what a container may be given; a token is what actually carries it, and one
+//! started with an empty capability list reaches nothing — see
+//! [`super::starting::Capabilities`], which is the other half.
 //!
 //! **Which is why a container tells the pipe about itself as it is made.** The
 //! server opened its pipe at startup, before this profile existed, and the one
@@ -73,7 +79,8 @@ use windows_sys::Win32::Security::Isolation::{
 };
 use windows_sys::Win32::Security::{
     EqualSid, FreeSid, GetLengthSid, GetTokenInformation, PSID, SID_AND_ATTRIBUTES,
-    TOKEN_APPCONTAINER_INFORMATION, TOKEN_QUERY, TokenAppContainerSid,
+    TOKEN_APPCONTAINER_INFORMATION, TOKEN_GROUPS, TOKEN_QUERY, TokenAppContainerSid,
+    TokenCapabilities,
 };
 use windows_sys::Win32::System::Threading::{
     OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -108,11 +115,15 @@ static PROFILES: LazyLock<Mutex<HashMap<String, Arc<Container>>>> =
 ///
 /// Written as a SID rather than looked up by name, because that is what it is:
 /// `S-1-15-3-1` is `internetClient` on every Windows there is.
-const INTERNET_CLIENT: &str = "S-1-15-3-1";
+///
+/// **Read twice**: a profile is created with it here, and the same constant is
+/// put on the token every process starts with — see
+/// [`super::starting::Capabilities`], which is where a capability takes effect.
+pub(super) const INTERNET_CLIENT: &str = "S-1-15-3-1";
 
 /// What an enabled group is, in the attributes half of a capability. Win32's
 /// own number, which the bindings do not carry.
-const SE_GROUP_ENABLED: u32 = 0x0000_0004;
+pub(super) const SE_GROUP_ENABLED: u32 = 0x0000_0004;
 
 /// One AppContainer, made and held.
 ///
@@ -733,6 +744,68 @@ pub fn around(id: u32) -> io::Result<Option<String>> {
     }
 
     Ok(written(inside))
+}
+
+/// The capabilities the token of process `id` carries, as the SIDs naming them.
+///
+/// **The other half of what [`around`] asks.** A container says which identity
+/// a process runs under; a capability says what that identity may reach, and
+/// the two are given by different calls — the profile is registered with one,
+/// the token is built with the other. A process correctly inside its container
+/// and holding no capability at all is exactly what a session that cannot reach
+/// the network is, and it looks right from every side but this one. So these
+/// are asked the way the container is: of the operating system, about the token
+/// it really handed over.
+pub fn held_by(id: u32) -> io::Result<Vec<String>> {
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, id) };
+
+    if process.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+
+    let process = Handle(process);
+    let mut token: HANDLE = ptr::null_mut();
+
+    if unsafe { OpenProcessToken(process.0, TOKEN_QUERY, &mut token) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    let token = Handle(token);
+
+    // Asked its size first rather than given a number, which is the difference
+    // from [`around`]: there is a largest SID there can be, but no largest
+    // number of capabilities a token may carry, and how many there are is the
+    // thing being read.
+    let mut wanted = 0u32;
+
+    unsafe { GetTokenInformation(token.0, TokenCapabilities, ptr::null_mut(), 0, &mut wanted) };
+
+    let mut buffer = vec![0u8; wanted as usize];
+    let mut read = 0u32;
+
+    let asked = unsafe {
+        GetTokenInformation(
+            token.0,
+            TokenCapabilities,
+            buffer.as_mut_ptr().cast(),
+            wanted,
+            &mut read,
+        )
+    };
+
+    if asked == 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    // Safety: the call wrote a `TOKEN_GROUPS` at the top of the buffer, whose
+    // count says how many `SID_AND_ATTRIBUTES` were written after it.
+    let groups = buffer.as_ptr().cast::<TOKEN_GROUPS>();
+    let count = unsafe { (*groups).GroupCount } as usize;
+    let first = unsafe { ptr::addr_of!((*groups).Groups) }.cast::<SID_AND_ATTRIBUTES>();
+
+    Ok((0..count)
+        .filter_map(|n| written(unsafe { first.add(n).read_unaligned() }.Sid))
+        .collect())
 }
 
 /// What a call that would not do it answered, in the spelling an HRESULT is

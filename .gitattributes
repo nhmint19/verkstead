@@ -1,0 +1,9 @@
+# Every text file here is stored and checked out with LF endings, on every
+# platform. The web suite reads stylesheets and asserts their text byte for
+# byte, so a CRLF checkout on Windows fails tests that pass everywhere else.
+* text=auto eol=lf
+
+# The files git should neither look inside nor convert.
+*.png  binary
+*.ico  binary
+*.icns binary

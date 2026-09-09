@@ -3455,7 +3455,7 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
     // `Sessions::start`, because this is where every session that *builds* is
     // launched from: the one that is not launched here is the one an Answer
     // must not be spent on — see [`crate::deferrals`].
-    let folding = crate::deferrals::unfolded(&state.pool, conversation_id).await;
+    let folding = crate::deferrals::unfolded(state, conversation_id).await;
     let prompt = folding.under(&prompt);
 
     // One Worktree holds one agent. Every session a run launches of its own

@@ -236,6 +236,34 @@ impl Server {
         })
     }
 
+    /// Put a file on one of a Set's Answers, as far as the record is concerned.
+    ///
+    /// The row alone, written through the store: what a Response names is the
+    /// path a session reads a file at, and that is composed from the record
+    /// rather than read off the disk. The upload that writes both halves is the
+    /// server's own suite's — this fixture's server keeps nothing, having no
+    /// Data Directory to keep it in.
+    pub fn attach_to_answer(&self, set_id: i64, label: &str, name: &str, bytes: i64) {
+        self.block_on(async {
+            let pool = verkstead_server::open_database(&self.database)
+                .await
+                .unwrap();
+            store::attach(
+                &pool,
+                ASKING_FROM,
+                store::Origin::Answer {
+                    set: set_id,
+                    label: label.to_owned(),
+                },
+                name,
+                bytes,
+            )
+            .await
+            .unwrap();
+            pool.close().await;
+        });
+    }
+
     /// Answer a Set the way the human's device does: YAML over HTTP.
     pub fn answer(&self, id: i64, yaml: &str) {
         let reply = ureq::post(format!("{}/api/v1/sets/{id}/response", self.url()))

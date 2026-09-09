@@ -8,6 +8,8 @@
 import type {
   AbandonedRepo,
   Adopted,
+  AnswerAttached,
+  AnswerAttachmentRemoved,
   ApiError,
   Attached,
   AttachmentRemoved,
@@ -35,6 +37,7 @@ import type {
   DirectoryListing,
   GrillingStarted,
   OnboardingView,
+  OpenPullRequestRepo,
   PrefillView,
   ProfileChoice,
   ProfileChosen,
@@ -74,6 +77,7 @@ import type {
   Submitted,
   Subscribed,
   Subscription,
+  TakenUp,
   TerminalOpened,
   TerminalsView,
   TranscriptView,
@@ -280,6 +284,22 @@ export function listAbandonedRoadmaps(): Promise<AbandonedRepo[]> {
   return get<AbandonedRepo[]>("/api/ui/abandoned-roadmaps");
 }
 
+/// And the pull requests open in those Repos, each saying which Conversation
+/// already holds it.
+///
+/// One request for every registered Repo, because the server asks them in
+/// parallel and the browser waiting on six of them in turn would be six round
+/// trips to say what one can.
+///
+/// Slower than everything else this page reads — a `gh` per Repo, each of them
+/// a call to GitHub — so whatever draws it has something to show while it is on
+/// its way. A Repo that could not be asked is simply not in the answer: this
+/// never refuses, and an empty list means *nothing to wrap up here* rather than
+/// *something went wrong*.
+export function listOpenPullRequests(): Promise<OpenPullRequestRepo[]> {
+  return get<OpenPullRequestRepo[]>("/api/ui/open-pull-requests");
+}
+
 /// Start a Conversation to adopt one of those roadmaps with.
 ///
 /// What clicking a roadmap in the notice does. The stage is not sent: which one
@@ -296,6 +316,36 @@ export function startAdoption(
     // The branch the roadmap was found on, so the new Conversation starts
     // fixed to it. Empty is the default branch, which is what no base means.
     base: base || null,
+  });
+}
+
+/// And one to wrap one of those pull requests up with.
+///
+/// The whole row goes rather than its number, unlike the roadmap above: a
+/// roadmap is a document in the Conversation's own repository and is read back
+/// off it, where a pull request is GitHub's — and a server handed only a number
+/// would have to make a `gh` call of its own to name what the human is already
+/// looking at.
+///
+/// Nothing is checked out by this. It records and opens, and the take-up on the
+/// page it lands on is what touches git.
+export function startPullRequestAdoption(
+  repoId: number,
+  pull: {
+    number: number;
+    title: string;
+    url: string;
+    head: string;
+    base: string;
+  },
+): Promise<Started> {
+  return post<Started>("/api/ui/pull-request-adoptions", {
+    repo_id: repoId,
+    number: pull.number,
+    title: pull.title,
+    url: pull.url,
+    head: pull.head,
+    base: pull.base,
   });
 }
 
@@ -623,6 +673,56 @@ export function removeAttachment(
   );
 }
 
+/// Put a file on one of a waiting Set's Answers, under the label of the
+/// Question it answers.
+///
+/// The Brief's upload said from the other page: one request per file, the raw
+/// bytes as the body, and the label and the name in the path — both encoded, so
+/// a name with a separator in it reaches the server to be refused rather than
+/// turning the request into a path that matches no route.
+///
+/// Addressed by the Set rather than by the Conversation, because that is what
+/// the sheet is a page about: where the file goes is the server's to work out.
+/// A body it would not even read comes back as `TooLarge` the way the Brief's
+/// does, and for the same reason.
+export async function attachToAnswer(
+  set: number,
+  label: string,
+  file: File,
+): Promise<AnswerAttached> {
+  const response = await fetch(
+    `/api/ui/sets/${set}/answers/${encodeURIComponent(
+      label,
+    )}/attachments/${encodeURIComponent(file.name)}`,
+    {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/octet-stream",
+      },
+      body: file,
+    },
+  );
+
+  if (response.status === 413) {
+    return "TooLarge";
+  }
+
+  return taken<AnswerAttached>(response);
+}
+
+/// And take one off an Answer again, by the row's own id — which is what the
+/// path names it by, under the Set it was put on: two files on one Set may
+/// share a name, and neither of them is a key.
+export function removeAnswerAttachment(
+  set: number,
+  attachment: number,
+): Promise<AnswerAttachmentRemoved> {
+  return post<AnswerAttachmentRemoved>(
+    `/api/ui/sets/${set}/attachments/${attachment}/remove`,
+  );
+}
+
 /// Save what the human has written into a Brief.
 export function saveBrief(id: number, markdown: string): Promise<BriefSaved> {
   return post<BriefSaved>(`/api/ui/conversations/${id}/brief`, { markdown });
@@ -750,6 +850,17 @@ export function startGrilling(id: number): Promise<GrillingStarted> {
 /// the base commit — read again by the server when the button is pressed.
 export function adoptRoadmap(id: number): Promise<Adopted> {
   return post<Adopted>(`/api/ui/conversations/${id}/adopt`, {});
+}
+
+/// And take up the pull request a conversation is holding: its head branch
+/// checked out, the pull request recorded, and the wrap-up running over it.
+///
+/// Nothing is sent here either, for the reason nothing is sent to adopt: which
+/// conversation is in the path, and what the branch is now is the repository's
+/// own answer — read when the button is pressed rather than taken from a page
+/// that read it a moment ago.
+export function takeUpPullRequest(id: number): Promise<TakenUp> {
+  return post<TakenUp>(`/api/ui/conversations/${id}/take-up`, {});
 }
 
 /// Stop a Conversation wherever it has got to: its worktree removed, its branch

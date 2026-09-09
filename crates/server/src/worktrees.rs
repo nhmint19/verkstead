@@ -157,6 +157,49 @@ pub(crate) fn branch_taken(repo: &Path, branch: &str) -> bool {
     }
 }
 
+/// The name `branch` answers to on its remote: what its upstream points at,
+/// with the remote's own name taken off the front.
+///
+/// Which is not always the name it has here. A session follows the target
+/// repository's own review process, and a repository whose branch-naming rule
+/// disagrees with the name Verkstead cut is pushed under the rule rather than
+/// under the name: `git push -u origin HEAD:refs/heads/tobi/02-crm`, from a
+/// branch this end calls `modern-keystone/02-crm`. The pull request that
+/// follows has the pushed name as its head, so the local name is a name GitHub
+/// has never heard of — see [`crate::wrapping`], which is where that costs a
+/// wrap-up its ending.
+///
+/// Read off the upstream rather than off the pushed name, because the push is
+/// long over by the time anything asks: what `-u` left behind is the one record
+/// of where the branch went, and it is in the repository rather than on the
+/// network.
+///
+/// `None` where there is nothing to say and the local name is the whole answer:
+/// a branch never pushed, a branch pushed without `-u` so that nothing recorded
+/// where it went, a name no branch has, and a repository git would not read.
+///
+/// And one more that has to be said out loud, because it does not look like
+/// nothing: a branch tracking another branch of this same repository.
+/// `%(upstream:remotename)` answers `.` for those, and the `lstrip` beside it
+/// would otherwise hand back the tail of a local name — `deep/local` read as
+/// `local` — as though a remote were carrying it. So the remote is what this
+/// turns on, and the name is only taken where a real one is named.
+pub(crate) fn pushed_to(repo: &Path, branch: &str) -> Option<String> {
+    let listed = git(
+        repo,
+        &[
+            "for-each-ref",
+            "--format=%(upstream:remotename)\t%(upstream:lstrip=3)",
+            "--end-of-options",
+            &format!("refs/heads/{branch}"),
+        ],
+    )?;
+
+    let (remote, head) = listed.lines().next()?.split_once('\t')?;
+
+    (!remote.is_empty() && remote != "." && !head.is_empty()).then(|| head.to_owned())
+}
+
 /// Every branch of `repo` a Conversation could be based on: the local ones and
 /// the remote-tracking ones both, in the order git lists them — the locals
 /// first, then whatever the remotes are carrying.
@@ -513,6 +556,133 @@ pub(crate) fn merged(repo: &Path, commit: &str, into: &str) -> Option<bool> {
     Some(base.trim() == commit)
 }
 
+/// Where `branch` is checked out in `repo`, or `None` where nothing holds it.
+///
+/// Git allows one checkout per branch, and *one* includes the human's own
+/// working tree beside every worktree Verkstead ever made: `git worktree list`
+/// lists the lot, the main checkout first. So this is what a take-up asks before
+/// it tries to check the pull request's head branch out — a branch somebody is
+/// standing on is a refusal naming where they are standing, rather than a git
+/// error with a path buried in it.
+///
+/// The porcelain form because it is the parseable one: a paragraph per checkout,
+/// `worktree <path>` first and `branch <ref>` among the lines under it — absent
+/// where that checkout is detached, which holds no branch to collide with.
+///
+/// `None` for a repository git would not read, which is the same answer as one
+/// with nothing checked out. Nothing turns on the difference: what follows a
+/// `None` here is a `git worktree add` that would refuse for itself, in the words
+/// the refusal above it already has.
+pub(crate) fn checked_out_at(repo: &Path, branch: &str) -> Option<PathBuf> {
+    let listed = git(repo, &["worktree", "list", "--porcelain"])?;
+    let held = format!("branch refs/heads/{branch}");
+
+    let mut at: Option<PathBuf> = None;
+
+    for line in listed.lines() {
+        if let Some(path) = line.strip_prefix("worktree ") {
+            at = Some(PathBuf::from(path));
+        }
+
+        if line.trim_end() == held {
+            return at;
+        }
+    }
+
+    None
+}
+
+/// Move `branch` on to `to` in `repo`, and say whether it went.
+///
+/// What a take-up does to a local head branch that stands behind origin's: the
+/// pull request's work is on the remote, this checkout's copy is older, and the
+/// worktree is about to be made on it. A fetch cannot do it — the branch is not
+/// checked out anywhere, which is exactly why it is safe to move — so the ref is
+/// written directly.
+///
+/// `from` is where it stands now, and it is passed to git rather than assumed:
+/// `update-ref` takes an old value and refuses the write where the ref has
+/// moved since, which is what makes this safe against anything that touched the
+/// branch between the reading and here.
+///
+/// Only ever called where the caller has established that `to` contains `from`,
+/// so this is a fast-forward in fact as well as in name. Git has no opinion
+/// about that — `update-ref` writes whatever it is given — and the deciding is
+/// the caller's, where the refusals for a branch that is ahead or has diverged
+/// are.
+pub(crate) fn fast_forward(repo: &Path, branch: &str, from: &str, to: &str) -> bool {
+    git(
+        repo,
+        &[
+            "update-ref",
+            "--end-of-options",
+            &format!("refs/heads/{branch}"),
+            to,
+            from,
+        ],
+    )
+    .is_some()
+}
+
+/// Point `branch` at `upstream` in `repo`, and say whether it went.
+///
+/// What a take-up does to a head branch that was already local. [`add`] gets
+/// this for nothing — cutting a branch off a remote-tracking one is git setting
+/// the upstream as it cuts — and a branch that was here before this press has
+/// only whatever whoever made it left it, which a `git branch` off a commit
+/// leaves as nothing at all.
+///
+/// It matters because of how the wrap-up pushes. The sessions a wrap-up runs
+/// push with a bare `git push`, which git refuses on a branch with no upstream;
+/// what gives an ordinary Conversation one is the implementing session's
+/// `push -u origin HEAD`, and a take-up runs no such session — the work is
+/// built, and the first thing to push is a review's own commit or a fix for a
+/// red check. So this is the one place a taken-up branch can get it.
+///
+/// Set on the branch rather than in the worktree, because that is where it
+/// lives: `branch.<name>.remote` is the repository's config and is read by
+/// every checkout of it.
+pub(crate) fn track(repo: &Path, branch: &str, upstream: &str) -> bool {
+    git(
+        repo,
+        &[
+            "branch",
+            "--set-upstream-to",
+            upstream,
+            "--end-of-options",
+            branch,
+        ],
+    )
+    .is_some()
+}
+
+/// Check the branch `branch` — which is already there — out at `path` as a
+/// worktree of `repo`.
+///
+/// [`add`]'s other half, and the one thing that separates them is who made the
+/// branch. Every worktree Verkstead makes for work of its own cuts its branch as
+/// it goes; a take-up is handed a branch that is somebody's already, with a pull
+/// request open on it, so what it wants is git checking that branch out where it
+/// stands — and never `-b`, which would refuse over a name that is the whole
+/// point.
+pub(crate) fn check_out(repo: &Path, path: &Path, branch: &str) -> bool {
+    if !room(path) {
+        return false;
+    }
+
+    git(
+        repo,
+        &[
+            "worktree",
+            "add",
+            "--end-of-options",
+            &path.to_string_lossy(),
+            branch,
+        ],
+    )
+    .is_some()
+}
+
 /// Make the directory a worktree goes under, and say whether it is there.
 ///
 /// Git creates the worktree directory but not the `worktrees/` above it, which
@@ -531,12 +701,20 @@ fn room(path: &Path) -> bool {
     true
 }
 
-/// Make `branch` off `commit` in `repo`, checked out at `path`.
+/// Make `branch` off `from` in `repo`, checked out at `path`.
 ///
 /// One git call, because it is one thing: a worktree registered with the branch
 /// it holds. Doing it in two would leave a branch behind whenever the checkout
 /// failed.
-pub(crate) fn add(repo: &Path, path: &Path, branch: &str, commit: &str) -> bool {
+///
+/// `from` is a commit for every branch a start cuts, that being what a base
+/// resolves to. It is a *name* for the one a take-up cuts — origin's copy of the
+/// pull request's head branch — and the difference is what git makes of it:
+/// cutting a branch off a remote-tracking one sets the new branch's upstream to
+/// it, so a push from the worktree goes where the pull request is. Passed
+/// through as it comes rather than resolved here, because resolving it is
+/// exactly what would throw that away.
+pub(crate) fn add(repo: &Path, path: &Path, branch: &str, from: &str) -> bool {
     if !room(path) {
         return false;
     }
@@ -550,7 +728,7 @@ pub(crate) fn add(repo: &Path, path: &Path, branch: &str, commit: &str) -> bool 
             branch,
             "--end-of-options",
             &path.to_string_lossy(),
-            commit,
+            from,
         ],
     )
     .is_some()
@@ -1920,6 +2098,74 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         assert_eq!(merged(dir.path(), "abc123", "main"), None);
+    }
+
+    /// A branch pushed under another name answers to the name the remote has
+    /// it under, which is the whole of what a wrap-up needs to find its pull
+    /// request: the head of a pull request is the pushed name, and the pushed
+    /// name is the pushing session's to choose.
+    #[test]
+    fn a_branch_answers_to_the_name_its_remote_carries_it_under() {
+        let (dir, upstream) = repository();
+        let clone = dir.path().join("clone");
+
+        run(
+            dir.path(),
+            &[
+                "clone",
+                &upstream.to_string_lossy(),
+                &clone.to_string_lossy(),
+            ],
+        );
+
+        run(&clone, &["checkout", "-b", "modern-keystone/02-crm"]);
+        run(
+            &clone,
+            &["push", "-u", "origin", "HEAD:refs/heads/tobi/02-crm"],
+        );
+
+        assert_eq!(
+            pushed_to(&clone, "modern-keystone/02-crm").as_deref(),
+            Some("tobi/02-crm")
+        );
+
+        // And the ordinary case, where the two names are the same one: the
+        // answer is that name rather than nothing, because nothing here would
+        // read as *this went somewhere else*.
+        run(&clone, &["checkout", "-b", "rate-limiting"]);
+        run(&clone, &["push", "-u", "origin", "rate-limiting"]);
+
+        assert_eq!(
+            pushed_to(&clone, "rate-limiting").as_deref(),
+            Some("rate-limiting")
+        );
+    }
+
+    /// And a branch with no remote name of its own answers nothing, so that the
+    /// local name is what stands.
+    ///
+    /// The third of these is the one worth having a test for: a branch tracking
+    /// another branch of this same repository has an upstream, and stripping a
+    /// remote's name off it would hand back `local` for `deep/local` — a name
+    /// no remote is carrying, asked of GitHub as though one were.
+    #[test]
+    fn a_branch_with_no_remote_name_of_its_own_answers_nothing() {
+        let (_dir, repo) = repository();
+
+        run(&repo, &["branch", "unpushed"]);
+        assert_eq!(pushed_to(&repo, "unpushed"), None);
+
+        run(&repo, &["branch", "deep/local"]);
+        run(&repo, &["branch", "tracking"]);
+        run(
+            &repo,
+            &["branch", "--set-upstream-to=deep/local", "tracking"],
+        );
+        assert_eq!(pushed_to(&repo, "tracking"), None);
+
+        // A name no branch has, and a directory that is no repository at all.
+        assert_eq!(pushed_to(&repo, "nothing-here"), None);
+        assert_eq!(pushed_to(Path::new("/nowhere-at-all"), "main"), None);
     }
 
     /// A repository with one commit on it and a branch to check out, and the

@@ -39,6 +39,11 @@ export type Draft = {
 
 /// Whether the human has put anything into this question: an Option, words, or
 /// both. Whitespace is not an answer here any more than it is at submit.
+///
+/// The files are not among them, and neither is anything else the page does not
+/// hold: what is on an Answer is on the Set, read back from the record, and a
+/// draft is what this device is holding on to. Which is why the submit is told
+/// the labels a file was put on — see [`drafted`] — and the draft is not.
 export function answered(field: Filled): boolean {
   return field.selected !== null || field.free_text.trim() !== "";
 }
@@ -57,11 +62,18 @@ export function answered(field: Filled): boolean {
 /// A field with nothing in it is left out of its entry rather than sent empty,
 /// which is how the schema writes a Response everywhere else — what the CLI
 /// parses and what the agent is handed as YAML.
+///
+/// `attached` is the labels a file was put on, read off the Set rather than
+/// held here: a file is an Answer to the question it was put under, so an entry
+/// carrying one goes back answered rather than marked Unanswered. Nothing about
+/// the file itself goes out — the rows on the Set are what say which Answer
+/// each is on, and the server counts them where it checks the Response.
 export function drafted(
   filled: Filled[],
   comment: string,
   direction: Direction | null = null,
   nothingElse = false,
+  attached: string[] = [],
 ): Response {
   const answers: Answer[] = filled.map((field) => {
     const words = field.free_text.trim();
@@ -74,8 +86,8 @@ export function drafted(
       answer.free_text = words;
     }
     // Exclusive with an Answer, so it goes on exactly the entries that carry
-    // nothing.
-    if (!answered(field)) {
+    // nothing — a file on the question being one of the things it may carry.
+    if (!answered(field) && !attached.includes(field.label)) {
       answer.unanswered = true;
     }
 

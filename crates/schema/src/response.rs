@@ -97,6 +97,19 @@ pub struct Answer {
     /// the question as still open.
     #[serde(default, skip_serializing_if = "is_false")]
     pub unanswered: bool,
+
+    /// The files the human put on this Answer, each by the path the session
+    /// reads it at, in the order they were attached.
+    ///
+    /// **Filled on the way out rather than sent in.** What the sheet submits
+    /// carries none of these: a file goes on the Set as it is chosen, and the
+    /// rows the record kept are what say which Answer each one is on — so a
+    /// Response is stored exactly as the human sent it, and the list is filled
+    /// from those rows wherever one is read out. Which is why an entry with no
+    /// files leaves the field out altogether, and why a Response stored before
+    /// the field existed reads as it always did.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<String>,
 }
 
 impl Response {
@@ -116,14 +129,22 @@ impl Response {
 }
 
 impl Answer {
-    /// Whether this entry carries an Answer at all — an Option was selected or
-    /// something was written. An entry that carries none is either the
-    /// Unanswered marker or a mistake.
+    /// Whether this entry carries an Answer at all — an Option was selected,
+    /// something was written, or a file was put on it. An entry carrying none
+    /// of the three is either the Unanswered marker or a mistake.
+    ///
+    /// **A file alone is an Answer**: handing something over is answering, and
+    /// a question with a file on it and nothing else goes back answered rather
+    /// than open. A Response *arriving* carries no files, though — they are
+    /// filled in on the way out, see [`Answer::attachments`] — so the reading a
+    /// submission is checked by is [`Response::validate_attached`]'s, which is
+    /// told which labels the record says a file was put on.
     pub fn is_answer(&self) -> bool {
         self.selected.is_some()
             || self
                 .free_text
                 .as_ref()
                 .is_some_and(|text| !text.trim().is_empty())
+            || !self.attachments.is_empty()
     }
 }

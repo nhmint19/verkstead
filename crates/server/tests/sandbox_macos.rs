@@ -1543,40 +1543,54 @@ async fn the_attached_files_are_read_at_the_path_the_prompt_names_and_written_no
     );
 }
 
-/// And a Conversation nothing was attached to reaches nothing there: the policy
-/// says the directory it was given and no other, and it was given none.
+/// And a Conversation nothing was attached to is given its own directory all
+/// the same, so a file put on an Answer while it waits is one it can read —
+/// and still no other Conversation's.
+///
+/// The sandbox is composed before the file exists, which is the whole of what
+/// this asserts: the policy is written as a session is started, and a session
+/// blocked on an ask was started hours before the human answered it.
 #[tokio::test]
 #[cfg_attr(
     not(target_os = "macos"),
     ignore = "the boundary this probes is a Mac's"
 )]
-async fn a_conversation_with_nothing_attached_reaches_nothing_there() {
+async fn a_file_attached_after_a_session_started_is_read_at_that_path_too() {
     let fixture = grilling().await;
 
     // Really on disk, so that its being out of reach inside is the policy rather
-    // than a directory nobody made: what a Conversation with nothing attached
-    // has is a root beside its own that is somebody else's.
+    // than a directory nobody made: beside this Conversation's own is a root
+    // holding somebody else's.
     let anothers = fixture.state.path().join("attachments/999");
     std::fs::create_dir_all(&anothers).unwrap();
     std::fs::write(anothers.join("theirs.md"), "not this Conversation's\n").unwrap();
 
     let sandbox = fixture.sandbox();
 
+    // The human answering an hour into the ask this session is blocked on.
+    let directory = fixture.attach("rates.csv", b"1,2,3");
+
     let reported = probe(
         &sandbox,
         &format!(
             r#"
             dir {mine} mine
+            file {file} attached
             dir {anothers} anothers
             "#,
-            mine = quoted(&fixture.attachments_dir()),
+            mine = quoted(&directory),
+            file = quoted(&directory.join("rates.csv")),
             anothers = quoted(&anothers),
         ),
     );
 
     assert_eq!(
-        reported["mine"], "absent",
-        "nothing was attached, so there is no directory to reach"
+        reported["mine"], "read",
+        "the directory was given though it was empty when the session started"
+    );
+    assert_eq!(
+        reported["attached"], "read",
+        "and the file the Response names is there to be read"
     );
     assert_eq!(
         reported["anothers"], "refused",

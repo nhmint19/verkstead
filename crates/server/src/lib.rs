@@ -13,6 +13,10 @@ use axum::routing::{get, post};
 use sqlx::SqlitePool;
 use verkstead_store::{Settlements, Waits};
 
+/// The same two presses made from the answer sheet, which put a file on an
+/// Answer to a Question Set rather than on the Brief.
+mod answer_files;
+
 /// The files the human put on a Conversation for its sessions to read: where
 /// the bytes are kept, and what a file is called once they are there.
 ///
@@ -121,6 +125,9 @@ mod profiles;
 /// Putting a share where a link reaches it, which is Verkstead's own write to
 /// GitHub.
 mod publishing;
+/// The open pull requests Verkstead did not open, which is the door work
+/// already somewhere else comes into the pipeline through.
+mod pull_requests;
 mod push;
 /// The store an OpenCode session keeps of itself, followed while it runs.
 mod records;

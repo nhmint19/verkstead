@@ -1,10 +1,12 @@
 {
   "adopting": null,
+  "adopting_pull_request": null,
   "archived": false,
   "attachments": [
     {
       "bytes": 20418,
       "id": 3,
+      "label": null,
       "name": "delivery-failures.csv",
       "origin": "Brief"
     }

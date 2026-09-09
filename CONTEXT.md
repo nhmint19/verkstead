@@ -53,8 +53,9 @@ _Avoid_: project, codebase, checkout
 The core entity: a Repo, a base commit, a Brief, one branch and one Worktree.
 Everything done about one piece of work hangs off it. Runs through Draft →
 Grilling → Implementing → Wrapping → Done — a roadmap Conversation passes
-straight from Grilling to Wrapping, its building belonging to its Stages — and
-can be closed from any of them, a **Steer** being the way back into a
+straight from Grilling to Wrapping, its building belonging to its Stages, and
+one adopting a pull request from Draft straight to Wrapping, its building
+having happened before Verkstead saw it — and can be closed from any of them, a **Steer** being the way back into a
 Conversation that is closed and one of the two ways into one that is Done. There
 is one move back down the ladder: a wrap-up whose review split its findings out
 into a backlog returns to Implementing to build it, and its finish step wraps up
@@ -183,7 +184,16 @@ directory and the Conversation's handoff directory writable, the Agent
 Profile's pair at `~/.claude` and `~/.claude.json`, the system, the Skills,
 the Conversation's **Attachments** and the Verkstead executable read-only in a
 directory of Verkstead's own, and nothing else of the machine at all — not
-even the checkout the Worktree was made from. Nothing at all stands where the
+even the checkout the Worktree was made from. The directories a session's own
+`PATH` names under the home of whoever runs the server are read-only inside
+with them, and so is the directory each program a session runs by name links
+into, where that too is under the home — which is how the harness a human
+installed for themselves is one a session can run, a native install being a
+link on the `PATH` into a versions directory no `PATH` names. A link leading
+anywhere else, or leading nowhere, is a name a session is not given at all,
+and nothing else of that home is. A Claude session is told not to update the
+install it runs, which is read-only inside and the human's own besides, so
+nothing a session does moves it. Nothing at all stands where the
 account's own skills would be found: they are hidden rather than merged with,
 and where the mechanism has no mount to hide one with it refuses the path
 instead. Each Companion Repo the Conversation was configured with is inside as
@@ -427,6 +437,18 @@ nowhere a session looks is a row that ticks and a session that cannot start. The
 GitHub token is not part of it — GitHub may not be in use at all, where git is
 not optional and its author is what git asks for.
 
+**A row says where, and not only whether.** One that is there carries the path
+the name resolved to and the file that path lands on, where it is a link: a
+distribution's `claude` too old to connect and the human's own under
+`~/.local/bin` are the same tick and two different programs. One that is not
+there says where the name was seen, where it was seen at all — on an entry of
+the server's own `PATH` that a session's is not composed with, or at the end of
+a link a session could not follow — because each of those is a `PATH` to fix
+rather than a program to install. A name on no list at all is absent with
+nothing said. And where a session looks is the composed list itself, drawn
+above the rows on every platform, a session's `PATH` being the server's own
+rather than anything the wizard could write down.
+
 **The verdict is reached once, at startup**, and the mode stays on until the
 wizard's last Continue takes it off. There is no skip and no re-entry: nothing
 inside a run puts it back on, so deleting the last Profile mid-run is the
@@ -442,7 +464,11 @@ machine nothing at all.
 human's to pick: an account is an account under a harness, and the harness has
 to be installed before there is one to log into; there is nothing to commit as
 until there is something to commit. The first names every dependency with this
-distro's own install command and where the binary has to land; the second offers
+distro's own install command and where the binary has to land — Claude Code's
+row leading with the vendor's own installer, a distribution's package being
+the one that can be too old to connect — and says once above the rows that the
+`PATH` was read at startup, so a directory an install has just made wants
+Verkstead started again from a shell that names it; the second offers
 the agent accounts already in the server's home as Profiles and holds its
 Continue until there is one, because a step that walked past a Profile would
 clear the mode onto the empty state a skip was rejected for; the third asks for
@@ -622,17 +648,34 @@ so it is left the moment there is anything in that list: a Conversation created,
 or *Show archived* switched on with archived ones present, which brings the
 sidebar back with them in it.
 
-**Adopting a roadmap is that page too**, from an **Adopt a roadmap** dropdown
-under the box, at the near edge of the row the two presses are at the far edge
-of — drawn only where there is a roadmap to adopt and nothing written in the box,
-since what it loads stands in place of what would have been written there.
-Picking one creates nothing: the roadmap is loaded into what the device is
-holding, the box locks to a card naming it and the Stage that would be started,
-the Repo and the base commit are the roadmap's own, and what is still the
-human's is the Pairings and the repos the work runs alongside. A clear control
-puts it down and gives the box back what was in it. **Start** then creates the
-adopting Conversation and adopts the Stage; **Save as draft** creates it and
-leaves the adopting to the press on its own page.
+**Adopting is that page too**, from an **Other actions** dropdown under the
+box, at the near edge of the row the two presses are at the far edge of — drawn
+whenever nothing is written in the box and nothing is loaded, since what it
+loads stands in place of what would have been written there. One nested level
+per action, in the one card the menu always is: **Continue a roadmap** and
+**Wrap up a pull request**, each greyed rather than hidden while there is
+nothing under it, because a menu that came and went with its lists would say
+nothing about what it offers. Picking a roadmap creates nothing: the roadmap is
+loaded into what the device is holding, the box locks to a card naming it and
+the Stage that would be started, the Repo and the base commit are the roadmap's
+own, and what is still the human's is the Pairings and the repos the work runs
+alongside. A clear control puts it down and gives the box back what was in it.
+**Start** then creates the adopting Conversation and adopts the Stage; **Save
+as draft** creates it and leaves the adopting to the press on its own page.
+
+**Picking a pull request loads it the same way**, with one difference: a pull
+request brings words of its own. The card names it — the Repo, the number, the
+title, the head branch and the base it goes into — over a box that stays a
+box, prefilled with the title as a heading and the description under it, and
+what is left there when the work starts is the Brief; what was typed before is
+put away and given back on clear, the way a held file is. The Repo is the pull
+request's and reads disabled, the branch and the base are its own and not
+drawn, and the grilling Pairing is not asked for, there being no grilling: what
+is the human's is the Implementation and Review Pairings and the companions.
+**Start** creates the Conversation and takes the pull request up; **Save as
+draft** creates it holding the pull request for the press on its own page. A
+pull request a Conversation already holds is listed all the same, and its row
+goes to that Conversation rather than loading anything.
 
 Every one of those freezes at the same moment the Brief does, so once grilling
 starts none of it is drawn; on a later round the branch and the base commit are
@@ -654,18 +697,60 @@ Conversation gets that directory **read-only** at `/verkstead/attachments`
 itself), and its prompt ends with a neutral `# Attached files` listing of each
 file's path and size, in the tone of the companions listing: what is there and
 where, and nothing about what to do with it, because the Brief says what a
-file is for. The copy is the record, and an agent that wants to work on one
-copies it into the Worktree.
+file is for. **The listing is grouped under what each file was attached to** —
+the Brief's under one line, and an Answer's under the title of the Set it was
+put on and the label of the Question it answers — in the order they were
+attached, which puts the Brief's group first. The copy is the record, and an
+agent that wants to work on one copies it into the Worktree.
+**The directory is there at every launch, made empty where nothing has been
+attached**, because a session blocked on an ask goes on running while the human
+answers it: a file put on an Answer an hour in lands in a directory that
+session already reads, and the Response names it there. Nothing is said about
+an empty one — the listing is of the files there are, so a Conversation with
+none is told nothing at all.
 
-**What a file is attached to is its origin.** The Brief is the one origin
-there is, and an Answer to a Question Set is the one planned next — a second
-value on the same record rather than a second kind of thing, the upload being
-the Conversation's and not the Brief's. Attachments freeze with the Brief:
-attached and removed while the round drafts, fixed once the work starts, and
-the frozen Brief pane draws them as a read-only row under the text. A Share
-carries the names and sizes and never the bytes. A same-named file is not
-replaced: the newcomer is renamed `name-2.ext`, and both stay. One flat
-directory per Conversation, 32 MB a file, any kind of file, folders skipped.
+**What a file is attached to is its origin, and there are two of them.** The
+Brief, and an Answer to a Question Set — a second value on the same record
+rather than a second kind of thing, the upload being the Conversation's and
+not the Brief's. **An Answer's file is keyed by the Set it was put on and the
+label of the Question it answers**, which is what its pills are drawn under
+and what a later session finds it named by; the Brief's are keyed by neither.
+The two share the one directory, so a file named like one already there is
+renamed whichever origin either of them has.
+
+**An Answer's file reaches a session three ways, and every one of them names
+the same path.** The agent waiting on the Set is handed it on the Response, in
+that Answer's `attachments` list. Every session started afterwards has it in
+the prompt's `# Attached files` listing, under the Set's title and the
+Question. And a session primed with an exchange it was not there for — the
+digest a Deferred Ask is folded into a prompt as, and the summary a relaunched
+grilling or a picked-up follow-up is started on — has it named under the
+decision it came with, because a file handed over with an Answer is part of the
+answer.
+
+**One is put on an Answer from the answer sheet**, where every Question and
+Sub-question's free-text field carries a paperclip of its own and the whole of
+the question takes a drop; a Heading has neither, asking nothing, and the
+set-level comment box has neither either. A chosen file goes up the moment it
+is chosen rather than waiting for Submit — so its pill comes back from the
+record and survives a reload, a × takes it off again, and a Set the agent locks
+unanswered keeps what was attached as record.
+
+**Each freezes when what it is a file of does.** The Brief's are attached and
+removed while the round drafts and fixed once the work starts, and the frozen
+Brief pane draws them as a read-only row under the text. An Answer's are
+attached and removed while the Set waits, and fixed the moment it settles —
+answered or locked unanswered — or its Conversation is Closed; a Set the agent
+locked unanswered keeps what was put on it as record. **A settled Set draws
+them the way the frozen Brief does**: the record under each Answer, name and
+size and nothing to press, with no paperclip anywhere on the page — the sheet
+read back, the Set page reached from the Timeline and a Share all being one
+drawing of one record. A file may only be put
+under a label the Set actually asks, which is every Question that is not a
+Heading and every Sub-question. A Share carries the names and sizes and never
+the bytes. A same-named file is not replaced: the newcomer is renamed
+`name-2.ext`, and both stay. One flat directory per Conversation, 32 MB a
+file, any kind of file, folders skipped.
 
 **On the compose page they are held in the page until the press**, because
 nothing exists on the server until Start or Save as draft: the files ride with
@@ -1335,23 +1420,50 @@ progress* on this branch.
 _Avoid_: phase, milestone, epic, step (that is a backlog's)
 
 **Adopt**:
-Take a roadmap the Repo already holds — written by the old tools, by hand, by
-anything that was not this Verkstead — into the pipeline, by starting its next
-Stage as a Conversation. The human's press stands in for the Stage before it
-that would otherwise have started it, so there is no grilling and no Brief to
-write: what they settle is the Pairings, the base commit and the repos the work
-runs alongside, and the stage brief becomes the Brief. **Taken up on the compose
-page**, from the dropdown under its box: the roadmap loads into the composer, and
-the press under it creates the Conversation and adopts the Stage together — the
-same two presses every other piece of work is composed with, the quieter of which
-stops at a draft, for the adopting to be pressed on its own pane. One Stage is
-the whole of what adopting starts, and all it has to start — that Stage's own
-plan commit writes to the roadmap, so when it settles the Stage after it begins
-the ordinary unattended way, and an adopted roadmap is a staged one from there
-on. Never stacks: there is no predecessor
-Conversation to stack on, and building on an unmerged branch is the human's
-move, made by picking that branch as the base.
-_Avoid_: import, attach, resume, take over, migrate
+Take work the Repo already holds — written by the old tools, by hand, by
+anything that was not this Verkstead — into the pipeline. Two kinds of work are
+adopted, and *adopt* is the code's and this vocabulary's word for both; what the
+human reads is **Continue a roadmap** for the one and **Wrap up a pull
+request** for the other, both levels of the **Other actions** dropdown on the
+compose page.
+
+**A roadmap is adopted** by starting its next Stage as a Conversation. The
+human's press stands in for the Stage before it that would otherwise have
+started it, so there is no grilling and no Brief to write: what they settle is
+the Pairings, the base commit and the repos the work runs alongside, and the
+stage brief becomes the Brief. The roadmap loads into the composer, and the
+press under it creates the Conversation and adopts the Stage together — the
+same two presses every other piece of work is composed with, the quieter of
+which stops at a draft, for the adopting to be pressed on its own pane. One
+Stage is the whole of what adopting starts, and all it has to start — that
+Stage's own plan commit writes to the roadmap, so when it settles the Stage
+after it begins the ordinary unattended way, and an adopted roadmap is a staged
+one from there on. Never stacks: there is no predecessor Conversation to stack
+on, and building on an unmerged branch is the human's move, made by picking
+that branch as the base.
+
+**A pull request is adopted** by starting a Conversation on it at its wrap-up:
+one opened by hand, by a contributor, by anything that was not this Verkstead.
+Read off GitHub rather than the repository — every open pull request of every
+registered Repo with a GitHub remote, through the configured `gh`, when the
+compose page opens and again on each reopen, never kept: any author, and never
+one from a fork, whose head branch is nowhere origin can be pushed to. One a
+Conversation already holds, Closed included, is listed and leads to that
+Conversation instead, the branch being that Conversation's. Taking it up puts
+the Conversation on the pull request's head branch, named for it and never
+invented — made off origin's, or a local one fast-forwarded where it is behind;
+one ahead, diverged or checked out anywhere else is refused by name, on the
+composer where the press was — with the head at take-up as its base commit and
+GitHub's base branch beside it, so the Timeline draws only what Verkstead adds
+from here and a conflict merge of the base drags nothing. Recording the pull
+request is the move, from Draft straight into **Wrapping**, and the wrap-up is
+the ordinary one from there: the Review Pairing decides whether the branch is
+read afresh with everything already said on it folded in, or, under *No
+review*, only what stands on it is answered. No grilling and no handoff: the
+pull request's own title and description stand as the Brief, edited or not,
+and nothing about the pull request itself — its draft flag, its description —
+is touched.
+_Avoid_: import, attach, resume, take over, migrate, improve
 
 **Abandoned**:
 What a roadmap in a registered Repo is when it has a Stage startable right now
@@ -1539,8 +1651,13 @@ session is opened on, and takes it *always*: an empty instruction carries the
 branch on and an empty brief grills the one already written, and there is
 nothing on the branch a follow-up could fall back on — it is something the human
 wanted rather than a step of the run. Wrapping takes nothing: its watchers
-recompute over whatever the branch now holds, the fix attempts forgotten. Done
-takes nothing at all, there being nothing to run in it.
+recompute over whatever the branch now holds, the fix attempts forgotten and the
+review put back to being something the wrap-up waits on, so the branch is read
+afresh from whatever state it was steered — the settle that carried a
+Conversation to Done is one look at the branch, and a steer is the human asking
+for another. **Resolve conflicts** is the one move into Wrapping that leaves it
+standing, which is why that is a press of its own. Done takes nothing at all,
+there being nothing to run in it.
 
 **And every target work goes on in takes the sandbox.** A companion section
 under all three of them — Grilling, Implementing and Wrapping — because what it
@@ -1960,7 +2077,11 @@ its prompt, oldest first, under the documents the prompt is built from — a
 Deferred Ask, which had nobody to tell from the start, and a store-and-nudge one
 whose session went before it fetched. Each is
 folded once, and that it was folded is recorded rather than worked out from what
-is answered. The one session never folded into is a relaunched grilling, which
+is answered. **The digest names whatever was attached to each Answer**, under
+the decision it came with and by the path the session reads it at, because the
+session it is folded into never saw the file handed over — and the summary a
+relaunched grilling is primed with, being the same digest, names them the same
+way. The one session never folded into is a relaunched grilling, which
 is already primed with everything the Conversation has answered.
 _Avoid_: sync/async ask, hard/soft question, urgent question
 
@@ -2039,9 +2160,12 @@ _Avoid_: options table, comparison table (the Guide's generic layout
 advice), grid
 
 **Answer**:
-The human's resolution of one Question or Sub-question: a selected Option
-and/or free text. A Question left without an Answer at submission is
-Unanswered.
+The human's resolution of one Question or Sub-question: a selected Option,
+free text, and/or a file put on it — **a file alone is an Answer**, handing
+something over being answering, so the sheet sends a question carrying one and
+nothing else as answered rather than Unanswered, and the record's own rows are
+what the server counts where it checks a Response. A Question left without any
+of the three at submission is Unanswered.
 _Avoid_: reply, response (that's the whole Set)
 
 **Unanswered**:
@@ -2054,6 +2178,11 @@ _Avoid_: skipped, blank
 The submitted collection of Answers (and Unanswered markers) for a Question
 Set, plus an optional set-level comment. What the waiting agent receives.
 May contain zero Answers.
+**An Answer with files on it carries them as an `attachments` list**, each by
+the path that session reads the file at — filled in from the record on the way
+out rather than sent in, so what is stored is what the human submitted and one
+Response shape comes back from a held wait and a fetch alike. An Answer with
+no files carries no list.
 _Avoid_: submission, result
 
 **Diff**:

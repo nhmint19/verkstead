@@ -661,6 +661,25 @@ async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
     attach(pool, id, Origin::Brief, "burst.csv", 48_112)
         .await
         .unwrap();
+
+    // One of each origin, because the second names a Set and the first names
+    // none: a row pointing at `question_sets` is one a delete has to take before
+    // the Set it points at, and a fixture carrying only the Brief's would not
+    // notice a delete that took them the other way round. The label is the
+    // server's to check against what the Set asks — the record takes the row as
+    // it stands.
+    attach(
+        pool,
+        id,
+        Origin::Answer {
+            set,
+            label: "Q1".to_owned(),
+        },
+        "the-counter-we-have.rs",
+        2_184,
+    )
+    .await
+    .unwrap();
     place_conversations(pool, &[id]).await.unwrap();
     stamp_unseen(pool, id).await.unwrap();
 
@@ -728,6 +747,20 @@ async fn written_straight_in(pool: &SqlitePool, id: i64, companion: i64, event: 
         .execute(pool)
         .await
         .unwrap();
+
+    // The other thing a Draft adopts. Never on one Conversation alongside the
+    // roadmap above — a Draft adopts one thing or none — but this fixture is
+    // filling every table a Conversation is named from rather than composing a
+    // Conversation anybody could have made.
+    sqlx::query(
+        "INSERT INTO pull_request_adoptions (conversation_id, number, title, url, head, base)
+         VALUES (?, 41, 'Rate limiting', 'https://github.com/tobico/verkstead/pull/41',
+                 'rate-limiting', 'main')",
+    )
+    .bind(id)
+    .execute(pool)
+    .await
+    .unwrap();
 
     sqlx::query(
         "INSERT INTO wrap_up_narrowings (conversation_id, at)

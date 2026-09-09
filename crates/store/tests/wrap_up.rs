@@ -12,13 +12,13 @@ use std::path::Path;
 use sqlx::SqlitePool;
 use verkstead_store::{
     Ask, Event, Finished, Lifecycle, Locking, Settlements, Steer, Steering, Submission, WAITED_ON,
-    WaitingOn, addressed_comments, ask, finish_wrap_up, fix_attempts, forget_addressed_comments,
-    forget_every_addressed_comment, forget_fix_attempts, implement_again, last_batch_proposal,
-    last_proposal, load_conversation, load_response, lock_set, open_database, pick_direction,
-    pull_requests, record_addressed_comments, record_another_pull_request, record_fix_attempt,
-    record_pull_request, register_repo, save_brief, settle_wrap_up, start_conversation,
-    start_grilling, steer_conversation, submit_response, timeline, unsettle_wrap_up,
-    wrap_up_settled,
+    WaitingOn, addressed_comments, ask, batch_over, finish_wrap_up, fix_attempts,
+    forget_addressed_comments, forget_every_addressed_comment, forget_fix_attempts,
+    implement_again, last_batch_proposal, last_proposal, load_conversation, load_response,
+    lock_set, open_database, pick_direction, pull_requests, record_addressed_comments,
+    record_another_pull_request, record_fix_attempt, record_pull_request, register_repo,
+    review_over, save_brief, settle_wrap_up, start_conversation, start_grilling,
+    steer_conversation, submit_response, timeline, unsettle_wrap_up, wrap_up_settled,
 };
 
 /// A Conversation whose work is on a pull request, which is the only state any
@@ -197,6 +197,138 @@ async fn checks_that_go_red_again_stop_being_settled() {
         .await
         .unwrap();
     assert_eq!(wrap_up_settled(&pool, id).await.unwrap(), Vec::new());
+}
+
+/// A review that is over is a push, so the green every pull request had goes
+/// with it: what GitHub called green was the commit before whatever the review
+/// landed, and a wrap-up that kept it would finish on a suite that never saw the
+/// work the human accepted.
+///
+/// Every pull request rather than the Conversation's own, a review reading the
+/// work whole and pushing into whichever worktree it fixed something in. What is
+/// settled about them otherwise is left where it is: the comments the review
+/// folded in are still addressed and the base has not moved.
+#[tokio::test]
+async fn a_review_that_is_over_puts_every_pull_requests_checks_back_to_waiting() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    let repo = own(&pool, id).await;
+    let companion = beside(&pool, id).await;
+
+    for settled in [
+        WaitingOn::Checks(repo),
+        WaitingOn::Checks(companion),
+        WaitingOn::Comments(repo),
+        WaitingOn::Mergeable(repo),
+    ] {
+        settle_wrap_up(&pool, id, settled).await.unwrap();
+    }
+
+    review_over(&pool, id).await.unwrap();
+
+    let mut settled = wrap_up_settled(&pool, id).await.unwrap();
+    settled.sort_by_key(|one| format!("{one:?}"));
+
+    assert_eq!(
+        settled,
+        vec![
+            WaitingOn::Comments(repo),
+            WaitingOn::Mergeable(repo),
+            WaitingOn::Review,
+        ],
+        "the review settled and both suites went back to being waited on",
+    );
+
+    // And the checks settle again as soon as a poll has read the run the push
+    // started, which is the ordinary way round: this took nothing away that a
+    // green cannot earn back.
+    settle_wrap_up(&pool, id, WaitingOn::Checks(repo))
+        .await
+        .unwrap();
+
+    assert!(
+        wrap_up_settled(&pool, id)
+            .await
+            .unwrap()
+            .contains(&WaitingOn::Checks(repo)),
+    );
+}
+
+/// And a batch session that is over takes the same green with it, for the same
+/// reason: what it landed on the human's say-so is pushed as it ends, so every
+/// suite standing green at that moment is green about the commit before it.
+///
+/// The review's settle is what carries that act for a review — see above. A
+/// batch has no settle of its own to be carried by: what settles it is the
+/// comments watcher noticing on its next poll that nothing is left unaddressed,
+/// which is another writer entirely. So the unsettle is the whole act, and it
+/// lands before that poll can.
+///
+/// What is settled about them otherwise is left exactly where it is. The review
+/// is still over, the base has not moved, and the comments this batch answered
+/// are the watcher's to settle rather than this function's to guess at.
+#[tokio::test]
+async fn a_batch_session_that_is_over_puts_every_pull_requests_checks_back_to_waiting() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    let repo = own(&pool, id).await;
+    let companion = beside(&pool, id).await;
+
+    for settled in [
+        WaitingOn::Checks(repo),
+        WaitingOn::Checks(companion),
+        WaitingOn::Comments(repo),
+        WaitingOn::Mergeable(repo),
+        WaitingOn::Review,
+    ] {
+        settle_wrap_up(&pool, id, settled).await.unwrap();
+    }
+
+    batch_over(&pool, id).await.unwrap();
+
+    let mut settled = wrap_up_settled(&pool, id).await.unwrap();
+    settled.sort_by_key(|one| format!("{one:?}"));
+
+    assert_eq!(
+        settled,
+        vec![
+            WaitingOn::Comments(repo),
+            WaitingOn::Mergeable(repo),
+            WaitingOn::Review,
+        ],
+        "both suites went back to being waited on, and nothing else moved",
+    );
+
+    // And they settle again as soon as a poll has read the run the push started,
+    // which is the ordinary way round: this took nothing away that a green
+    // cannot earn back.
+    settle_wrap_up(&pool, id, WaitingOn::Checks(repo))
+        .await
+        .unwrap();
+
+    assert!(
+        wrap_up_settled(&pool, id)
+            .await
+            .unwrap()
+            .contains(&WaitingOn::Checks(repo)),
+    );
+}
+
+/// A batch session on a Conversation whose pull requests were never found puts
+/// nothing back to waiting and refuses nothing: there is no suite to be green
+/// about, and an end that failed over it would stop a run for having nothing to
+/// do.
+#[tokio::test]
+async fn a_batch_session_on_a_conversation_with_no_pull_request_settles_nothing_and_refuses_nothing()
+ {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    batch_over(&pool, id).await.unwrap();
+
+    assert!(wrap_up_settled(&pool, id).await.unwrap().is_empty());
 }
 
 /// The count is per check rather than per Conversation: a suite where one job

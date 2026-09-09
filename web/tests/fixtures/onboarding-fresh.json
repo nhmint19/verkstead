@@ -7,51 +7,61 @@
       "dependency": "Sandbox",
       "state": {
         "state": "Absent",
-        "trouble": null
+        "trouble": null,
+        "seen": null
       }
     },
     {
       "dependency": "Git",
       "state": {
         "state": "Absent",
-        "trouble": null
+        "trouble": null,
+        "seen": null
       }
     },
     {
       "dependency": "Claude",
       "state": {
         "state": "Absent",
-        "trouble": null
+        "trouble": null,
+        "seen": null
       }
     },
     {
       "dependency": "Codex",
       "state": {
         "state": "Absent",
-        "trouble": null
+        "trouble": null,
+        "seen": null
       }
     },
     {
       "dependency": "Grok",
       "state": {
         "state": "Absent",
-        "trouble": null
+        "trouble": null,
+        "seen": null
       }
     },
     {
       "dependency": "OpenCode",
       "state": {
         "state": "Absent",
-        "trouble": null
+        "trouble": null,
+        "seen": null
       }
     },
     {
       "dependency": "Gh",
       "state": {
         "state": "Absent",
-        "trouble": null
+        "trouble": null,
+        "seen": null
       }
     }
+  ],
+  "path": [
+    "/machine/bin"
   ],
   "accounts": [],
   "steps": {

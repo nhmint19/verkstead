@@ -29,20 +29,21 @@ use axum::routing::{delete, get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    Adopted, Attached, AttachmentRemoved, Author, BaseBranchChoice, BranchRename, BriefEdit,
-    BuildCacheView, CheckRollup, CleanupStepView, CleanupView, CommentedOn, CompanionAdded,
-    CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode, CompanionModeChoice,
-    CompanionModeChosen, CompanionRemoved, CompanionView, CompileCaching, ConflictResolutionEdit,
-    ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
-    ConversationStopped, ConversationUnarchived, ConversationView, Creation, Cursor,
-    GrillingStarted, IgnoreRule, IgnoredCommentsEdit, Lifecycle, Locked, Merging, MissedOut,
-    NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry,
+    Adopted, AdoptedPullRequestView, AnswerAttached, AnswerAttachmentRemoved, Attached,
+    AttachmentRemoved, Author, BaseBranchChoice, BranchRename, BriefEdit, BuildCacheView,
+    CheckRollup, CleanupStepView, CleanupView, CommentedOn, CompanionAdded, CompanionBaseRecorded,
+    CompanionBranchRenamed, CompanionMode, CompanionModeChoice, CompanionModeChosen,
+    CompanionRemoved, CompanionView, CompileCaching, ConflictResolutionEdit, ConversationArchived,
+    ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
+    ConversationUnarchived, ConversationView, Creation, Cursor, GrillingStarted, IgnoreRule,
+    IgnoredCommentsEdit, Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion,
+    NewConversation, NewOrder, NewPullRequestAdoption, ProfileChoice, ProfileEdit, ProfileEntry,
     PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved,
     Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress, SetReading, SetView,
     SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit,
     SharedConversation, ShowArchived, ShowingArchived, Standing, SteerOpened, SteerSubmission,
-    Submitted, Subscribed, Subscription, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved,
-    UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    Submitted, Subscribed, Subscription, TakenUp, TerminalOpened, TimelineEvent, TokenEdit,
+    TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -60,6 +61,30 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route("/api/ui/sets/{id}", get(set))
         .route("/api/ui/sets/{id}/response", post(submit_response))
         .route("/api/ui/sets/{id}/lock", post(lock_set))
+        // And the files the human puts on its Answers, which are the Brief's
+        // own two presses made from the sheet — see [`crate::answer_files`].
+        //
+        // Under the Set rather than under its Conversation, because the sheet
+        // is a page about one Set: which Conversation's directory the file
+        // lands in is read off the Set, the way everything else on that page
+        // is. The Answer is in the path too, there being one paperclip per
+        // Question and nothing set-wide to put a file on.
+        //
+        // One request per file, the raw bytes as the body and the name in the
+        // path — and a body limit of its own over the router's default, exactly
+        // as the Brief's upload has both.
+        .route(
+            "/api/ui/sets/{id}/answers/{label}/attachments/{name}",
+            post(attach_to_answer).layer(DefaultBodyLimit::max(crate::attachments::MAX_BYTES + 1)),
+        )
+        // And taking one off, by the row's own id rather than by its name and
+        // its label: two files on one Answer may share a name, and neither of
+        // them is a key. Under the Set rather than under the Answer for that
+        // reason as well — the id is the whole of what says which file this is.
+        .route(
+            "/api/ui/sets/{id}/attachments/{attachment}/remove",
+            post(detach_from_answer),
+        )
         .route("/api/ui/repos", get(repos).post(register_repo))
         // And making one, which is the other way a Repo arrives. Its own path
         // beside the registration rather than a shape the one above also takes:
@@ -113,11 +138,24 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // rather than under a Repo, because that is where it is read: what it
         // offers is another way to start work.
         .route("/api/ui/abandoned-roadmaps", get(abandoned_roadmaps))
+        // And the pull requests open in them, which is the other thing offered
+        // under that box: work that is already somewhere else, waiting to be
+        // wrapped up. Read off GitHub rather than out of the store, so it sits
+        // beside the roadmaps rather than under a Repo for the same reason.
+        .route("/api/ui/open-pull-requests", get(open_pull_requests))
         // And starting one to adopt a roadmap with, which is what clicking a
         // roadmap in that notice does. Its own endpoint rather than a field on
         // the one above: adopting is the other way into the pipeline, and what
         // it starts is a Conversation with no Brief to write.
         .route("/api/ui/adoptions", post(start_adoption))
+        // And starting one to wrap a pull request up with, which is what
+        // pressing a free row of that level does. Its own endpoint beside the
+        // one above for the same reason, over the other kind of thing there is
+        // to take up.
+        .route(
+            "/api/ui/pull-request-adoptions",
+            post(start_pull_request_adoption),
+        )
         .route("/api/ui/conversations/{id}", get(conversation))
         // And the same Conversation as one file to send somebody: the share
         // build of the viewer with this record inside it, answered as a
@@ -286,6 +324,7 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // grilling start's sibling: what the human presses on an adopting
         // Conversation, there being no Brief to write and no grilling to run.
         .route("/api/ui/conversations/{id}/adopt", post(adopt))
+        .route("/api/ui/conversations/{id}/take-up", post(take_up))
         .route("/api/ui/conversations/{id}/close", post(close))
         // And the two of those joined, which is one row of the menu rather than
         // two pressed in turn: the close and the archive are one intention often
@@ -549,6 +588,19 @@ pub(crate) async fn set_reading(state: &AppState, id: i64) -> Result<SetReading,
         }
     };
 
+    // And the files the human put on its Answers, which the sheet draws under
+    // the Questions they name — with a × while the Set waits, and read-only
+    // once it has settled. Read here rather than fetched by the page for the
+    // reason the standing is: a pill that turned up a moment after the Answer
+    // it belongs to would be the record arriving in two pieces.
+    let attachments = match crate::answer_files::attached(&state.pool, id).await {
+        Ok(attachments) => attachments,
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, "reading the files put on a Set failed");
+            return Err(unavailable("the Question Set could not be read"));
+        }
+    };
+
     // Everything the agent wrote, rendered — which is the whole of what is left
     // to do, and none of it this crate's.
     //
@@ -557,7 +609,7 @@ pub(crate) async fn set_reading(state: &AppState, id: i64) -> Result<SetReading,
     // work to do on an async worker thread while other requests wait behind it.
     let set_id = stored.id;
     let view = tokio::task::spawn_blocking(move || {
-        verkstead_render::set_view(set_id, conversation, set, standing, follow_up)
+        verkstead_render::set_view(set_id, conversation, set, standing, follow_up, attachments)
     })
     .await;
 
@@ -901,6 +953,45 @@ async fn abandoned_roadmaps(State(state): State<AppState>) -> HttpResponse {
     Json(crate::stages::abandoned(repos).await).into_response()
 }
 
+/// `GET /api/ui/open-pull-requests` — every open pull request in the registered
+/// Repos, grouped by Repo, each saying which Conversation already holds it.
+///
+/// The other way work gets into the pipeline: a pull request Verkstead did not
+/// open is a branch with a review on it and nothing driving the wrap-up, and
+/// this is what the *Wrap up a pull request* level under the compose box lists.
+///
+/// Read off GitHub through the host's `gh` every time it is asked for, like the
+/// roadmaps above and for a stronger version of their reason: GitHub owns this
+/// list, and a copy Verkstead kept would be wrong the moment somebody pressed
+/// *Merge*.
+///
+/// **Nothing here is an error.** A Repo with no GitHub remote, a machine with no
+/// `gh`, a login that has expired and a GitHub that timed out are all
+/// repositories this list has no news about — see [`crate::pull_requests::open`],
+/// where each of them contributes no rows and no failure. The one thing that can
+/// go wrong is the registry itself, which is Verkstead's own database.
+async fn open_pull_requests(State(state): State<AppState>) -> HttpResponse {
+    let repos = match store::registered_repos(&state.pool).await {
+        Ok(repos) => repos,
+        Err(error) => {
+            tracing::error!(error = ?error, "reading the registered Repos failed");
+            return unavailable("the registered Repos could not be read");
+        }
+    };
+
+    // Which pull requests are already in the pipeline, read once for the whole
+    // list — see [`store::held_pull_requests`].
+    let held = match store::held_pull_requests(&state.pool).await {
+        Ok(held) => held,
+        Err(error) => {
+            tracing::error!(error = ?error, "reading which pull requests are already held failed");
+            return unavailable("the open pull requests could not be read");
+        }
+    };
+
+    Json(crate::pull_requests::open(&state.github, repos, &held).await).into_response()
+}
+
 /// `GET /api/ui/conversations` — the sidebar, newest first.
 ///
 /// Three facts ride out on every row beyond what the store holds: whether a
@@ -1028,6 +1119,34 @@ async fn start_adoption(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "starting a Conversation to adopt a roadmap failed");
+            unavailable("the Conversation could not be started")
+        }
+    }
+}
+
+/// `POST /api/ui/pull-request-adoptions` — start a Conversation to wrap a pull
+/// request up with.
+///
+/// What pressing a free row of the *Wrap up a pull request* level does. It
+/// records and opens: nothing about the repository is touched and nothing is
+/// checked out until the human presses the take-up on the page this puts them
+/// on.
+async fn start_pull_request_adoption(
+    State(state): State<AppState>,
+    Json(new): Json<NewPullRequestAdoption>,
+) -> HttpResponse {
+    let pull_request = store::AdoptedPullRequest {
+        number: new.number,
+        title: new.title,
+        url: new.url,
+        head: new.head,
+        base: new.base,
+    };
+
+    match crate::conversations::start_wrapping_up(&state, new.repo_id, &pull_request).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "starting a Conversation to wrap a pull request up failed");
             unavailable("the Conversation could not be started")
         }
     }
@@ -1401,6 +1520,28 @@ pub(crate) async fn conversation_view(
         _ => None,
     };
 
+    // And the pull request it is holding, where it is holding one and has not
+    // taken it up yet. Read straight off the record rather than off GitHub: the
+    // roadmap above is a document in this Repo and costs a file read, where this
+    // would be a call out to somebody else's server every time the page was
+    // opened. What GitHub says *now* is what the take-up asks for, which is the
+    // one moment it decides anything.
+    //
+    // A worktree says the take-up has happened, exactly as it says an adoption
+    // has: what follows it is a wrap-up, and the pull request is on the record
+    // properly by then.
+    let adopting_pull_request = conversation
+        .adopting_pull_request
+        .clone()
+        .filter(|_| worktree.is_none())
+        .map(|held| AdoptedPullRequestView {
+            number: held.number,
+            title: held.title,
+            url: held.url,
+            head: held.head,
+            base: held.base,
+        });
+
     // Whether driving has stopped, however it stopped: the stop says the
     // Conversation is stopped now, and the Notice it points at says what stopped
     // and why. One question about one thing — an account out of window stops a
@@ -1616,6 +1757,7 @@ pub(crate) async fn conversation_view(
         stop_asked,
         ready_to_continue,
         adopting,
+        adopting_pull_request,
         grilling_pairing,
         implementation_pairing,
         review_pairing,
@@ -2956,6 +3098,56 @@ async fn detach(
     }
 }
 
+/// `POST /api/ui/sets/{id}/answers/{label}/attachments/{name}` — put a file on
+/// one of a Set's Answers.
+///
+/// The Brief's upload made from the answer sheet, refused by where the Set
+/// stands rather than by where the Brief does — see [`crate::answer_files`].
+async fn attach_to_answer(
+    State(state): State<AppState>,
+    Path((id, label, name)): Path<(String, String, String)>,
+    body: axum::body::Bytes,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(AnswerAttached::NoSuchSet).into_response();
+    };
+
+    match crate::answer_files::attach(&state, id, &label, &name, &body).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, label = %label, name = %name, "putting a file on an Answer failed");
+            unavailable("the file could not be attached")
+        }
+    }
+}
+
+/// `POST /api/ui/sets/{id}/attachments/{attachment}/remove` — and take one off
+/// again, file and row together.
+async fn detach_from_answer(
+    State(state): State<AppState>,
+    Path((id, attachment)): Path<(String, String)>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(AnswerAttachmentRemoved::NoSuchSet).into_response();
+    };
+
+    // An id that is not a number names no attachment, which is a file that is
+    // not there — and that is what the press asked for. See
+    // [`AnswerAttachmentRemoved`], which has no *no such attachment* for this
+    // reason.
+    let Ok(attachment) = attachment.parse::<i64>() else {
+        return Json(AnswerAttachmentRemoved::Removed).into_response();
+    };
+
+    match crate::answer_files::detach(&state, id, attachment).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, attachment, "removing a file from an Answer failed");
+            unavailable("the file could not be removed")
+        }
+    }
+}
+
 /// `POST /api/ui/conversations/{id}/repo` — move the work onto another
 /// registered Repo.
 async fn switch_repo(
@@ -3158,7 +3350,28 @@ async fn adopt(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "adopting a roadmap stage failed");
-            unavailable("the stage could not be adopted")
+            unavailable("the stage could not be started")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/take-up` — put the Conversation on the
+/// branch of the pull request it is holding and start wrapping it up.
+///
+/// The adoption's sibling over the other kind of thing a Draft holds, and
+/// checked the same way: what the page named was read off GitHub a moment ago,
+/// and a branch somebody has pushed to, taken or checked out since is answered
+/// here rather than there.
+async fn take_up(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(TakenUp::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::take_up(&state, id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "taking a pull request up failed");
+            unavailable("the pull request could not be taken up")
         }
     }
 }

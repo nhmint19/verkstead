@@ -137,6 +137,20 @@ pub struct SetView {
     /// was asked changes — an ordinary Set is what a follow-up's rounds are made
     /// of — and a Set stored before any of this stays exactly as it was.
     pub follow_up: bool,
+
+    /// The files the human put on this Set's Answers, oldest first — which is
+    /// the order they were attached in, and the order the pills are drawn in.
+    ///
+    /// One list rather than a field on each Question, because that is how the
+    /// record holds them: each carries the label it was put under, and the page
+    /// draws every file naming a Question under that Question's field.
+    ///
+    /// Here whether or not the Set has settled. While it waits they are the
+    /// pills beside the answers, with a × on each; once it has settled they are
+    /// the record of what was sent, read-only — and a Share carries these rows
+    /// and never the bytes, which is the whole of what a reader of one can know
+    /// about the files.
+    pub attachments: Vec<crate::conversations::AttachmentView>,
 }
 
 /// The Diff as the browser receives it: the HTML the server rendered, and the
@@ -296,14 +310,16 @@ pub struct Answered {
 /// `standing` is the caller's to decide — it comes from the store's settlement
 /// and the registry of held waits, neither of which is any of this crate's
 /// business. `follow_up` is the caller's for the same reason: it is where the
-/// Conversation stands, which this crate never asks about. Everything else on
-/// the way out is rendering, which is all of it.
+/// Conversation stands, which this crate never asks about, and `attachments` is
+/// the record of what was put on the Set's Answers, which is the same. Everything
+/// else on the way out is rendering, which is all of it.
 pub fn set_view(
     id: i64,
     conversation: i64,
     set: verkstead_schema::QuestionSet,
     standing: Standing,
     follow_up: bool,
+    attachments: Vec<crate::conversations::AttachmentView>,
 ) -> SetView {
     // An empty Preface is the same as none at all: no point drawing the section
     // for it. The Postscript is nothing but the same thing said at the other end
@@ -342,6 +358,7 @@ pub fn set_view(
         standing,
         proposal,
         follow_up,
+        attachments,
     }
 }
 

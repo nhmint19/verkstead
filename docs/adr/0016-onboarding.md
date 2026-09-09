@@ -34,11 +34,30 @@ when nobody is looking. Nothing is folded into the settings view: the verdict
 is a different question from what is configured.
 
 **Present means a session would find it.** A session resolves `claude`, `git`
-and the rest on the PATH inside the Sandbox, not the server's, and on Linux
-that PATH did not include `/usr/local/bin`, where `npm install -g` on the
-Debian family puts a binary. It does now, and every probe resolves on that
-PATH. Claude's native installer lands in `~/.local/bin`, which is still off
-it, so its instruction says to use a system prefix or a symlink. The Linux
+and the rest on the PATH inside the Sandbox, and every probe resolves on that
+same list, read once at startup and held where the sandbox and the probes
+both read it. **That list is the server's own `PATH`, in the order it was
+written** (amended 2026-09-08 — it was a fixed list of system directories
+until then): Verkstead's own `bin` first, then the entries of the `PATH` the
+server was started with, then the machine's fixed list as a floor,
+`/usr/local/bin` among it because that is where `npm install -g` on the Debian
+family puts a binary. First occurrence wins, empty and relative entries are
+dropped, and an entry neither under the server's home nor under the
+platform's floor is dropped too, since a session could not reach it — which is
+what removes the `/mnt/c/...` entries WSL appends. Every entry that remains
+under the server's home is bound read-only into the sandbox, the rule the
+Windows boundary already applied. For every name the wizard has a row for,
+kept in one constant, a symlink is followed and the directory it lands in is
+bound read-only where that is under the home, so Claude's native install —
+`~/.local/bin/claude` linking into `~/.local/share/claude/versions/` — is
+found and launched; a target elsewhere, or a dangling link, is not found. Every
+Claude session runs with `DISABLE_AUTOUPDATER=1`, so no session writes into
+the human's install. Nothing is added the `PATH` did not name: a Mac app
+started from the Dock has launchd's `PATH` and never sees `~/.local/bin`, and
+the NixOS module's service user has no `~/.local/bin` of the human's — both
+are follow-ups rather than part of this. The row says where the name
+resolved and what it links to, and a name seen on the server's `PATH`
+somewhere a session cannot reach reads absent with a note saying so. The Linux
 sandbox row is a trivial `bwrap` run rather than a PATH lookup, because
 unprivileged user namespaces can be off and the AppImage cannot carry
 `bwrap`; a failure's stderr is shown under the row. On macOS `sandbox-exec`
@@ -52,8 +71,13 @@ wrong. macOS, Windows, NixOS, Ubuntu, Fedora, Debian and Arch — each with its
 derivatives — get exact commands for `bwrap` and `git`; a harness gets the
 exact command where the OS has a package for it (nixpkgs, Homebrew, npm) and
 a link to the vendor's install page where not, each saying where the binary
-must land. Any other Linux gets the generic list of what is needed. The step
-waits for **Continue** — it never advances under somebody's hands.
+must land. Claude's row leads with the native installer on every Linux tab and
+on Windows, saying `~/.local/bin` must be on the `PATH` of the shell Verkstead
+is started from and the server then restarted, the `PATH` being read once;
+macOS keeps Homebrew first, the Dock never handing an app the shell's `PATH`.
+Every tab draws the real list a session looks on, sent on the wire, rather
+than prose about it. Any other Linux gets the generic list of what is needed.
+The step waits for **Continue** — it never advances under somebody's hands.
 
 **Accounts are detected in the server's HOME**: `~/.claude` with
 `~/.claude.json`, `~/.codex`, `~/.grok`, and opencode's XDG pair; on Windows
@@ -128,8 +152,20 @@ page does. Either way the Repo is registered and becomes the draft's.
   the shape above: git is a dependency and its author is what git asks for;
   GitHub is a choice.
 - **Probing on the server's PATH and binding what was found into every
-  sandbox.** Rejected: a `node`-based install needs `node` bound in too, and a
-  directory of the human's read-only in every session is a hole.
+  sandbox.** Rejected at first: a `node`-based install needs `node` bound in
+  too, and a directory of the human's read-only in every session is a hole.
+  Reversed on 2026-09-08, when a distribution's own `claude` on Ubuntu under
+  WSL proved too old to connect and the native installer's `~/.local/bin` was
+  the only current one: the hole is bounded to the per-user directories the
+  `PATH` names and the link targets under the home, `node` under nvm sits in
+  one of those directories already, and a harness the human cannot run is the
+  larger failure. What stays rejected is binding anything outside the home on
+  the `PATH`'s account — such an entry is dropped instead.
+- **Adding `~/.local/bin` whether or not the `PATH` names it**, and **reading
+  the login shell's `PATH` by running the shell.** Rejected: the first hands a
+  session a directory the human never put on their `PATH`, and the second
+  spawns a shell whose rc files can hang or print. The server's own `PATH` is
+  the one the human started it with.
 - **Probing on the sandbox PATH as it was.** Rejected: only nix and the
   Fedora and Arch distro packages land on it.
 - **A server timer that nudges the page.** Rejected: the probes are cheap

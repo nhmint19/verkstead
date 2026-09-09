@@ -505,7 +505,11 @@ impl Agents {
 /// reason this is a mapping rather than a name written into the line. The type
 /// comes off the Pairing's Profile, so nothing has to be plumbed through to say
 /// which agent is being launched.
-pub(crate) fn binary(agent_type: store::AgentType) -> &'static str {
+///
+/// `const` so that the one list of the names a session is followed into can be
+/// built out of it rather than write them again — see
+/// [`crate::sandbox::PROGRAMS`].
+pub(crate) const fn binary(agent_type: store::AgentType) -> &'static str {
     match agent_type {
         store::AgentType::Claude => "claude",
         store::AgentType::Codex => "codex",
@@ -1713,9 +1717,15 @@ impl Sessions {
         // the bind below puts it at. Both sides ask
         // [`crate::attachments::Attachments`] the same question, so a session
         // cannot be told about a directory other than the one it was given.
+        //
+        // The Sets beside the files, because a file put on an Answer is listed
+        // under what its Set is called as well as under the Question — see
+        // [`skills::attached`]. A second read rather than a column on the files:
+        // what a Set is called is a fact about the Set.
         let prompt = skills::attached(
             &prompt,
             &store::attachments(pool, conversation.id).await?,
+            &store::attached_sets(pool, conversation.id).await?,
             &agents.attachments.inside(Platform::HERE, conversation.id),
         );
 

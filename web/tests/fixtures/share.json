@@ -39,17 +39,20 @@
   ],
   "conversation": {
     "adopting": null,
+    "adopting_pull_request": null,
     "archived": false,
     "attachments": [
       {
         "bytes": 3902,
         "id": 4,
+        "label": null,
         "name": "window-resets.json",
         "origin": "Brief"
       },
       {
         "bytes": 512774,
         "id": 5,
+        "label": null,
         "name": "the-run-that-stalled.log",
         "origin": "Brief"
       }
@@ -213,6 +216,15 @@
   "exported_at": "2026-08-03T09:07:11.000Z",
   "sets": [
     {
+      "attachments": [
+        {
+          "bytes": 1902,
+          "id": 6,
+          "label": "Q9",
+          "name": "the-five-changes.md",
+          "origin": "Answer"
+        }
+      ],
       "branch": "usage-limits",
       "conversation": 4,
       "diagrams": false,

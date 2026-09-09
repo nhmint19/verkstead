@@ -1,16 +1,19 @@
 {
   "adopting": null,
+  "adopting_pull_request": null,
   "archived": false,
   "attachments": [
     {
       "bytes": 3902,
       "id": 4,
+      "label": null,
       "name": "window-resets.json",
       "origin": "Brief"
     },
     {
       "bytes": 512774,
       "id": 5,
+      "label": null,
       "name": "the-run-that-stalled.log",
       "origin": "Brief"
     }

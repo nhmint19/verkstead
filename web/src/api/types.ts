@@ -114,6 +114,41 @@ export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdo
 repo: string, why: CompanionRefusal, } };
 
 /**
+ * The pull request a drafting Conversation is holding, as its own page names
+ * it: which one, what it is called, and the two branches it sits between.
+ *
+ * Kept rather than read off GitHub every time the page is drawn, which is where
+ * this parts company with [`AdoptionView`] beside it. A roadmap is a document
+ * in the Conversation's own repository and costs a file read; a pull request is
+ * a call out to GitHub, and a page that made one every time it was opened would
+ * be a page waiting on somebody else's server to say what it is about. What is
+ * authoritative is asked again at the take-up, which is the one moment it
+ * matters.
+ */
+export type AdoptedPullRequestView = { 
+/**
+ * The number GitHub gave it, which is what everybody calls it by — in the
+ * Conversation's own Repo and nowhere else.
+ */
+number: number, 
+/**
+ * Its title, as it read when the row was listed.
+ */
+title: string, 
+/**
+ * The whole URL, so the card can lead out to GitHub.
+ */
+url: string, 
+/**
+ * The branch the work is on, which is the branch the take-up checks out.
+ */
+head: string, 
+/**
+ * And the branch it goes into.
+ */
+base: string, };
+
+/**
  * The stage an adoption would start, named.
  */
 export type AdoptedStage = { 
@@ -310,7 +345,38 @@ free_text?: string | null,
  * Left open on purpose. Exclusive with an Answer: the agent must treat
  * the question as still open.
  */
-unanswered?: boolean, };
+unanswered?: boolean, 
+/**
+ * The files the human put on this Answer, each by the path the session
+ * reads it at, in the order they were attached.
+ *
+ * **Filled on the way out rather than sent in.** What the sheet submits
+ * carries none of these: a file goes on the Set as it is chosen, and the
+ * rows the record kept are what say which Answer each one is on — so a
+ * Response is stored exactly as the human sent it, and the list is filled
+ * from those rows wherever one is read out. Which is why an entry with no
+ * files leaves the field out altogether, and why a Response stored before
+ * the field existed reads as it always did.
+ */
+attachments?: Array<string>, };
+
+/**
+ * What became of putting a file on an Answer.
+ *
+ * [`Attached`]'s three refusals said again — a file too large, a name that is
+ * not a name, and nothing there to attach to — with the freeze in the other
+ * place: what fixes an Answer's files is the Set settling rather than the
+ * Brief, so each way that can have happened is named for the sheet to say.
+ */
+export type AnswerAttached = { "Attached": { attachment: AttachmentView, } } | "NoSuchSet" | "Answered" | "Locked" | "Closed" | "NoSuchLabel" | "TooLarge" | "NotAName";
+
+/**
+ * And of taking one off an Answer again.
+ *
+ * No *no such attachment*, for [`AttachmentRemoved`]'s reason: a file that is
+ * not there is the state the press asked for.
+ */
+export type AnswerAttachmentRemoved = "Removed" | "NoSuchSet" | "Answered" | "Locked" | "Closed";
 
 /**
  * A Set's Response as the page needs it: the Answers, and when they were sent.
@@ -375,12 +441,11 @@ export type Attached = { "Attached": { attachment: AttachmentView, } } | "NoSuch
 /**
  * What a file was attached to.
  *
- * Drawn nowhere yet, and on the wire all the same: the pills under a Brief are
- * the Brief's own files, and the page can only know that by being told. The
- * second value is an Answer to a Question Set, which is the same upload made
- * from a different page.
+ * The pills under a Brief are the Brief's own files and the pills under a
+ * Question are that Answer's, and a page can only know which it is holding by
+ * being told.
  */
-export type AttachmentOrigin = "Brief";
+export type AttachmentOrigin = "Brief" | "Answer";
 
 /**
  * And of taking one off again.
@@ -427,9 +492,24 @@ name: string,
  */
 bytes: number, 
 /**
- * What it was attached to. One value today — see [`AttachmentOrigin`].
+ * What it was attached to — see [`AttachmentOrigin`].
  */
-origin: AttachmentOrigin, };
+origin: AttachmentOrigin, 
+/**
+ * The label of the Question this file was put under, on a file put on an
+ * Answer — `Q7` for a Question, `Q7a` for a Sub-question — and `null` on
+ * every one of the Brief's.
+ *
+ * Beside the origin rather than inside it, because that is how the record
+ * holds it: the origin is a word, and this is what the word is read with.
+ * It is what the sheet groups a Set's files by, there being one list of
+ * them for a page that draws pills under every Question.
+ *
+ * Which Set it was put on is not here at all: the only page that draws
+ * these is that Set's own, and a Conversation's own row of pills is the
+ * Brief's.
+ */
+label: string | null, };
 
 /**
  * Who a session's commits are by.
@@ -1395,6 +1475,17 @@ ready_to_continue: boolean,
  */
 adopting: AdoptionView | null, 
 /**
+ * And the pull request it is holding, where it is holding one.
+ *
+ * `null` alongside [`Self::adopting`] on every ordinary Conversation, and
+ * never both at once: a Draft adopts one thing or none. `Some` is one
+ * started off the *Wrap up a pull request* level, and it is what puts the
+ * page on that shape — the pull request named over a Brief the human still
+ * writes, the two Pairings that will run the wrap-up, and no branch, base
+ * or grilling to settle.
+ */
+adopting_pull_request: AdoptedPullRequestView | null, 
+/**
  * The worktree the grilling was given to work in, once there is one.
  *
  * `null` both before grilling starts and after closing — the two ways a
@@ -1669,7 +1760,23 @@ export type Dependency = "Sandbox" | "Git" | "Claude" | "Codex" | "Grok" | "Open
  * Flat on the wire — `{"state": "Absent", "trouble": "…"}` — so the viewer
  * narrows on a field rather than unwrapping a variant name.
  */
-export type DependencyState = { "state": "Present" } | { "state": "Absent", 
+export type DependencyState = { "state": "Present", 
+/**
+ * The path the name resolved to on a session's `PATH`: the entry it
+ * was found in with the name on the end of it.
+ *
+ * Nothing on the sandbox row of the two platforms where a sandbox is
+ * no program to find — Apple's own, and the identity a Windows session
+ * runs under. Every other present row has one.
+ */
+at: string | null, 
+/**
+ * And the file that path finally lands on, where it is a link and the
+ * two are not the same file. Claude's native installer leaves
+ * `~/.local/bin/claude` pointing into its versions directory, and
+ * which version is about to run is the half worth reading.
+ */
+target: string | null, } | { "state": "Absent", 
 /**
  * What the machine said about it, where anything was said at all: the
  * standard error of a `bwrap` that is installed and would not run,
@@ -1677,7 +1784,13 @@ export type DependencyState = { "state": "Present" } | { "state": "Absent",
  * says so in its own words. Nothing where the answer was simply that
  * no such program is on the sandbox's `PATH`.
  */
-trouble: string | null, } | { "state": "NotApplicable" };
+trouble: string | null, 
+/**
+ * And where the name *was* seen, where it was seen somewhere a session
+ * cannot use it — see [`Seen`]. Nothing where it is on no `PATH` at
+ * all, which is a row with nothing to say beyond *install one*.
+ */
+seen: Seen | null, } | { "state": "NotApplicable" };
 
 /**
  * One row of the dependencies step: a thing a session needs, and whether this
@@ -1963,6 +2076,27 @@ export type NewConversation = { repo_id: number, };
 export type NewOrder = { order: Array<number>, };
 
 /**
+ * And starting one to wrap a pull request up with: which Repo, and the row off
+ * the *Wrap up a pull request* level that was pressed.
+ *
+ * The whole row rather than a number, unlike [`NewAdoption`] beside it. A
+ * roadmap is a document in the Conversation's own repository and is read back
+ * off it wherever it is wanted; a pull request is somebody else's server, and
+ * a server that had only the number would have to make a `gh` call of its own
+ * to draw the card the human has already been looking at. So the five facts
+ * travel, and the take-up is where GitHub is asked again.
+ */
+export type NewPullRequestAdoption = { repo_id: number, number: number, title: string, url: string, 
+/**
+ * The branch the work is on, which is the branch the take-up checks out.
+ */
+head: string, 
+/**
+ * And the branch it goes into.
+ */
+base: string, };
+
+/**
  * A notice as the page receives it: what Verkstead did, and when.
  *
  * HTML alone, like the handoff and unlike the Brief: nobody edits it. Rendered
@@ -2013,6 +2147,22 @@ distro: Distro,
  */
 dependencies: Array<DependencyView>, 
 /**
+ * And where a session looks for a program, in the order it looks: the
+ * `PATH` a session is given, as this server composed it out of its own.
+ *
+ * **The list rather than a sentence about one.** What a session searches
+ * is the server's own `PATH` ahead of the platform's floor — see
+ * `sandbox::composed` — so which directories those are is a fact about
+ * *this* machine rather than about the platform, and a tab of written-down
+ * prose could not say it. A wizard telling somebody where to put a binary
+ * has to name the directories a session really looks in, which is the
+ * whole of why this is on the wire.
+ *
+ * Verkstead's own directory is not on it, that being the one entry
+ * holding nothing a human installs.
+ */
+path: Array<string>, 
+/**
  * And every agent account already on this machine, in the order the
  * harnesses above are drawn. Empty on a machine that has none, which is
  * the step saying what to run rather than what to tick.
@@ -2022,6 +2172,103 @@ accounts: Array<AccountView>,
  * And whether each of the three steps stands met, at this moment.
  */
 steps: StepsView, };
+
+/**
+ * One open pull request, as a row of that level draws it.
+ *
+ * Any author, because whose pull request it is says nothing about whether it is
+ * worth wrapping up — what the pipeline takes up is the branch rather than the
+ * person. Forks are the one exclusion, and they are excluded for what taking
+ * one up would have to do rather than out of taste: a head branch in another
+ * repository cannot be pushed to over `origin`, so a wrap-up that fixed a red
+ * check would have nowhere to put the fix.
+ */
+export type OpenPullRequest = { 
+/**
+ * The number GitHub gave it, which is what everybody calls it by — in
+ * this repository and nowhere else.
+ */
+number: number, 
+/**
+ * Its title, which is the line a row leads with.
+ */
+title: string, 
+/**
+ * The whole URL, so a row can lead out to GitHub without a repository
+ * name being guessed at.
+ */
+url: string, 
+/**
+ * The branch the work is on, which is the branch taking it up checks out.
+ */
+head: string, 
+/**
+ * And the branch it goes into, which is what the wrap-up watches for
+ * conflicts against.
+ */
+base: string, 
+/**
+ * Who opened it, by their GitHub login. Empty where GitHub named nobody,
+ * which is what a deleted account leaves behind.
+ */
+author: string, 
+/**
+ * What it says about itself: the description as it was written, raw
+ * markdown. Empty where nobody wrote one.
+ *
+ * Never drawn on the row — a row is a line, and this is a document — but
+ * carried on it all the same, because loading a pull request prefills the
+ * box with the title as a heading and this under it. Raw rather than
+ * rendered, unlike every other piece of markdown crossing this wire: what
+ * it becomes is a Brief the human edits, and a field cannot be filled from
+ * HTML.
+ */
+body: string, 
+/**
+ * The Conversation already holding this pull request, where one does —
+ * any state, Done and Closed included, because a pull request stays on a
+ * Conversation's record once it is recorded there.
+ *
+ * `null` is a pull request nothing has taken up. What a held row does
+ * instead of loading is lead to the Conversation holding it: there is one
+ * Conversation per piece of work, and a second one over the same branch
+ * would be two wrap-ups pushing to it.
+ */
+conversation_id: number | null, };
+
+/**
+ * One Repo's open pull requests, as the *Wrap up a pull request* level lists
+ * them.
+ *
+ * Grouped by Repo for the reason the abandoned roadmaps are — a number is a
+ * fact about a repository, and `#41` says something different in each of them,
+ * so a flat list would be one whose rows could not be told apart without
+ * carrying the repository anyway.
+ *
+ * Nothing here is stored. Every field is read off GitHub through the host's
+ * `gh` at the moment the level is drawn, which is why a pull request somebody
+ * has since merged simply stops appearing rather than having to be taken off
+ * anything.
+ *
+ * A Repo Verkstead could not ask about — no GitHub remote, no `gh`, nobody
+ * logged in, a GitHub that would not answer — contributes no group at all
+ * rather than an empty one or a failure: what Verkstead does not know is not
+ * an empty list, but it is not a broken page either.
+ */
+export type OpenPullRequestRepo = { 
+/**
+ * Which Repo, by the id a Conversation is started against.
+ */
+repo_id: number, 
+/**
+ * And what it is called, which is what each row says it is in.
+ */
+repo: string, 
+/**
+ * The open pull requests in it, in the order GitHub listed them. Never
+ * empty: a Repo with nothing open contributes no group at all.
+ */
+pull_requests: Array<OpenPullRequest>, };
 
 /**
  * One Option as the page draws it: the number a Response answers by, its text
@@ -2755,7 +3002,7 @@ export type RepoRemoved = "Removed" | "NoSuchRepo" | "InUse";
 /**
  * What became of moving a Conversation onto another Repo.
  */
-export type RepoSwitched = "Switched" | "NoSuchConversation" | "NotDrafting" | "Adopting" | "NoSuchRepo";
+export type RepoSwitched = "Switched" | "NoSuchConversation" | "NotDrafting" | "Adopting" | "HoldingPullRequest" | "NoSuchRepo";
 
 /**
  * One registered Repo opened: everything the card cannot hold, read at the
@@ -3012,6 +3259,39 @@ why: string, };
 export type Screen = { repaint: string, columns: number, rows: number, };
 
 /**
+ * Where a program was seen that a session still cannot run.
+ *
+ * The half of *absent* that is worth a sentence. A name is missing in three
+ * ways that are not the same thing to do anything about, and a row saying only
+ * *absent* would send somebody to install what they have already got: a
+ * program on the server's own `PATH` and not on a session's is a shell profile
+ * and a restart rather than an install.
+ *
+ * Flat on the wire — `{"seen": "Beyond", "at": "…"}` — the way
+ * [`DependencyState`] is, so the viewer narrows on a field rather than
+ * unwrapping a variant name. The wording is the viewer's own, like the install
+ * commands beside it: what is here is what the machine is, and what to say
+ * about it is the same three sentences on every Verkstead.
+ */
+export type Seen = { "seen": "Beyond", 
+/**
+ * Where it was seen, with the name on the end of it.
+ */
+at: string, } | { "seen": "Leading", 
+/**
+ * The link, on a `PATH` entry a session has.
+ */
+at: string, 
+/**
+ * And what it points at, which is the part a session cannot open.
+ */
+target: string, } | { "seen": "Dangling", 
+/**
+ * The link that leads nowhere.
+ */
+at: string, };
+
+/**
  * Where the serve switch is being put.
  *
  * A press rather than a setting: nothing of it is saved, and what the switch
@@ -3175,7 +3455,22 @@ proposal: ProposalView | null,
  * was asked changes — an ordinary Set is what a follow-up's rounds are made
  * of — and a Set stored before any of this stays exactly as it was.
  */
-follow_up: boolean, };
+follow_up: boolean, 
+/**
+ * The files the human put on this Set's Answers, oldest first — which is
+ * the order they were attached in, and the order the pills are drawn in.
+ *
+ * One list rather than a field on each Question, because that is how the
+ * record holds them: each carries the label it was put under, and the page
+ * draws every file naming a Question under that Question's field.
+ *
+ * Here whether or not the Set has settled. While it waits they are the
+ * pills beside the answers, with a × on each; once it has settled they are
+ * the record of what was sent, read-only — and a Share carries these rows
+ * and never the bytes, which is the whole of what a reader of one can know
+ * about the files.
+ */
+attachments: Array<AttachmentView>, };
 
 /**
  * The settings as the human has just written them.
@@ -3897,6 +4192,29 @@ export type Subscribed = "Stored" | "Incomplete";
  * something the server has any reason to learn.
  */
 export type Subscription = { endpoint: string, p256dh: string, auth: string, };
+
+/**
+ * What became of pressing the take-up on a Draft holding a pull request.
+ *
+ * [`Adopted`]'s sibling over the other kind of thing a Draft takes up, and
+ * named the same way for the same reason: a human is at the workbench pressing
+ * the button, and each of these is something different for them to go and do.
+ *
+ * The refusals it does not share with [`Adopted`] are the ones about a branch
+ * that is already there. A stage's branch is a name nothing has yet, so what
+ * refuses an adoption is a name being *taken*; a pull request's head branch is
+ * the whole point, so what refuses a take-up is that branch holding something
+ * origin does not, or somebody else standing on it.
+ */
+export type TakenUp = "TakenUp" | "NoSuchConversation" | "NotDrafting" | "NotHoldingOne" | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "FetchFailed" | "NoHeadBranch" | "BranchAhead" | "BranchDiverged" | "FastForwardFailed" | { "CheckedOutElsewhere": { 
+/**
+ * Where it is checked out, as git named it.
+ */
+at: string, } } | "WorktreeRefused" | { "Companion": { 
+/**
+ * The Repo's registered name.
+ */
+repo: string, why: CompanionRefusal, } };
 
 /**
  * One task's document as the pane draws it: the entry it belongs to, and the

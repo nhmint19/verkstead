@@ -75,6 +75,12 @@ pub enum WaitingOn {
     /// findings out into a backlog leaves Wrapping to build them, and what comes
     /// back is a branch nobody has read. So the move out takes this settle with
     /// it — see [`super::implement_again`] — and the second wrap reviews afresh.
+    ///
+    /// And a steer into Wrapping takes it too, from whatever state the human
+    /// steered from: a steer is them saying *look at this again*, so the wrap-up
+    /// it lands in reads the branch rather than inheriting what the last one made
+    /// of it. See [`super::steer_conversation`], and [`super::resolve_conflicts`]
+    /// for the one move into Wrapping that leaves it standing.
     Review,
 
     /// Nothing has been said on the pull request opened in this Repo that has
@@ -355,10 +361,13 @@ pub async fn unsettle_wrap_up(
 
 /// The same, inside a transaction that is doing something else as well.
 ///
-/// Which is the move out of Wrapping: leaving takes the review's settle with it,
-/// in the same breath as the state changes, so a Conversation being built again
-/// is never one carrying a settled review of work that has not been done yet.
-/// See [`super::implement_again`].
+/// Which is the two moves the review's settle does not survive, each taking it in
+/// the same breath as the state changes. Leaving Wrapping to build a split-out
+/// backlog takes it, so a Conversation being built again is never one carrying a
+/// settled review of work that has not been done yet — see
+/// [`super::implement_again`]; and a steer into Wrapping takes it, so the wrap-up
+/// the human asked for reads the branch rather than inheriting what the last one
+/// made of it — see [`super::steer_conversation`].
 pub(crate) async fn unsettle(
     tx: &mut sqlx::SqliteConnection,
     conversation_id: i64,
@@ -379,6 +388,112 @@ pub(crate) async fn unsettle(
              Conversation {conversation_id}"
         )
     })?;
+
+    Ok(())
+}
+
+/// Record that the review is over, and put every pull request's checks back to
+/// waiting with it.
+///
+/// **One transaction, because the two are one fact.** A review lands whatever
+/// the human accepted and pushes it as it ends, so a suite that was green is
+/// green about the commit before that push and every one of them has to run
+/// again. A settle written without the unsettle beside it — or a poll of
+/// [`finish_wrap_up`] reading between the two — is a Conversation reaching Done
+/// on a green nobody re-earned, which is the same failure
+/// [`super::follow_up_over`] takes a `pushed` for.
+///
+/// Every pull request rather than one: a review reads the work whole and pushes
+/// into whichever worktree it fixed something in, and none of the suites it may
+/// have replaced is this Conversation's to keep.
+///
+/// A review that pushed nothing — one that found nothing worth raising, or one
+/// the human turned off — costs a poll of the checks and nothing else. The next
+/// look settles the suite again, and nothing could have finished in the
+/// meantime: the review is what the wrap-up was waiting on.
+pub async fn review_over(pool: &SqlitePool, conversation_id: i64) -> Result<()> {
+    let mut tx = super::writing(pool, "recording that a review is over").await?;
+
+    let opened: Vec<(i64,)> =
+        sqlx::query_as("SELECT repo_id FROM pull_requests WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .fetch_all(&mut *tx)
+            .await
+            .with_context(|| {
+                format!("reading which pull requests Conversation {conversation_id} is on")
+            })?;
+
+    for (repo_id,) in opened {
+        unsettle(&mut tx, conversation_id, WaitingOn::Checks(repo_id)).await?;
+    }
+
+    sqlx::query(
+        "INSERT INTO wrap_up_settled (conversation_id, repo_id, waiting_on, at)
+         VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         ON CONFLICT (conversation_id, repo_id, waiting_on) DO NOTHING",
+    )
+    .bind(conversation_id)
+    .bind(WaitingOn::Review.repo())
+    .bind(WaitingOn::Review.stored())
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("settling the review of Conversation {conversation_id}"))?;
+
+    tx.commit()
+        .await
+        .context("recording that a review is over")?;
+
+    Ok(())
+}
+
+/// Put every pull request's checks back to waiting, a batch session having just
+/// ended over them.
+///
+/// The third of these, and the same fact each time: a session that lands what
+/// the human accepted pushes it, and a suite that was green is green about the
+/// commit before that push. [`review_over`] takes it with the review's settle
+/// and [`super::follow_up_over`] with the move out of Follow-up; a batch has
+/// neither to be carried by, because what settles a batch is the comments
+/// watcher noticing on its next poll that nothing is left unaddressed. So this
+/// is the whole of the act rather than half of one.
+///
+/// **Which is why it is written before that poll can happen.** The settle and
+/// the unsettle are two different watchers' writes, and the finishing rule is a
+/// third reader between them — so the ordering has to be a rule rather than a
+/// cadence, exactly as it does for a review. See [`finish_wrap_up`], and
+/// `crate::responding` on the server, which is where a batch session ends.
+///
+/// One transaction across all of them, so that no reading of the table catches
+/// half a fact.
+///
+/// Every pull request rather than the one the batch was dispatched about: what
+/// a comment asks for is fixed wherever the thing it is about lives, and a
+/// session sent at one pull request's comments may well commit in a companion's
+/// worktree beside it — the addressing skill is written for exactly that.
+///
+/// A batch that pushed nothing costs a poll of the checks and nothing else. The
+/// next look settles them again, and nothing could have finished in the
+/// meantime: the comments this batch was dispatched about are unaddressed for as
+/// long as it runs, and a wrap-up does not finish over those.
+pub async fn batch_over(pool: &SqlitePool, conversation_id: i64) -> Result<()> {
+    let mut tx = super::writing(pool, "recording that a batch session is over").await?;
+
+    let opened: Vec<(i64,)> =
+        sqlx::query_as("SELECT repo_id FROM pull_requests WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .fetch_all(&mut *tx)
+            .await
+            .with_context(|| {
+                format!("reading which pull requests Conversation {conversation_id} is on")
+            })?;
+
+    for (repo_id,) in opened {
+        unsettle(&mut tx, conversation_id, WaitingOn::Checks(repo_id)).await?;
+    }
+
+    tx.commit()
+        .await
+        .context("recording that a batch session is over")?;
 
     Ok(())
 }
