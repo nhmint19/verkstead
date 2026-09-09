@@ -96,8 +96,13 @@ sandbox_binds:
 ```bash
 (cd web && pnpm install && pnpm build)
 cargo build -p verkstead-cli --no-default-features
-./target/debug/verkstead serve --data-dir ../verkstead-data
+./target/debug/verkstead serve --data-dir ~/verkstead-data
 ```
+
+**`--data-dir` must be absolute.** It is taken verbatim, so a relative one ends
+up in each Sandbox's own paths, where it means nothing: the session dies with
+`bwrap: Can't chdir to ../verkstead-data/worktrees/<branch>: No such file or
+directory` even though the Worktree is there.
 
 Build the viewer **before** the first `cargo build` — the viewer is embedded
 `allow_missing`, so a Rust build that runs first bakes in an empty one and the
@@ -109,7 +114,7 @@ checkout because `secrets.yaml` is not in `.gitignore`.
 ### The link
 
 ```bash
-echo "http://127.0.0.1:8422/?key=$(cat ../verkstead-data/workbench.key)"
+echo "http://127.0.0.1:8422/?key=$(cat ~/verkstead-data/workbench.key)"
 ```
 
 The startup log prints the same thing as `workbench=`. Every page is 401 without
